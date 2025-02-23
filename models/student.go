@@ -1,9 +1,10 @@
 package models
 
 type Student struct {
-	StudentID  int    `json:"student_id"`
+	ID         int    `json:"id"`
 	FirstName  string `json:"first_name"`
 	LastName   string `json:"last_name"`
-	Patronymic string `json:"patronymic,omitempty"`
+	Patronymic string `json:"patronymic"`
 	IIN        string `json:"iin"`
+	SchoolID   int    `json:"school_id"`
 }

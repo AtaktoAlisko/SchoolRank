@@ -9,4 +9,5 @@ type User struct {
 	LastName  string `json:"last_name,omitempty"`
 	Age       int    `json:"age,omitempty"`
 	Role      string `json:"role,omitempty"`
+	IsVerified  bool   `json:"is_verified,omitempty"`
 }

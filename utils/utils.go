@@ -82,6 +82,7 @@ func GenerateVerificationToken(email string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(secret))
 }
+
 func ParseToken(tokenStr string) (*jwt.Token, error) {
 	return jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -198,21 +199,26 @@ func GenerateOTP() (string, error) {
 	}
 	return fmt.Sprintf("%04d", num.Int64()), nil
 }
-func SendVerificationEmail(to, token string) {
-	 from := "mralibekmurat27@gmail.com"
-	  password := "bdyi mtae fqub cfcr"
+func SendVerificationEmail(to, token, otp string) {
+	from := "mralibekmurat27@gmail.com"
+	password := "bdyi mtae fqub cfcr"
 
 	smtpHost := "smtp.gmail.com"
 	smtpPort := "587"
 
 	auth := smtp.PlainAuth("", from, password, smtpHost)
 
+	// Создаем ссылку с токеном
 	verificationLink := fmt.Sprintf("http://localhost:8000/verify-email?token=%s", token)
 
-	message := fmt.Sprintf("Click here to verify your email: %s", verificationLink)
+	// Сообщение с ссылкой и OTP
+	message := fmt.Sprintf(
+		"Click here to verify your email: %s\n\nYour OTP code is: %s", 
+		verificationLink, otp)
 
+	// Формируем и отправляем письмо
 	msg := []byte("To: " + to + "\r\n" +
-		"Subject: Verify Your Email\r\n" +
+		"Subject: Verify Your Email and OTP\r\n" +
 		"\r\n" + message + "\r\n")
 
 	err := smtp.SendMail(smtpHost+":"+smtpPort, auth, from, []string{to}, msg)
@@ -220,6 +226,7 @@ func SendVerificationEmail(to, token string) {
 		log.Printf("Error sending email: %v", err)
 	}
 }
+
 func SendVerificationOTP(to, otp string) {
 	 from := "mralibekmurat27@gmail.com"
 	 password := "bdyi mtae fqub cfcr"
@@ -240,7 +247,6 @@ func SendVerificationOTP(to, otp string) {
 		log.Printf("Error sending email: %v", err)
 	}
 }
-
 
 
 

@@ -11,7 +11,6 @@ import (
 
 // Controller для школ
 type SchoolController struct{}
-
 // Создание школы
 func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +58,6 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, school)
 	}
 }
-
 // Получение списка всех школ
 func (sc SchoolController) GetSchools(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -86,3 +84,70 @@ func (sc SchoolController) GetSchools(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, schools)
 	}
 }
+// Создание нового студента
+func (sc SchoolController) CreateStudent(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        var student models.Student
+        if err := json.NewDecoder(r.Body).Decode(&student); err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
+            return
+        }
+
+        query := `INSERT INTO Student (first_name, last_name, patronymic, iin) VALUES(?, ?, ?, ?)`
+        _, err := db.Exec(query, student.FirstName, student.LastName, student.Patronymic, student.IIN)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create student"})
+            return
+        }
+
+        utils.ResponseJSON(w, "Student created successfully")
+    }
+}
+// Выбор типа теста
+func (sc SchoolController) CreateUNTType(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        var untType models.UNTType
+        if err := json.NewDecoder(r.Body).Decode(&untType); err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
+            return
+        }
+
+        query := `INSERT INTO UNT_Type (first_type_id, second_type_id, history_of_kazakhstan, mathematical_literacy, reading_literacy) 
+                  VALUES(?, ?, ?, ?, ?)`
+        _, err := db.Exec(query, untType.FirstTypeID, untType.SecondTypeID, untType.HistoryKazakh, untType.MathLiteracy, untType.ReadingLiteracy)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create UNT Type"})
+            return
+        }
+
+        utils.ResponseJSON(w, "UNT Type created successfully")
+    }
+}
+// Расчет итогового балла
+func (sc SchoolController) CalculateScore(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        var score models.UNTScore
+        if err := json.NewDecoder(r.Body).Decode(&score); err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
+            return
+        }
+
+        // Логика расчета баллов
+        totalScore := score.FirstSubjectScore + score.SecondSubjectScore + score.HistoryKazakhstan + score.MathLiteracy + score.ReadingLiteracy
+        score.TotalScore = totalScore // сохраняем итоговый балл в поле Score
+
+        query := `INSERT INTO UNT_Score (year, unt_type_id, student_id, first_subject_score, second_subject_score, history_of_kazakhstan, mathematical_literacy, reading_literacy, score) 
+                  VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        _, err := db.Exec(query, score.Year, score.UNTTypeID, score.StudentID, score.FirstSubjectScore, score.SecondSubjectScore, score.HistoryKazakhstan, score.MathLiteracy, score.ReadingLiteracy, score.TotalScore)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to calculate and save score"})
+            return
+        }
+
+        utils.ResponseJSON(w, "Score calculated and saved successfully")
+    }
+}
+

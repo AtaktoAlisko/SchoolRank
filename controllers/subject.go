@@ -8,12 +8,7 @@ import (
 	"ranking-school/models"
 	"ranking-school/utils"
 )
-
-// Controller for subjects
 type SubjectController struct{}
-
-// Get all First_Subject
-// Get all First_Subject
 func (sc SubjectController) GetFirstSubjects(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rows, err := db.Query("SELECT first_subject_id, subject, score FROM First_Subject")
@@ -38,10 +33,6 @@ func (sc SubjectController) GetFirstSubjects(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, subjects)
 	}
 }
-
-
-// Get all Second_Subject
-// Get all Second_Subject
 func (sc SubjectController) GetSecondSubjects(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rows, err := db.Query("SELECT second_subject_id, subject, score FROM Second_Subject")
@@ -66,45 +57,52 @@ func (sc SubjectController) GetSecondSubjects(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, subjects)
 	}
 }
-
 func (sc SubjectController) CreateFirstSubject(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var subject models.FirstSubject
 		if err := json.NewDecoder(r.Body).Decode(&subject); err != nil {
-			log.Println("JSON Error:", err)
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
 			return
 		}
 
-		// Вставляем новый предмет в таблицу
-		_, err := db.Exec("INSERT INTO First_Subject (subject, score) VALUES (?, ?)", subject.Subject, subject.Score)
+		query := `INSERT INTO First_Subject(subject, score) VALUES(?, ?)`
+		_, err := db.Exec(query, subject.Subject, subject.Score)
 		if err != nil {
 			log.Println("SQL Error:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create First Subject"})
 			return
 		}
 
-		utils.ResponseJSON(w, models.Message{Message: "First Subject created successfully"})
+		utils.ResponseJSON(w, "First Subject created successfully")
 	}
 }
-// Add a new Second_Subject
 func (sc SubjectController) CreateSecondSubject(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var subject models.SecondSubject
 		if err := json.NewDecoder(r.Body).Decode(&subject); err != nil {
-			log.Println("JSON Error:", err)
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
 			return
 		}
 
-		// Вставляем новый предмет в таблицу
-		_, err := db.Exec("INSERT INTO Second_Subject (subject, score) VALUES (?, ?)", subject.Subject, subject.Score)
+		// Проверка, чтобы первый предмет и второй не совпадали
+		if subject.FirstSubjectID == subject.ID {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "First and second subject cannot be the same"})
+			return
+		}
+
+		// SQL запрос для вставки второго предмета
+		query := `INSERT INTO Second_Subject(subject, score, first_subject_id) VALUES(?, ?, ?)`
+		_, err := db.Exec(query, subject.Subject, subject.Score, subject.FirstSubjectID)
 		if err != nil {
 			log.Println("SQL Error:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create Second Subject"})
 			return
 		}
 
-		utils.ResponseJSON(w, models.Message{Message: "Second Subject created successfully"})
+		utils.ResponseJSON(w, "Second Subject created successfully")
 	}
 }
+
+
+
+

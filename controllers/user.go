@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/golang-jwt/jwt"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
@@ -112,13 +113,22 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Записываем пользователя в БД (email-пользователи НЕ подтверждены сразу)
+		// Генерируем токен для подтверждения email
+		verificationToken, err := utils.GenerateVerificationToken(user.Email)
+		if err != nil {
+			log.Printf("Error generating verification token: %v", err)
+			error.Message = "Failed to generate verification token."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
+			return
+		}
+
+		// Записываем пользователя в БД с is_verified = false
 		if isEmail {
-			query = "INSERT INTO users (email, password, first_name, last_name, age, role, verified, otp_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-			_, err = db.Exec(query, user.Email, user.Password, user.FirstName, user.LastName, user.Age, user.Role, false, otpCode)
+			query = "INSERT INTO users (email, password, first_name, last_name, age, role, verified, otp_code, verification_token) VALUES (?, ?, ?, ?, ?, ?, false, ?, ?)"
+			_, err = db.Exec(query, user.Email, user.Password, user.FirstName, user.LastName, user.Age, user.Role, otpCode, verificationToken)
 		} else {
-			query = "INSERT INTO users (phone, password, first_name, last_name, age, role, verified, otp_code) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)"
-			_, err = db.Exec(query, user.Phone, user.Password, user.FirstName, user.LastName, user.Age, user.Role, true)
+			query = "INSERT INTO users (phone, password, first_name, last_name, age, role, verified, otp_code, verification_token) VALUES (?, ?, ?, ?, ?, ?, true, NULL, ?)"
+			_, err = db.Exec(query, user.Phone, user.Password, user.FirstName, user.LastName, user.Age, user.Role, verificationToken)
 		}
 
 		if err != nil {
@@ -128,12 +138,12 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Отправляем email с OTP (только если email)
+		// Отправляем email с токеном и OTP
 		if isEmail {
-			utils.SendVerificationOTP(user.Email, otpCode)
+			utils.SendVerificationEmail(user.Email, verificationToken, otpCode)
 		}
 
-		user.Password = ""
+		user.Password = ""  // Не передаем пароль пользователю
 		message := "User registered successfully."
 		if isEmail {
 			message += " Please verify your email with the OTP code."
@@ -154,29 +164,25 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		if user.Email == "" && user.Phone == "" {
-			error.Message = "Email or phone is required."
-			utils.RespondWithError(w, http.StatusBadRequest, error)
-			return
-		}
-
 		var query string
 		var identifier string
 		var hashedPassword string
 		var email sql.NullString
 		var phone sql.NullString
 		var role string
+		var isVerified bool
 
+		// Проверка email или телефона
 		if user.Email != "" {
-			query = "SELECT id, email, phone, password, first_name, last_name, age, role FROM users WHERE email = ?"
+			query = "SELECT id, email, phone, password, first_name, last_name, age, role, is_verified FROM users WHERE email = ?"
 			identifier = user.Email
 		} else {
-			query = "SELECT id, email, phone, password, first_name, last_name, age, role FROM users WHERE phone = ?"
+			query = "SELECT id, email, phone, password, first_name, last_name, age, role, is_verified FROM users WHERE phone = ?"
 			identifier = user.Phone
 		}
 
 		row := db.QueryRow(query, identifier)
-		err = row.Scan(&user.ID, &email, &phone, &hashedPassword, &user.FirstName, &user.LastName, &user.Age, &role)
+		err = row.Scan(&user.ID, &email, &phone, &hashedPassword, &user.FirstName, &user.LastName, &user.Age, &role, &isVerified)
 
 		if err != nil {
 			if err == sql.ErrNoRows {
@@ -190,15 +196,14 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Присваиваем email и phone, если они не NULL
-		if email.Valid {
-			user.Email = email.String
-		}
-		if phone.Valid {
-			user.Phone = phone.String
+		// Проверка подтверждения email
+		if !isVerified {
+			error.Message = "Please verify your email before logging in."
+			utils.RespondWithError(w, http.StatusForbidden, error)
+			return
 		}
 
-		// Проверяем пароль с bcrypt
+		// Проверка пароля
 		err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(user.Password))
 		if err != nil {
 			error.Message = "Invalid password."
@@ -206,7 +211,7 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Генерируем токен
+		// Генерация токенов
 		accessToken, err := utils.GenerateToken(user)
 		if err != nil {
 			log.Printf("Error generating token: %v", err)
@@ -648,47 +653,42 @@ func (c Controller) ConfirmResetPassword(db *sql.DB) http.HandlerFunc {
         json.NewEncoder(w).Encode(map[string]string{"message": "Password reset successfully"})
     }
 }
-func (c Controller) VerifyEmail(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var requestData struct {
-			Email   string `json:"email"`
-			OTPCode string `json:"otp_code"`
-		}
-		var error models.Error
+func (c *Controller) VerifyEmail(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        var requestData struct {
+            Email    string `json:"email"`
+            OTPCode  string `json:"otp_code"`
+        }
 
-		err := json.NewDecoder(r.Body).Decode(&requestData)
-		if err != nil || requestData.Email == "" || requestData.OTPCode == "" {
-			error.Message = "Invalid request body."
-			utils.RespondWithError(w, http.StatusBadRequest, error)
-			return
-		}
+        // Декодируем тело запроса
+        err := json.NewDecoder(r.Body).Decode(&requestData)
+        if err != nil || requestData.Email == "" || requestData.OTPCode == "" {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Email or OTP code is missing"})
+            return
+        }
 
-		// Проверяем OTP в БД
-		var storedOTP string
-		err = db.QueryRow("SELECT otp_code FROM users WHERE email = ? AND verified = false", requestData.Email).Scan(&storedOTP)
-		if err != nil {
-			error.Message = "Email not found or already verified."
-			utils.RespondWithError(w, http.StatusNotFound, error)
-			return
-		}
+        // Проверка, что OTP совпадает с тем, что хранится в базе данных
+        var storedOTP string
+        err = db.QueryRow("SELECT otp_code FROM users WHERE email = ?", requestData.Email).Scan(&storedOTP)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid email or OTP"})
+            return
+        }
 
-		// Сравниваем OTP
-		if storedOTP != requestData.OTPCode {
-			error.Message = "Invalid OTP code."
-			utils.RespondWithError(w, http.StatusUnauthorized, error)
-			return
-		}
+        if storedOTP != requestData.OTPCode {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid OTP code"})
+            return
+        }
 
-		// Подтверждаем email
-		_, err = db.Exec("UPDATE users SET verified = true, otp_code = NULL WHERE email = ?", requestData.Email)
-		if err != nil {
-			error.Message = "Database error."
-			utils.RespondWithError(w, http.StatusInternalServerError, error)
-			return
-		}
+        // Обновляем статус верификации
+        _, err = db.Exec("UPDATE users SET is_verified = true WHERE email = ?", requestData.Email)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to verify email"})
+            return
+        }
 
-		utils.ResponseJSON(w, map[string]string{"message": "Email verified successfully."})
-	}
+        utils.ResponseJSON(w, "Email verified successfully")
+    }
 }
 func ChangeAdminPassword(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -724,7 +724,41 @@ func ChangeAdminPassword(db *sql.DB) http.HandlerFunc {
 		fmt.Fprintln(w, "Password updated successfully")
 	}
 }
+func (c *Controller) RegisterUser(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var user models.User
+		if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
+			return
+		}
 
+		// Generate unique verification token
+		verificationToken := uuid.New().String()
+
+		// Save user to DB with 'is_verified' as false
+		query := `INSERT INTO users (email, password, first_name, last_name, is_verified, verification_token) 
+		          VALUES(?, ?, ?, ?, false, ?)`
+		_, err := db.Exec(query, user.Email, user.Password, user.FirstName, user.LastName, verificationToken)
+		if err != nil {
+			log.Println("SQL Error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create user"})
+			return
+		}
+
+		// Send verification email
+		verificationLink := fmt.Sprintf("http://localhost:8000/verify-email?token=%s", verificationToken)
+		go sendVerificationEmail(user.Email, verificationLink)
+
+		utils.ResponseJSON(w, "User registered successfully. Please verify your email.")
+	}
+}
+
+func sendVerificationEmail(email, verificationLink string) {
+	// Implement email sending logic using a service like SendGrid, Mailgun, or SMTP
+	// Example: sending email with verification link
+	fmt.Println("Verification email sent to", email)
+	fmt.Println("Verification Link:", verificationLink)
+}
 
 
 
