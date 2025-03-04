@@ -17,17 +17,17 @@ var db *sql.DB
 func main() {
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		log.Fatal("Ошибка загрузки .env файла")
 	}
 
 	secret := os.Getenv("SECRET")
 	if secret == "" {
-		log.Fatal("SECRET variable is not set")
+		log.Fatal("Ошибка: переменная SECRET не установлена")
 	}
-
 	db = driver.ConnectDB()
 	defer db.Close()
 
+	
 	controller := controllers.Controller{}
 	schoolController := controllers.SchoolController{}
 	untScoreController := controllers.UNTScoreController{}
@@ -36,9 +36,10 @@ func main() {
 	untTypeController := controllers.UNTTypeController{}
 	studentController := controllers.StudentController{}
 
+	
 	router := mux.NewRouter()
 
-	// Маршруты для аутентификации и управления паролями
+	// *** Аутентификация и пароли ***
 	router.HandleFunc("/signup", controller.Signup(db)).Methods("POST")
 	router.HandleFunc("/login", controller.Login(db)).Methods("POST")
 	router.HandleFunc("/getMe", controller.GetMe(db)).Methods("GET")
@@ -46,58 +47,55 @@ func main() {
 	router.HandleFunc("/reset-password", controller.ResetPassword(db)).Methods("POST")
 	router.HandleFunc("/forgot-password", controller.ForgotPassword(db)).Methods("POST")
 	router.HandleFunc("/verify-email", controller.VerifyEmail(db)).Methods("POST")
-	router.HandleFunc("/verify-email", controller.VerifyEmail(db)).Methods("GET")
 
-
-	// Маршруты для работы со школами
+	// *** Школы ***
 	router.HandleFunc("/schools", schoolController.GetSchools(db)).Methods("GET")
-	router.HandleFunc("/schools/create", schoolController.CreateSchool(db)).Methods("POST")
+	router.HandleFunc("/schools", schoolController.CreateSchool(db)).Methods("POST")
 
-	// Маршруты для UNT Score
+	// *** UNT Score ***
 	router.HandleFunc("/unt_scores", untScoreController.GetUNTScores(db)).Methods("GET")
-	router.HandleFunc("/unt_scores/create", untScoreController.CreateUNTScore(db)).Methods("POST")
+	router.HandleFunc("/unt_scores", untScoreController.CreateUNTScore(db)).Methods("POST")
+	router.HandleFunc("/unt_scores/{student_id}", untScoreController.GetUNTScoreByStudent(db)).Methods("GET")
 
-	// Маршруты для предметов
+	// *** Предметы ***
 	router.HandleFunc("/subjects/first", subjectController.GetFirstSubjects(db)).Methods("GET")
 	router.HandleFunc("/subjects/first", subjectController.CreateFirstSubject(db)).Methods("POST")
 	router.HandleFunc("/subjects/second", subjectController.GetSecondSubjects(db)).Methods("GET")
 	router.HandleFunc("/subjects/second", subjectController.CreateSecondSubject(db)).Methods("POST")
 
-	// Маршруты для типов предметов
-	router.HandleFunc("/subjects/firstType", typeController.CreateFirstType(db)).Methods("POST")
-	router.HandleFunc("/subjects/firstType", typeController.GetFirstTypes(db)).Methods("GET")
-	router.HandleFunc("/subjects/secondType", typeController.CreateSecondType(db)).Methods("POST")
-	router.HandleFunc("/subjects/secondType", typeController.GetSecondTypes(db)).Methods("GET")
+	// *** UNT Type ***
+	router.HandleFunc("/unt_types", untTypeController.GetUNTTypes(db)).Methods("GET")
+	router.HandleFunc("/unt_types", untTypeController.CreateUNTType(db)).Methods("POST")
 
-	// Маршруты для UNT Types
-	router.HandleFunc("/untTypes", untTypeController.CreateUNTType(db)).Methods("POST")
-	router.HandleFunc("/untTypes", untTypeController.GetUNTTypes(db)).Methods("GET")
-
-	// Маршруты для студентов
+	// *** Студенты ***
 	router.HandleFunc("/students", studentController.GetStudents(db)).Methods("GET")
-	router.HandleFunc("/students/create", studentController.CreateStudents(db)).Methods("POST")
+	router.HandleFunc("/students", studentController.CreateStudent(db)).Methods("POST")
+	router.HandleFunc("/students/{student_id}/unt_results", studentController.GetUNTResults(db)).Methods("GET")
 
-	// Расчёт оценки
-	router.HandleFunc("/score/calculate", schoolController.CalculateScore(db)).Methods("GET")
+	// *** First Type ***
+	router.HandleFunc("/first_types", typeController.GetFirstTypes(db)).Methods("GET")
+	router.HandleFunc("/first_types/create", typeController.CreateFirstType(db)).Methods("POST") 
+	// *** Second Type ***
+	router.HandleFunc("/second_types", typeController.GetSecondTypes(db)).Methods("GET")
+	router.HandleFunc("/second_types", typeController.CreateSecondType(db)).Methods("POST")
 
-	// Оборачиваем роутер в CORS middleware
+	// Включаем CORS
 	handler := corsMiddleware(router)
 
-	log.Println("Server started on port 8000")
+	// Запуск сервера
+	log.Println("Сервер запущен на порту 8000")
 	log.Fatal(http.ListenAndServe("0.0.0.0:8000", handler))
 }
 
-// CORS Middleware Function
+
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Разрешаем все домены
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
-		// Обработка preflight запроса
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 

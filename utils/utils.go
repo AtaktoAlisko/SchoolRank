@@ -82,7 +82,6 @@ func GenerateVerificationToken(email string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(secret))
 }
-
 func ParseToken(tokenStr string) (*jwt.Token, error) {
 	return jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -226,7 +225,6 @@ func SendVerificationEmail(to, token, otp string) {
 		log.Printf("Error sending email: %v", err)
 	}
 }
-
 func SendVerificationOTP(to, otp string) {
 	 from := "mralibekmurat27@gmail.com"
 	 password := "bdyi mtae fqub cfcr"
