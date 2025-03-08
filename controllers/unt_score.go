@@ -152,3 +152,88 @@ func (sc *UNTScoreController) GetUNTScoreByStudent(db *sql.DB) http.HandlerFunc 
 		utils.ResponseJSON(w, result)
 	}
 }
+func (usc UNTScoreController) CalculateStudentRatings(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Запрос для получения всех студентов и их баллов
+		query := `
+			SELECT us.student_id, us.year, us.total_score, ut.first_type_id, ut.second_type_id,
+			       fs.subject AS first_subject_name, fs.score AS first_subject_score,
+			       ss.subject AS second_subject_name, ss.score AS second_subject_score,
+			       st.history_of_kazakhstan, st.reading_literacy
+			FROM UNT_Score us
+			JOIN UNT_Type ut ON us.unt_type_id = ut.unt_type_id
+			LEFT JOIN First_Type ft ON ut.first_type_id = ft.first_type_id
+			LEFT JOIN First_Subject fs ON ft.first_subject_id = fs.first_subject_id
+			LEFT JOIN Second_Subject ss ON ft.second_subject_id = ss.second_subject_id
+			LEFT JOIN Second_Type st ON ut.second_type_id = st.second_type_id
+		`
+
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println("SQL Error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get student data"})
+			return
+		}
+		defer rows.Close()
+
+		// Массив для хранения всех студентов и их баллов
+		var students []models.StudentRating
+		var totalMaxScore int
+		var totalStudentScore int
+
+		for rows.Next() {
+			var rating models.StudentRating
+			var firstSubjectScore, secondSubjectScore, historyKazakhstan, readingLiteracy int
+			var firstSubjectName, secondSubjectName string
+
+			// Сканируем данные о студенте и его баллы
+			err := rows.Scan(
+				&rating.StudentID, &rating.Year, &rating.TotalScore,
+				&rating.FirstTypeID, &rating.SecondTypeID,
+				&firstSubjectName, &firstSubjectScore,
+				&secondSubjectName, &secondSubjectScore,
+				&historyKazakhstan, &readingLiteracy,
+			)
+			if err != nil {
+				log.Println("Error scanning data:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to scan student data"})
+				return
+			}
+
+			// Рассчитываем процент для каждого студента
+			rating.FirstSubjectName = firstSubjectName
+			rating.SecondSubjectName = secondSubjectName
+			rating.FirstSubjectScore = firstSubjectScore
+			rating.SecondSubjectScore = secondSubjectScore
+			rating.HistoryKazakhstan = historyKazakhstan
+			rating.ReadingLiteracy = readingLiteracy
+
+			// В данном случае используем максимальный возможный балл для 1 типа (140) и 2 типа (30) экзамена
+			maxScore := 140
+			if rating.SecondTypeID != nil {
+				maxScore = 30
+			}
+
+			rating.Rating = float64(rating.TotalScore) / float64(maxScore) * 100
+
+			// Добавляем информацию о студенте в список
+			students = append(students, rating)
+			totalMaxScore += maxScore
+			totalStudentScore += rating.TotalScore
+		}
+
+		// Рассчитываем общий рейтинг для класса
+		classAverage := (float64(totalStudentScore) / float64(totalMaxScore)) * 100
+
+		// Добавляем общий рейтинг в ответ
+		utils.ResponseJSON(w, struct {
+			AverageRating float64         `json:"average_rating"`
+			Students      []models.StudentRating `json:"students"`
+		}{
+			AverageRating: classAverage,
+			Students:      students,
+		})
+	}
+}
+
+

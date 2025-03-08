@@ -54,10 +54,10 @@ func main() {
 
 	// *** UNT Score ***
 	router.HandleFunc("/unt_scores", untScoreController.GetUNTScores(db)).Methods("GET")
-	router.HandleFunc("/unt_scores", untScoreController.CreateUNTScore(db)).Methods("POST")
+	router.HandleFunc("/unt_scores/create", untScoreController.CreateUNTScore(db)).Methods("POST")
 	router.HandleFunc("/unt_scores/{student_id}", untScoreController.GetUNTScoreByStudent(db)).Methods("GET")
 
-	// *** Предметы ***
+	// *** Subjects ***
 	router.HandleFunc("/subjects/first", subjectController.GetFirstSubjects(db)).Methods("GET")
 	router.HandleFunc("/subjects/first", subjectController.CreateFirstSubject(db)).Methods("POST")
 	router.HandleFunc("/subjects/second", subjectController.GetSecondSubjects(db)).Methods("GET")
@@ -65,11 +65,11 @@ func main() {
 
 	// *** UNT Type ***
 	router.HandleFunc("/unt_types", untTypeController.GetUNTTypes(db)).Methods("GET")
-	router.HandleFunc("/unt_types", untTypeController.CreateUNTType(db)).Methods("POST")
+	router.HandleFunc("/unt_types/create", untTypeController.CreateUNTType(db)).Methods("POST")
 
-	// *** Студенты ***
+	// *** Students ***
 	router.HandleFunc("/students", studentController.GetStudents(db)).Methods("GET")
-	router.HandleFunc("/students", studentController.CreateStudent(db)).Methods("POST")
+	router.HandleFunc("/students/create", studentController.CreateStudent(db)).Methods("POST")
 	router.HandleFunc("/students/{student_id}/unt_results", studentController.GetUNTResults(db)).Methods("GET")
 
 	// *** First Type ***
@@ -77,7 +77,11 @@ func main() {
 	router.HandleFunc("/first_types/create", typeController.CreateFirstType(db)).Methods("POST") 
 	// *** Second Type ***
 	router.HandleFunc("/second_types", typeController.GetSecondTypes(db)).Methods("GET")
-	router.HandleFunc("/second_types", typeController.CreateSecondType(db)).Methods("POST")
+	router.HandleFunc("/second_types/create", typeController.CreateSecondType(db)).Methods("POST")
+
+	http.HandleFunc("/students/untResults/create", studentController.CreateUNTResults(db))
+    http.HandleFunc("/students/untResults", studentController.GetUNTResults(db))
+
 
 	// Включаем CORS
 	handler := corsMiddleware(router)

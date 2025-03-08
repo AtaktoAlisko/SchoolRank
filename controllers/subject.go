@@ -49,7 +49,7 @@ func (sc SubjectController) GetSecondSubjects(db *sql.DB) http.HandlerFunc {
 		var subjects []models.SecondSubject
 		for rows.Next() {
 			var subject models.SecondSubject
-			if err := rows.Scan(&subject.ID, &subject.Subject, &subject.Score, &subject.FirstSubjectID); err != nil {
+			if err := rows.Scan(&subject.ID, &subject.Subject, &subject.Score); err != nil {
 				log.Println("Scan Error:", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse Second Subjects"})
 				return
@@ -89,17 +89,9 @@ func (sc SubjectController) CreateSecondSubject(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Проверяем, существует ли First Subject
-		var firstSubjectExists bool
-		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM First_Subject WHERE first_subject_id = ?)", subject.FirstSubjectID).Scan(&firstSubjectExists)
-		if err != nil || !firstSubjectExists {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "First Subject ID does not exist"})
-			return
-		}
-
-		// Вставляем Second Subject в БД
-		query := `INSERT INTO Second_Subject(subject, score, first_subject_id) VALUES(?, ?, ?)`
-		_, err = db.Exec(query, subject.Subject, subject.Score, subject.FirstSubjectID)
+		
+		query := `INSERT INTO Second_Subject(subject, score) VALUES(?,?)`
+		_, err := db.Exec(query, subject.Subject, subject.Score)
 		if err != nil {
 			log.Println("SQL Error:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create Second Subject"})
