@@ -11,6 +11,14 @@ import (
 
 type TypeController struct{}
 
+// Функция для обработки NULL значений
+func nullableValue(value interface{}) interface{} {
+	if value == nil {
+		return nil
+	}
+	return value
+}
+
 // Создание FirstType
 func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -37,7 +45,13 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 		// Вставляем First Type в БД
 		query := `INSERT INTO First_Type (first_subject_id, second_subject_id, history_of_kazakhstan, mathematical_literacy, reading_literacy) 
 		          VALUES (?, ?, ?, ?, ?)`
-		_, err = db.Exec(query, firstType.FirstSubjectID, firstType.SecondSubjectID, firstType.HistoryOfKazakhstan, firstType.MathematicalLiteracy, firstType.ReadingLiteracy)
+		_, err = db.Exec(query, 
+			nullableValue(firstType.FirstSubjectID), 
+			nullableValue(firstType.SecondSubjectID), 
+			nullableValue(firstType.HistoryOfKazakhstan), 
+			nullableValue(firstType.MathematicalLiteracy), 
+			nullableValue(firstType.ReadingLiteracy))
+
 		if err != nil {
 			log.Println("SQL Error:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create First Type"})
@@ -48,7 +62,7 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-
+// Получение всех First Types
 func (c *TypeController) GetFirstTypes(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := `SELECT 
@@ -92,6 +106,7 @@ func (c *TypeController) GetFirstTypes(db *sql.DB) http.HandlerFunc {
 	}
 }
 
+// Создание SecondType
 func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var secondType models.SecondType
@@ -113,6 +128,7 @@ func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
 	}
 }
 
+// Получение всех Second Types
 func (c *TypeController) GetSecondTypes(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := `SELECT second_type_id, 

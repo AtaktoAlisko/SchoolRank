@@ -63,15 +63,18 @@ func main() {
 	router.HandleFunc("/subjects/second", subjectController.GetSecondSubjects(db)).Methods("GET")
 	router.HandleFunc("/subjects/second", subjectController.CreateSecondSubject(db)).Methods("POST")
 
-	// *** UNT Type ***
-	router.HandleFunc("/unt_types", untTypeController.GetUNTTypes(db)).Methods("GET")
 	router.HandleFunc("/unt_types/create", untTypeController.CreateUNTType(db)).Methods("POST")
-
-	// *** Students ***
+	router.HandleFunc("/unt_types", untTypeController.GetUNTTypes(db)).Methods("GET")
+	
 	router.HandleFunc("/students", studentController.GetStudents(db)).Methods("GET")
 	router.HandleFunc("/students/create", studentController.CreateStudent(db)).Methods("POST")
 	router.HandleFunc("/students/{student_id}/unt_results", studentController.GetUNTResults(db)).Methods("GET")
 
+	// In your routes setup file
+	router.HandleFunc("/students/untResults", studentController.CreateUNTResults(db)).Methods("POST")
+	// e.g. GET /unt_scores
+    router.HandleFunc("/unt_scores", untScoreController.GetUNTScores(db)).Methods("GET")
+  
 	// *** First Type ***
 	router.HandleFunc("/first_types", typeController.GetFirstTypes(db)).Methods("GET")
 	router.HandleFunc("/first_types/create", typeController.CreateFirstType(db)).Methods("POST") 
@@ -79,8 +82,14 @@ func main() {
 	router.HandleFunc("/second_types", typeController.GetSecondTypes(db)).Methods("GET")
 	router.HandleFunc("/second_types/create", typeController.CreateSecondType(db)).Methods("POST")
 
-	http.HandleFunc("/students/untResults/create", studentController.CreateUNTResults(db))
-    http.HandleFunc("/students/untResults", studentController.GetUNTResults(db))
+	router.HandleFunc("/students/untResults/create", studentController.CreateUNTResults(db)).Methods("POST")
+
+    // Get results by student_id
+    router.HandleFunc("/students/untResults", studentController.GetUNTResults(db)).Methods("GET")
+
+
+
+
 
 
 	// Включаем CORS

@@ -80,7 +80,7 @@ func (sc StudentController) CreateUNTResults(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Проверяем существование Student и UNT_Type перед вставкой результатов
+		// Проверяем существование Student и UNT_Type
 		var studentExists, untTypeExists bool
 		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM Student WHERE student_id = ?)", result.StudentID).Scan(&studentExists)
 		if err != nil || !studentExists {
@@ -94,15 +94,17 @@ func (sc StudentController) CreateUNTResults(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		var totalScore int
+		// Считаем totalScore корректно по типу
+		totalScore := 0
 		if result.UNTTypeID == 1 {
 			totalScore = result.FirstSubjectScore + result.SecondSubjectScore + result.HistoryKazakhstan + result.MathLiteracy + result.ReadingLiteracy
 		} else if result.UNTTypeID == 2 {
 			totalScore = result.HistoryKazakhstan + result.ReadingLiteracy
 		}
 
-		query := `INSERT INTO UNT_Score (year, unt_type_id, student_id, total_score) VALUES(?, ?, ?, ?)`
-		_, err = db.Exec(query, result.Year, result.UNTTypeID, result.StudentID, totalScore)
+		// Правильный запрос на вставку данных
+		query := `INSERT INTO UNT_Score (year, unt_type_id, student_id, first_subject_score, second_subject_score, history_of_kazakhstan, math_literacy, reading_literacy, total_score) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		_, err = db.Exec(query, result.Year, result.UNTTypeID, result.StudentID, result.FirstSubjectScore, result.SecondSubjectScore, result.HistoryKazakhstan, result.MathLiteracy, result.ReadingLiteracy, totalScore)
 		if err != nil {
 			log.Println("SQL Error:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create UNT score"})
@@ -114,40 +116,42 @@ func (sc StudentController) CreateUNTResults(db *sql.DB) http.HandlerFunc {
 }
 
 func (sc StudentController) GetUNTResults(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        studentID := r.URL.Query().Get("student_id")
-        if studentID == "" {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "student_id is required"})
-            return
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		studentID := r.URL.Query().Get("student_id")
+		if studentID == "" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "student_id is required"})
+			return
+		}
 
-        rows, err := db.Query(`
-            SELECT unt_score_id, year, unt_type_id, student_id, 
-                   first_subject_score, second_subject_score, 
-                   history_of_kazakhstan, mathematical_literacy, 
-                   reading_literacy, total_score
-            FROM UNT_Score 
-            WHERE student_id = ?`, studentID)
-        if err != nil {
-            log.Println("SQL Error:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get UNT results"})
-            return
-        }
-        defer rows.Close()
+		rows, err := db.Query(`
+			SELECT unt_score_id, year, unt_type_id, student_id, 
+				   first_subject_score, second_subject_score, 
+				   history_of_kazakhstan, math_literacy, 
+				   reading_literacy, total_score
+			FROM UNT_Score 
+			WHERE student_id = ?`, studentID)
+		if err != nil {
+			log.Println("SQL Error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get UNT results"})
+			return
+		}
+		defer rows.Close()
 
-        var results []models.UNTScore
-        for rows.Next() {
-            var result models.UNTScore
-            if err := rows.Scan(&result.ID, &result.Year, &result.UNTTypeID, &result.StudentID,
-                &result.FirstSubjectScore, &result.SecondSubjectScore, &result.HistoryKazakhstan,
-                &result.MathLiteracy, &result.ReadingLiteracy, &result.TotalScore); err != nil {
-                log.Println("Scan Error:", err)
-                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse UNT results"})
-                return
-            }
-            results = append(results, result)
-        }
+		var results []models.UNTScore
+		for rows.Next() {
+			var result models.UNTScore
+			if err := rows.Scan(&result.ID, &result.Year, &result.UNTTypeID, &result.StudentID,
+				&result.FirstSubjectScore, &result.SecondSubjectScore, &result.HistoryKazakhstan,
+				&result.MathLiteracy, &result.ReadingLiteracy, &result.TotalScore); err != nil {
+				log.Println("Scan Error:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse UNT results"})
+				return
+			}
+			results = append(results, result)
+		}
 
-        utils.ResponseJSON(w, results)
-    }
+		utils.ResponseJSON(w, results)
+	}
 }
+
+

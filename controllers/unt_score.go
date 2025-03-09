@@ -78,18 +78,18 @@ func (usc UNTScoreController) CreateUNTScore(db *sql.DB) http.HandlerFunc {
 func (sc UNTScoreController) GetUNTScores(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := `
-			SELECT us.unt_score_id, us.year, us.unt_type_id, us.student_id, us.total_score,
-			       fs.subject AS first_subject_name, fs.score AS first_subject_score,
-			       ss.subject AS second_subject_name, ss.score AS second_subject_score,
-			       st.history_of_kazakhstan, st.reading_literacy,
-			       s.first_name, s.last_name, s.iin
-			FROM UNT_Score us
-			LEFT JOIN UNT_Type ut ON us.unt_type_id = ut.unt_type_id
-			LEFT JOIN First_Type ft ON ut.first_type_id = ft.first_type_id
-			LEFT JOIN First_Subject fs ON ft.first_subject_id = fs.first_subject_id
-			LEFT JOIN Second_Subject ss ON ft.second_subject_id = ss.second_subject_id
-			LEFT JOIN Second_Type st ON ut.second_type_id = st.second_type_id
-			LEFT JOIN Student s ON us.student_id = s.student_id
+		SELECT us.unt_score_id, us.year, us.unt_type_id, us.student_id, us.total_score,
+		       fs.subject AS first_subject_name, fs.score AS first_subject_score,
+		       ss.subject AS second_subject_name, ss.score AS second_subject_score,
+		       st.history_of_kazakhstan, st.reading_literacy,
+		       s.first_name, s.last_name, s.iin
+		FROM UNT_Score us
+		LEFT JOIN UNT_Type ut ON us.unt_type_id = ut.unt_type_id
+		LEFT JOIN First_Type ft ON ut.first_type_id = ft.first_type_id
+		LEFT JOIN First_Subject fs ON ft.first_subject_id = fs.first_subject_id
+		LEFT JOIN Second_Subject ss ON ft.second_subject_id = ss.second_subject_id
+		LEFT JOIN Second_Type st ON ut.second_type_id = st.second_type_id
+		LEFT JOIN Student s ON us.student_id = s.student_id
 		`
 
 		rows, err := db.Query(query)
@@ -103,20 +103,88 @@ func (sc UNTScoreController) GetUNTScores(db *sql.DB) http.HandlerFunc {
 		var scores []models.UNTScore
 		for rows.Next() {
 			var score models.UNTScore
+
+			// Используем sql.NullInt64 для полей, которые могут быть NULL
+			var untTypeID, studentID, totalScore sql.NullInt64
+			var firstSubjectScore, secondSubjectScore sql.NullInt64
+			var historyKazakhstan, readingLiteracy sql.NullInt64
+			var firstSubjectName, secondSubjectName sql.NullString
+			var firstName, lastName, iin sql.NullString
+
+			// Сканы для полей с возможными NULL значениями
 			if err := rows.Scan(
-				&score.ID, &score.Year, &score.UNTTypeID, &score.StudentID, &score.TotalScore,
-				&score.FirstSubjectName, &score.FirstSubjectScore,
-				&score.SecondSubjectName, &score.SecondSubjectScore,
-				&score.HistoryKazakhstan, &score.ReadingLiteracy,
-				&score.FirstName, &score.LastName, &score.IIN,
+				&score.ID, &score.Year, &untTypeID, &studentID, &totalScore,
+				&firstSubjectName, &firstSubjectScore,
+				&secondSubjectName, &secondSubjectScore,
+				&historyKazakhstan, &readingLiteracy,
+				&firstName, &lastName, &iin,
 			); err != nil {
 				log.Println("Scan Error:", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse UNT Scores"})
 				return
 			}
+
+			// Преобразуем sql.NullInt64 в обычные значения
+			if untTypeID.Valid {
+				score.UNTTypeID = int(untTypeID.Int64)
+			} else {
+				score.UNTTypeID = 0 // или другое значение по умолчанию
+			}
+
+			if studentID.Valid {
+				score.StudentID = int(studentID.Int64)
+			} else {
+				score.StudentID = 0 // или другое значение по умолчанию
+			}
+
+			// Обработка total_score, которое может быть NULL
+			if totalScore.Valid {
+				score.TotalScore = int(totalScore.Int64)
+			} else {
+				score.TotalScore = 0 // или другое значение по умолчанию
+			}
+
+			if firstSubjectScore.Valid {
+				score.FirstSubjectScore = int(firstSubjectScore.Int64)
+			}
+
+			if secondSubjectScore.Valid {
+				score.SecondSubjectScore = int(secondSubjectScore.Int64)
+			}
+
+			if historyKazakhstan.Valid {
+				score.HistoryKazakhstan = int(historyKazakhstan.Int64)
+			}
+
+			if readingLiteracy.Valid {
+				score.ReadingLiteracy = int(readingLiteracy.Int64)
+			}
+
+			if firstSubjectName.Valid {
+				score.FirstSubjectName = firstSubjectName.String
+			}
+
+			if secondSubjectName.Valid {
+				score.SecondSubjectName = secondSubjectName.String
+			}
+
+			if firstName.Valid {
+				score.FirstName = firstName.String
+			}
+
+			if lastName.Valid {
+				score.LastName = lastName.String
+			}
+
+			if iin.Valid {
+				score.IIN = iin.String
+			}
+
+			// Добавляем результат в срез
 			scores = append(scores, score)
 		}
 
+		// Отправляем результат в формате JSON
 		utils.ResponseJSON(w, scores)
 	}
 }
@@ -235,5 +303,4 @@ func (usc UNTScoreController) CalculateStudentRatings(db *sql.DB) http.HandlerFu
 		})
 	}
 }
-
 

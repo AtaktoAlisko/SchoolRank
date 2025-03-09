@@ -246,7 +246,12 @@ func SendVerificationOTP(to, otp string) {
 	}
 }
 
-
+func NullableValue(value interface{}) interface{} {
+    if value == nil {
+        return nil
+    }
+    return value
+}
 
 
 

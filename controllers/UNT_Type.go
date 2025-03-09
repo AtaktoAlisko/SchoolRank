@@ -12,54 +12,52 @@ import (
 type UNTTypeController struct{}
 
 // Create UNT Type by selecting either First_Type or Second_Type
-// Create UNT Type by selecting either First_Type or Second_Type
 func (sc UNTTypeController) CreateUNTType(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        var untType models.UNTType
-        if err := json.NewDecoder(r.Body).Decode(&untType); err != nil {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
-            return
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		var untType models.UNTType
+		if err := json.NewDecoder(r.Body).Decode(&untType); err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
+			return
+		}
 
-        // Check if only one type is provided (either First_Type or Second_Type)
-        if (untType.FirstTypeID == nil && untType.SecondTypeID == nil) || (untType.FirstTypeID != nil && untType.SecondTypeID != nil) {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "You must provide either First_Type or Second_Type, but not both"})
-            return
-        }
+		// Check if only one type is provided (either First_Type or Second_Type)
+		if (untType.FirstTypeID == nil && untType.SecondTypeID == nil) || (untType.FirstTypeID != nil && untType.SecondTypeID != nil) {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "You must provide either First_Type or Second_Type, but not both"})
+			return
+		}
 
-        // Check if the provided First_Type exists
-        if untType.FirstTypeID != nil {
-            var firstTypeExists bool
-            err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM First_Type WHERE first_type_id = ?)", *untType.FirstTypeID).Scan(&firstTypeExists)
-            if err != nil || !firstTypeExists {
-                utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "First Type ID does not exist"})
-                return
-            }
-        }
+		// Check if the provided First_Type exists
+		if untType.FirstTypeID != nil {
+			var firstTypeExists bool
+			err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM First_Type WHERE first_type_id = ?)", *untType.FirstTypeID).Scan(&firstTypeExists)
+			if err != nil || !firstTypeExists {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "First Type ID does not exist"})
+				return
+			}
+		}
 
-        // Check if the provided Second_Type exists
-        if untType.SecondTypeID != nil {
-            var secondTypeExists bool
-            err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM Second_Type WHERE second_type_id = ?)", *untType.SecondTypeID).Scan(&secondTypeExists)
-            if err != nil || !secondTypeExists {
-                utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Second Type ID does not exist"})
-                return
-            }
-        }
+		// Check if the provided Second_Type exists
+		if untType.SecondTypeID != nil {
+			var secondTypeExists bool
+			err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM Second_Type WHERE second_type_id = ?)", *untType.SecondTypeID).Scan(&secondTypeExists)
+			if err != nil || !secondTypeExists {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Second Type ID does not exist"})
+				return
+			}
+		}
 
-        // Insert into UNT_Type
-        query := `INSERT INTO UNT_Type (first_type_id, second_type_id) VALUES (?, ?)`
-        _, err := db.Exec(query, untType.FirstTypeID, untType.SecondTypeID)
-        if err != nil {
-            log.Println("SQL Error:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create UNT Type"})
-            return
-        }
+		// Insert into UNT_Type
+		query := `INSERT INTO UNT_Type (first_type_id, second_type_id) VALUES (?, ?)`
+		_, err := db.Exec(query, utils.NullableValue(untType.FirstTypeID), utils.NullableValue(untType.SecondTypeID))
+		if err != nil {
+			log.Println("SQL Error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create UNT Type"})
+			return
+		}
 
-        utils.ResponseJSON(w, "UNT Type created successfully")
-    }
+		utils.ResponseJSON(w, "UNT Type created successfully")
+	}
 }
-
 // Get all UNT Types with their respective names
 func (sc UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
