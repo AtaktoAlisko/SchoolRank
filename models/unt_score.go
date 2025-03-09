@@ -15,12 +15,12 @@ type UNTScore struct {
 
     // История и грамотность
     HistoryKazakhstan    int    `json:"history_of_kazakhstan"`
-    MathLiteracy         int    `json:"MathLiteracy"`  
+    MathematicalLiteracy int    `json:"mathematical_literacy"`  
     ReadingLiteracy      int    `json:"reading_literacy"`
 
     // Данные о студенте
     FirstName            string `json:"first_name"`
     LastName             string `json:"last_name"`
-    IIN                  string `json:"iin"`
+    IIN                     string `json:"iin"`
     Rating              float64 `json:"rating"` 
 }

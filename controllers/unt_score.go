@@ -12,68 +12,96 @@ import (
 type UNTScoreController struct{}
 
 func (usc UNTScoreController) CreateUNTScore(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var untScore models.UNTScore
-		if err := json.NewDecoder(r.Body).Decode(&untScore); err != nil {
-			log.Println("Error decoding request body:", err)
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
-			return
-		}
+    return func(w http.ResponseWriter, r *http.Request) {
+        var untScore models.UNTScore
+        if err := json.NewDecoder(r.Body).Decode(&untScore); err != nil {
+            log.Println("Error decoding request body:", err)
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
+            return
+        }
 
-		// Проверяем существование UNT_Type и Student
-		var exists bool
-		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM UNT_Type WHERE unt_type_id = ?)", untScore.UNTTypeID).Scan(&exists)
-		if err != nil || !exists {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "UNT Type ID does not exist"})
-			return
-		}
+        // Заменяем 0 на значения по умолчанию, если не заданы
+        if untScore.FirstSubjectScore == 0 {
+            untScore.FirstSubjectScore = 0
+        }
+        if untScore.SecondSubjectScore == 0 {
+            untScore.SecondSubjectScore = 0
+        }
+        if untScore.HistoryKazakhstan == 0 {
+            untScore.HistoryKazakhstan = 0
+        }
+        if untScore.MathematicalLiteracy == 0 {  // Используем MathLiteracy вместо MathematicalLiteracy
+            untScore.MathematicalLiteracy = 0
+        }
+        if untScore.ReadingLiteracy == 0 {
+            untScore.ReadingLiteracy = 0
+        }
 
-		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM Student WHERE student_id = ?)", untScore.StudentID).Scan(&exists)
-		if err != nil || !exists {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Student ID does not exist"})
-			return
-		}
+        // Проверяем существование UNT_Type и Student
+        var exists bool
+        if untScore.UNTTypeID != 0 {
+            err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM UNT_Type WHERE unt_type_id = ?)", untScore.UNTTypeID).Scan(&exists)
+            if err != nil || !exists {
+                utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "UNT Type ID does not exist"})
+                return
+            }
+        }
 
-		// Подтягиваем баллы из связанных таблиц
-		var totalScore int
-		err = db.QueryRow(`
-			SELECT COALESCE(SUM(score), 0) FROM (
-				SELECT fs.score FROM First_Subject fs
-				JOIN First_Type ft ON fs.first_subject_id = ft.first_subject_id
-				JOIN UNT_Type ut ON ft.first_type_id = ut.first_type_id
-				WHERE ut.unt_type_id = ?
-				UNION ALL
-				SELECT ss.score FROM Second_Subject ss
-				JOIN First_Type ft ON ss.second_subject_id = ft.second_subject_id
-				JOIN UNT_Type ut ON ft.first_type_id = ut.first_type_id
-				WHERE ut.unt_type_id = ?
-				UNION ALL
-				SELECT st.history_of_kazakhstan FROM Second_Type st
-				JOIN UNT_Type ut ON st.second_type_id = ut.second_type_id
-				WHERE ut.unt_type_id = ?
-				UNION ALL
-				SELECT st.reading_literacy FROM Second_Type st
-				JOIN UNT_Type ut ON st.second_type_id = ut.second_type_id
-				WHERE ut.unt_type_id = ?
-			) AS scores`, untScore.UNTTypeID, untScore.UNTTypeID, untScore.UNTTypeID, untScore.UNTTypeID).Scan(&totalScore)
-		if err != nil {
-			log.Println("Error calculating total score:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to calculate total score"})
-			return
-		}
+        if untScore.StudentID != 0 {
+            err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM Student WHERE student_id = ?)", untScore.StudentID).Scan(&exists)
+            if err != nil || !exists {
+                utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Student ID does not exist"})
+                return
+            }
+        }
 
-		// Вставляем данные в таблицу
-		query := `INSERT INTO UNT_Score (year, unt_type_id, student_id, score) VALUES (?, ?, ?, ?)`
-		_, err = db.Exec(query, untScore.Year, untScore.UNTTypeID, untScore.StudentID, totalScore)
-		if err != nil {
-			log.Println("Error inserting UNT score:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create UNT score"})
-			return
-		}
+        // Подтягиваем баллы из связанных таблиц только если UNT_Type задан
+        var totalScore int
+        if untScore.UNTTypeID != 0 {
+            err := db.QueryRow(`
+                SELECT COALESCE(SUM(score), 0) + 
+                    COALESCE(MAX(ft.history_of_kazakhstan), 0) + 
+                    COALESCE(MAX(ft.math_literacy), 0) +  // Используем math_literacy
+                    COALESCE(MAX(ft.reading_literacy), 0) 
+                FROM (
+                    SELECT fs.score, ft.history_of_kazakhstan, ft.math_literacy, ft.reading_literacy
+                    FROM First_Subject fs
+                    JOIN First_Type ft ON fs.first_subject_id = ft.first_subject_id
+                    JOIN UNT_Type ut ON ft.first_type_id = ut.first_type_id
+                    WHERE ut.unt_type_id = ?
+                    UNION ALL
+                    SELECT ss.score, ft.history_of_kazakhstan, ft.math_literacy, ft.reading_literacy
+                    FROM Second_Subject ss
+                    JOIN First_Type ft ON ss.second_subject_id = ft.second_subject_id
+                    JOIN UNT_Type ut ON ft.first_type_id = ut.first_type_id
+                    WHERE ut.unt_type_id = ?
+                ) AS scores
+                LEFT JOIN Second_Type st ON st.second_type_id = scores.second_type_id
+            `, untScore.UNTTypeID, untScore.UNTTypeID).Scan(&totalScore)
 
-		utils.ResponseJSON(w, "UNT Score created successfully")
-	}
+            if err != nil {
+                log.Println("Error calculating total score:", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to calculate total score"})
+                return
+            }
+        } else {
+            // Если UNT_Type отсутствует, просто считаем баллы на основе переданных значений
+            totalScore = untScore.FirstSubjectScore + untScore.SecondSubjectScore + untScore.HistoryKazakhstan + untScore.MathematicalLiteracy + untScore.ReadingLiteracy
+        }
+
+        // Вставляем данные в таблицу
+        query := `INSERT INTO UNT_Score (year, unt_type_id, student_id, score) VALUES (?, ?, ?, ?)`
+        _, err := db.Exec(query, untScore.Year, untScore.UNTTypeID, untScore.StudentID, totalScore)
+        if err != nil {
+            log.Println("Error inserting UNT score:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create UNT score"})
+            return
+        }
+
+        utils.ResponseJSON(w, "UNT Score created successfully")
+    }
 }
+
 
 func (sc UNTScoreController) GetUNTScores(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -220,6 +248,7 @@ func (sc *UNTScoreController) GetUNTScoreByStudent(db *sql.DB) http.HandlerFunc 
 		utils.ResponseJSON(w, result)
 	}
 }
+
 func (usc UNTScoreController) CalculateStudentRatings(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Запрос для получения всех студентов и их баллов
@@ -303,4 +332,3 @@ func (usc UNTScoreController) CalculateStudentRatings(db *sql.DB) http.HandlerFu
 		})
 	}
 }
-

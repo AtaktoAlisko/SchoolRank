@@ -59,9 +59,9 @@ func main() {
 
 	// *** Subjects ***
 	router.HandleFunc("/subjects/first", subjectController.GetFirstSubjects(db)).Methods("GET")
-	router.HandleFunc("/subjects/first", subjectController.CreateFirstSubject(db)).Methods("POST")
+	router.HandleFunc("/subjects/first/create", subjectController.CreateFirstSubject(db)).Methods("POST")
 	router.HandleFunc("/subjects/second", subjectController.GetSecondSubjects(db)).Methods("GET")
-	router.HandleFunc("/subjects/second", subjectController.CreateSecondSubject(db)).Methods("POST")
+	router.HandleFunc("/subjects/second/create", subjectController.CreateSecondSubject(db)).Methods("POST")
 
 	router.HandleFunc("/unt_types/create", untTypeController.CreateUNTType(db)).Methods("POST")
 	router.HandleFunc("/unt_types", untTypeController.GetUNTTypes(db)).Methods("GET")

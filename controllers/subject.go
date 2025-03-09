@@ -37,28 +37,30 @@ func (sc SubjectController) GetFirstSubjects(db *sql.DB) http.HandlerFunc {
 }
 
 func (sc SubjectController) GetSecondSubjects(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		rows, err := db.Query("SELECT second_subject_id, subject, score, first_subject_id FROM Second_Subject")
-		if err != nil {
-			log.Println("SQL Error:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get Second Subjects"})
-			return
-		}
-		defer rows.Close()
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Обновленный запрос без поля first_subject_id
+        rows, err := db.Query("SELECT second_subject_id, subject, score FROM Second_Subject")
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get Second Subjects"})
+            return
+        }
+        defer rows.Close()
 
-		var subjects []models.SecondSubject
-		for rows.Next() {
-			var subject models.SecondSubject
-			if err := rows.Scan(&subject.ID, &subject.Subject, &subject.Score); err != nil {
-				log.Println("Scan Error:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse Second Subjects"})
-				return
-			}
-			subjects = append(subjects, subject)
-		}
+        var subjects []models.SecondSubject
+        for rows.Next() {
+            var subject models.SecondSubject
+            // Обновили Scan для работы без first_subject_id
+            if err := rows.Scan(&subject.ID, &subject.Subject, &subject.Score); err != nil {
+                log.Println("Scan Error:", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse Second Subjects"})
+                return
+            }
+            subjects = append(subjects, subject)
+        }
 
-		utils.ResponseJSON(w, subjects)
-	}
+        utils.ResponseJSON(w, subjects)
+    }
 }
 
 func (sc SubjectController) CreateFirstSubject(db *sql.DB) http.HandlerFunc {

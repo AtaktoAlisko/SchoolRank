@@ -124,12 +124,12 @@ func (sc SchoolController) CalculateScore(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		totalScore := score.FirstSubjectScore + score.SecondSubjectScore + score.HistoryKazakhstan + score.MathLiteracy + score.ReadingLiteracy
+		totalScore := score.FirstSubjectScore + score.SecondSubjectScore + score.HistoryKazakhstan + score.MathematicalLiteracy + score.ReadingLiteracy
 		score.TotalScore = totalScore
 
 		query := `INSERT INTO UNT_Score (year, unt_type_id, student_id, first_subject_score, second_subject_score, history_of_kazakhstan, mathematical_literacy, reading_literacy, score) 
 				VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`
-		_, err := db.Exec(query, score.Year, score.UNTTypeID, score.StudentID, score.FirstSubjectScore, score.SecondSubjectScore, score.HistoryKazakhstan, score.MathLiteracy, score.ReadingLiteracy, score.TotalScore)
+		_, err := db.Exec(query, score.Year, score.UNTTypeID, score.StudentID, score.FirstSubjectScore, score.SecondSubjectScore, score.HistoryKazakhstan, score.MathematicalLiteracy, score.ReadingLiteracy, score.TotalScore)
 		if err != nil {
 			log.Println("SQL Error:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to calculate and save score"})

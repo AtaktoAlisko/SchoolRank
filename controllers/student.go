@@ -97,14 +97,14 @@ func (sc StudentController) CreateUNTResults(db *sql.DB) http.HandlerFunc {
 		// Считаем totalScore корректно по типу
 		totalScore := 0
 		if result.UNTTypeID == 1 {
-			totalScore = result.FirstSubjectScore + result.SecondSubjectScore + result.HistoryKazakhstan + result.MathLiteracy + result.ReadingLiteracy
+			totalScore = result.FirstSubjectScore + result.SecondSubjectScore + result.HistoryKazakhstan + result.MathematicalLiteracy + result.ReadingLiteracy
 		} else if result.UNTTypeID == 2 {
 			totalScore = result.HistoryKazakhstan + result.ReadingLiteracy
 		}
 
 		// Правильный запрос на вставку данных
 		query := `INSERT INTO UNT_Score (year, unt_type_id, student_id, first_subject_score, second_subject_score, history_of_kazakhstan, math_literacy, reading_literacy, total_score) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`
-		_, err = db.Exec(query, result.Year, result.UNTTypeID, result.StudentID, result.FirstSubjectScore, result.SecondSubjectScore, result.HistoryKazakhstan, result.MathLiteracy, result.ReadingLiteracy, totalScore)
+		_, err = db.Exec(query, result.Year, result.UNTTypeID, result.StudentID, result.FirstSubjectScore, result.SecondSubjectScore, result.HistoryKazakhstan, result.MathematicalLiteracy, result.ReadingLiteracy, totalScore)
 		if err != nil {
 			log.Println("SQL Error:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create UNT score"})
@@ -142,7 +142,7 @@ func (sc StudentController) GetUNTResults(db *sql.DB) http.HandlerFunc {
 			var result models.UNTScore
 			if err := rows.Scan(&result.ID, &result.Year, &result.UNTTypeID, &result.StudentID,
 				&result.FirstSubjectScore, &result.SecondSubjectScore, &result.HistoryKazakhstan,
-				&result.MathLiteracy, &result.ReadingLiteracy, &result.TotalScore); err != nil {
+				&result.MathematicalLiteracy, &result.ReadingLiteracy, &result.TotalScore); err != nil {
 				log.Println("Scan Error:", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse UNT results"})
 				return
