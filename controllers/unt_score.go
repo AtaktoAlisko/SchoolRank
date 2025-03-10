@@ -30,14 +30,14 @@ func (usc UNTScoreController) CreateUNTScore(db *sql.DB) http.HandlerFunc {
         if untScore.HistoryKazakhstan == 0 {
             untScore.HistoryKazakhstan = 0
         }
-        if untScore.MathematicalLiteracy == 0 {  // Используем MathLiteracy вместо MathematicalLiteracy
+        if untScore.MathematicalLiteracy == 0 {
             untScore.MathematicalLiteracy = 0
         }
         if untScore.ReadingLiteracy == 0 {
             untScore.ReadingLiteracy = 0
         }
 
-        // Проверяем существование UNT_Type и Student
+        // Проверка существования UNT_Type и Student
         var exists bool
         if untScore.UNTTypeID != 0 {
             err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM UNT_Type WHERE unt_type_id = ?)", untScore.UNTTypeID).Scan(&exists)
@@ -61,22 +61,21 @@ func (usc UNTScoreController) CreateUNTScore(db *sql.DB) http.HandlerFunc {
             err := db.QueryRow(`
                 SELECT COALESCE(SUM(score), 0) + 
                     COALESCE(MAX(ft.history_of_kazakhstan), 0) + 
-                    COALESCE(MAX(ft.math_literacy), 0) +  // Используем math_literacy
+                    COALESCE(MAX(ft.mathematical_literacy), 0) +  
                     COALESCE(MAX(ft.reading_literacy), 0) 
                 FROM (
-                    SELECT fs.score, ft.history_of_kazakhstan, ft.math_literacy, ft.reading_literacy
+                    SELECT fs.score, ft.history_of_kazakhstan, ft.mathematical_literacy, ft.reading_literacy
                     FROM First_Subject fs
                     JOIN First_Type ft ON fs.first_subject_id = ft.first_subject_id
                     JOIN UNT_Type ut ON ft.first_type_id = ut.first_type_id
                     WHERE ut.unt_type_id = ?
                     UNION ALL
-                    SELECT ss.score, ft.history_of_kazakhstan, ft.math_literacy, ft.reading_literacy
+                    SELECT ss.score, ft.history_of_kazakhstan, ft.mathematical_literacy, ft.reading_literacy
                     FROM Second_Subject ss
                     JOIN First_Type ft ON ss.second_subject_id = ft.second_subject_id
                     JOIN UNT_Type ut ON ft.first_type_id = ut.first_type_id
                     WHERE ut.unt_type_id = ?
                 ) AS scores
-                LEFT JOIN Second_Type st ON st.second_type_id = scores.second_type_id
             `, untScore.UNTTypeID, untScore.UNTTypeID).Scan(&totalScore)
 
             if err != nil {
@@ -90,7 +89,7 @@ func (usc UNTScoreController) CreateUNTScore(db *sql.DB) http.HandlerFunc {
         }
 
         // Вставляем данные в таблицу
-        query := `INSERT INTO UNT_Score (year, unt_type_id, student_id, score) VALUES (?, ?, ?, ?)`
+        query := `INSERT INTO UNT_Score (year, unt_type_id, student_id, total_score) VALUES (?, ?, ?, ?)`
         _, err := db.Exec(query, untScore.Year, untScore.UNTTypeID, untScore.StudentID, totalScore)
         if err != nil {
             log.Println("Error inserting UNT score:", err)
@@ -102,7 +101,7 @@ func (usc UNTScoreController) CreateUNTScore(db *sql.DB) http.HandlerFunc {
     }
 }
 
-
+// Получить все UNT Scores
 func (sc UNTScoreController) GetUNTScores(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := `
@@ -216,6 +215,7 @@ func (sc UNTScoreController) GetUNTScores(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, scores)
 	}
 }
+
 
 func (sc *UNTScoreController) GetUNTScoreByStudent(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
