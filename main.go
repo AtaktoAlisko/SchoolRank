@@ -53,15 +53,12 @@ func main() {
 	router.HandleFunc("/update-password", controller.TokenVerifyMiddleware(controller.UpdatePassword(db))).Methods("PUT")
 
 
-
-
-
 	// *** Школы ***
 	router.HandleFunc("/schools", schoolController.GetSchools(db)).Methods("GET")
 	router.HandleFunc("/schools", schoolController.CreateSchool(db)).Methods("POST")
 
 	// *** UNT Score ***
-	router.HandleFunc("/unt_scores", untScoreController.GetUNTScores(db)).Methods("GET")
+	    router.HandleFunc("/unt_scores", untScoreController.GetUNTScores(db)).Methods("GET")
 	router.HandleFunc("/unt_scores/create", untScoreController.CreateUNTScore(db)).Methods("POST")
 	router.HandleFunc("/unt_scores/{student_id}", untScoreController.GetUNTScoreByStudent(db)).Methods("GET")
 
@@ -81,7 +78,7 @@ func main() {
 	// In your routes setup file
 	router.HandleFunc("/students/untResults", studentController.CreateUNTResults(db)).Methods("POST")
 	// e.g. GET /unt_scores
-    router.HandleFunc("/unt_scores", untScoreController.GetUNTScores(db)).Methods("GET")
+
   
 	// *** First Type ***
 	router.HandleFunc("/first_types", typeController.GetFirstTypes(db)).Methods("GET")

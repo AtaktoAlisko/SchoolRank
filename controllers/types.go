@@ -63,8 +63,6 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
     }
 }
 
-// Получение всех First Types
-// Getting all First Types
 // Getting all First Types
 func (c *TypeController) GetFirstTypes(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
@@ -112,10 +110,6 @@ func (c *TypeController) GetFirstTypes(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, types)
     }
 }
-
-
-
-
 // Создание SecondType
 func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

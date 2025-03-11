@@ -13,5 +13,7 @@ type StudentRating struct {
     SecondSubjectScore int     `json:"second_subject_score"`
     HistoryKazakhstan  int     `json:"history_of_kazakhstan"`
     ReadingLiteracy    int     `json:"reading_literacy"`
+ MathematicalLiteracy int    `json:"mathematical_literacy"`
     Rating             float64 `json:"rating"` // Рассчитанный рейтинг
+    
 }
