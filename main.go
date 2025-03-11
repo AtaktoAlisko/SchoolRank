@@ -49,6 +49,11 @@ func main() {
 	router.HandleFunc("/verify-email", controller.VerifyEmail(db)).Methods("POST")
 	router.HandleFunc("/logout", controller.Logout).Methods("POST")
 	router.HandleFunc("/delete-account", controller.DeleteAccount(db)).Methods("DELETE")
+	router.HandleFunc("/edit-profile", controller.TokenVerifyMiddleware(controller.EditProfile(db))).Methods("PUT")
+	router.HandleFunc("/update-password", controller.TokenVerifyMiddleware(controller.UpdatePassword(db))).Methods("PUT")
+
+
+
 
 
 	// *** Школы ***

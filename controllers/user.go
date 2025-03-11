@@ -318,14 +318,123 @@ func (c Controller) DeleteAccount(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, map[string]string{"message": "Account deleted successfully"})
     }
 }
+func (c Controller) EditProfile(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        var requestData struct {
+            FirstName string `json:"first_name"`
+            LastName  string `json:"last_name"`
+            Age       int    `json:"age"`
+            Email     string `json:"email"`
+        }
 
+        // Decode the body of the request
+        err := json.NewDecoder(r.Body).Decode(&requestData)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body."})
+            return
+        }
+
+        // Get the user ID from the token (which is validated in the middleware)
+        userID, err := utils.VerifyToken(r)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+            return
+        }
+
+        // Check if the user is updating their own profile
+        var currentUserID int
+        query := "SELECT id FROM users WHERE id = ?"
+        err = db.QueryRow(query, userID).Scan(&currentUserID)
+        if err != nil || currentUserID == 0 {
+            utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "User not found."})
+            return
+        }
+
+        // Update the profile data in the database
+        updateQuery := `
+            UPDATE users 
+            SET first_name = ?, last_name = ?, age = ?, email = ? 
+            WHERE id = ?
+        `
+        _, err = db.Exec(updateQuery, requestData.FirstName, requestData.LastName, requestData.Age, requestData.Email, userID)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error updating profile."})
+            return
+        }
+
+        // Respond with a success message
+        utils.ResponseJSON(w, map[string]string{"message": "Profile updated successfully."})
+    }
+}
+func (c Controller) UpdatePassword(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var requestData struct {
+			CurrentPassword string `json:"current_password"`
+			NewPassword     string `json:"new_password"`
+			ConfirmPassword string `json:"confirm_password"`
+		}
+
+		// Декодируем тело запроса
+		err := json.NewDecoder(r.Body).Decode(&requestData)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body."})
+			return
+		}
+
+		// Верификация токена, чтобы получить userID
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		// Проверяем, совпадают ли новый пароль и подтвержденный пароль
+		if requestData.NewPassword != requestData.ConfirmPassword {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "New password and confirm password do not match."})
+			return
+		}
+
+		// Получаем текущий пароль из базы данных
+		var hashedPassword string
+		query := "SELECT password FROM users WHERE id = ?"
+		err = db.QueryRow(query, userID).Scan(&hashedPassword)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error retrieving user password."})
+			return
+		}
+
+		// Проверяем текущий пароль
+		err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(requestData.CurrentPassword))
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Incorrect current password."})
+			return
+		}
+
+		// Хешируем новый пароль
+		hashedNewPassword, err := bcrypt.GenerateFromPassword([]byte(requestData.NewPassword), bcrypt.DefaultCost)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error hashing the new password."})
+			return
+		}
+
+		// Обновляем пароль в базе данных
+		_, err = db.Exec("UPDATE users SET password = ? WHERE id = ?", hashedNewPassword, userID)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error updating password."})
+			return
+		}
+
+		// Отправляем успешный ответ
+		utils.ResponseJSON(w, map[string]string{"message": "Password updated successfully."})
+	}
+}
 func (c Controller) TokenVerifyMiddleware(next http.HandlerFunc) http.HandlerFunc {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         var errorObject models.Error
         authHeader := r.Header.Get("Authorization")
         bearerToken := strings.Split(authHeader, " ")
 
-        if len(bearerToken) == 2{
+        if len(bearerToken) == 2 {
             authToken := bearerToken[1]
 
             token, err := jwt.Parse(authToken, func(token *jwt.Token) (interface{}, error) {
@@ -334,11 +443,13 @@ func (c Controller) TokenVerifyMiddleware(next http.HandlerFunc) http.HandlerFun
                 }
                 return []byte(os.Getenv("SECRET")), nil
             })
+
             if err != nil {
                 errorObject.Message = err.Error()
                 utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
                 return
             }
+
             if token.Valid {
                 next.ServeHTTP(w, r)
             } else {
@@ -353,7 +464,6 @@ func (c Controller) TokenVerifyMiddleware(next http.HandlerFunc) http.HandlerFun
         }
     })
 }
-
 func (c Controller) RefreshToken(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var jwtToken models.JWT

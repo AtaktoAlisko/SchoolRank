@@ -93,48 +93,26 @@ func ParseToken(tokenStr string) (*jwt.Token, error) {
 func VerifyToken(r *http.Request) (int, error) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
-		return 0, errors.New("missing token")
+		return 0, errors.New("Authorization header missing")
 	}
 
-	tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
-	if tokenStr == authHeader {
-		return 0, errors.New("invalid token format")
-	}
-
-	secret := os.Getenv("SECRET")
-	if secret == "" {
-		return 0, errors.New("SECRET environment variable is not set")
-	}
-
-	// Парсинг токена
-	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
-		// Убедитесь, что это правильный метод подписания
+	tokenString := strings.Split(authHeader, " ")[1]
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("unexpected signing method")
+			return nil, errors.New("Unexpected signing method")
 		}
-		return []byte(secret), nil
+		return []byte(os.Getenv("SECRET")), nil
 	})
 
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse token: %v", err)
+		return 0, err
 	}
 
-	if !token.Valid {
-		return 0, errors.New("invalid token")
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		userID := int(claims["user_id"].(float64))
+		return userID, nil
 	}
-
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return 0, errors.New("invalid claims")
-	}
-
-	// Извлекаем ID пользователя из токена
-	userID, ok := claims["user_id"].(float64)
-	if !ok {
-		return 0, errors.New("user_id not found in token")
-	}
-
-	return int(userID), nil
+	return 0, errors.New("Invalid token")
 }
 func GenerateRefreshToken(user models.User) (string, error) {
     secret := os.Getenv("SECRET")
@@ -245,7 +223,6 @@ func SendVerificationOTP(to, otp string) {
 		log.Printf("Error sending email: %v", err)
 	}
 }
-
 func NullableValue(value interface{}) interface{} {
     if value == nil {
         return nil
