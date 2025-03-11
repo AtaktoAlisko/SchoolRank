@@ -48,8 +48,7 @@ func main() {
 	router.HandleFunc("/forgot-password", controller.ForgotPassword(db)).Methods("POST")
 	router.HandleFunc("/verify-email", controller.VerifyEmail(db)).Methods("POST")
 	router.HandleFunc("/logout", controller.Logout).Methods("POST")
-
-
+	router.HandleFunc("/delete-account", controller.DeleteAccount(db)).Methods("DELETE")
 
 
 	// *** Школы ***
@@ -90,10 +89,6 @@ func main() {
 
     // Get results by student_id
     router.HandleFunc("/students/untResults", studentController.GetUNTResults(db)).Methods("GET")
-
-
-
-
 
 
 	// Включаем CORS

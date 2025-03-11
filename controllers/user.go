@@ -215,6 +215,110 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
 		})
 	}
 }
+func (c Controller) Logout(w http.ResponseWriter, r *http.Request) {
+    // Get token from Authorization header
+    authHeader := r.Header.Get("Authorization")
+    bearerToken := strings.Split(authHeader, " ")
+
+    if len(bearerToken) == 2 {
+        tokenString := bearerToken[1]
+        token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+            if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+                return nil, fmt.Errorf("there was an error")
+            }
+            return []byte(os.Getenv("SECRET")), nil
+        })
+
+        if err != nil || !token.Valid {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid or expired token"})
+            return
+        }
+
+        // Continue with logging out, e.g., clearing session or token
+        http.SetCookie(w, &http.Cookie{
+            Name:     "token",
+            Value:    "",
+            Expires:  time.Unix(0, 0), // Set expiration time
+            HttpOnly: true,
+        })
+
+        utils.ResponseJSON(w, map[string]string{"message": "Successfully logged out"})
+        return
+    } else {
+        utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+        return
+    }
+}
+
+func (c Controller) DeleteAccount(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        var errorObject models.Error
+        
+        // Get the token from the request header
+        authHeader := r.Header.Get("Authorization")
+        bearerToken := strings.Split(authHeader, " ")
+
+        if len(bearerToken) != 2 {
+            errorObject.Message = "Authorization token is required"
+            utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
+            return
+        }
+
+        tokenString := bearerToken[1]
+        
+        // Parse the token to verify it
+        token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+            if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+                return nil, fmt.Errorf("Invalid signing method")
+            }
+            return []byte(os.Getenv("SECRET")), nil
+        })
+        
+        if err != nil || !token.Valid {
+            errorObject.Message = "Invalid or expired token"
+            utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
+            return
+        }
+
+        // Get the user ID from the token claims
+        claims, ok := token.Claims.(jwt.MapClaims)
+        if !ok || claims["user_id"] == nil {
+            errorObject.Message = "Invalid token claims"
+            utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
+            return
+        }
+
+        userID := claims["user_id"].(float64)
+
+        // Check if the user exists in the database
+        var existingUserID int
+        err = db.QueryRow("SELECT id FROM users WHERE id = ?", int(userID)).Scan(&existingUserID)
+        if err != nil {
+            if err == sql.ErrNoRows {
+                errorObject.Message = "User not found"
+                utils.RespondWithError(w, http.StatusNotFound, errorObject)
+                return
+            }
+            errorObject.Message = "Error querying user"
+            utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
+            return
+        }
+
+        // Delete user from the database
+        _, err = db.Exec("DELETE FROM users WHERE id = ?", int(userID))
+        if err != nil {
+            errorObject.Message = "Failed to delete user"
+            utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
+            return
+        }
+
+        // Optionally, remove any related data (such as UNT Scores, etc.)
+
+        // Respond with a success message
+        utils.ResponseJSON(w, map[string]string{"message": "Account deleted successfully"})
+    }
+}
+
 func (c Controller) TokenVerifyMiddleware(next http.HandlerFunc) http.HandlerFunc {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         var errorObject models.Error
@@ -424,13 +528,23 @@ func (c Controller) ResetPassword(db *sql.DB) http.HandlerFunc {
             return
         }
 
+        // Обновляем статус верификации пользователя на true, чтобы он мог сразу войти
+        _, err = db.Exec("UPDATE users SET is_verified = true WHERE email = ?", requestData.Email)
+        if err != nil {
+            error.Message = "Failed to verify email."
+            utils.RespondWithError(w, http.StatusInternalServerError, error)
+            return
+        }
+
         // Удаляем OTP после успешного сброса
         db.Exec("DELETE FROM password_resets WHERE email = ?", requestData.Email)
 
+        // Ответ успешный
         w.WriteHeader(http.StatusOK)
-        json.NewEncoder(w).Encode(map[string]string{"message": "Password reset successfully"})
+        json.NewEncoder(w).Encode(map[string]string{"message": "Password reset and email verified successfully"})
     }
 }
+
 func (c Controller) ResetPasswordConfirm(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var requestData struct {
@@ -740,37 +854,4 @@ func GenerateRandomCode() (string, error) {
 
 
 
-func (c Controller) Logout(w http.ResponseWriter, r *http.Request) {
-    // Get token from Authorization header
-    authHeader := r.Header.Get("Authorization")
-    bearerToken := strings.Split(authHeader, " ")
 
-    if len(bearerToken) == 2 {
-        tokenString := bearerToken[1]
-        token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-            if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-                return nil, fmt.Errorf("there was an error")
-            }
-            return []byte(os.Getenv("SECRET")), nil
-        })
-
-        if err != nil || !token.Valid {
-            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid or expired token"})
-            return
-        }
-
-        // Continue with logging out, e.g., clearing session or token
-        http.SetCookie(w, &http.Cookie{
-            Name:     "token",
-            Value:    "",
-            Expires:  time.Unix(0, 0), // Set expiration time
-            HttpOnly: true,
-        })
-
-        utils.ResponseJSON(w, map[string]string{"message": "Successfully logged out"})
-        return
-    } else {
-        utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
-        return
-    }
-}
