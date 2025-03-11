@@ -47,6 +47,10 @@ func main() {
 	router.HandleFunc("/reset-password", controller.ResetPassword(db)).Methods("POST")
 	router.HandleFunc("/forgot-password", controller.ForgotPassword(db)).Methods("POST")
 	router.HandleFunc("/verify-email", controller.VerifyEmail(db)).Methods("POST")
+	router.HandleFunc("/logout", controller.Logout).Methods("POST")
+
+
+
 
 	// *** Школы ***
 	router.HandleFunc("/schools", schoolController.GetSchools(db)).Methods("GET")

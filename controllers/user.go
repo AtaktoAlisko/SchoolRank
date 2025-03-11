@@ -11,6 +11,7 @@ import (
 	"ranking-school/models"
 	"ranking-school/utils"
 	"strings"
+	"time"
 
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
@@ -214,41 +215,41 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
 		})
 	}
 }
-func (c Controller) TokenVerifyMiddleware(next http.HandlerFunc) http.HandlerFunc{
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var errorObject models.Error
-		authHeader := r.Header.Get("Authorization")
-		bearerToken := strings.Split(authHeader, " ")
+func (c Controller) TokenVerifyMiddleware(next http.HandlerFunc) http.HandlerFunc {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        var errorObject models.Error
+        authHeader := r.Header.Get("Authorization")
+        bearerToken := strings.Split(authHeader, " ")
 
-		if len(bearerToken) == 2{
-			authToken := bearerToken[1]
+        if len(bearerToken) == 2{
+            authToken := bearerToken[1]
 
-			token, error :=jwt.Parse(authToken, func(token*jwt.Token)(interface{},error){
-				if _, ok :=token.Method.(*jwt.SigningMethodHMAC); !ok{
-					return nil, fmt.Errorf("There was an error")
-				}
-				return []byte(os.Getenv("SECRET")),nil
-			})
-			if error != nil{
-				errorObject.Message=error.Error()
-				utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
-				return
-			}
-			if token.Valid{
-				next.ServeHTTP(w,r)
-			} else{
-				errorObject.Message=error.Error()
-				utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
-				return
-			}
-		} else{
-			errorObject.Message="Invailed Token."
-			utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
-			return
-		}
-	})
-
+            token, err := jwt.Parse(authToken, func(token *jwt.Token) (interface{}, error) {
+                if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+                    return nil, fmt.Errorf("There was an error")
+                }
+                return []byte(os.Getenv("SECRET")), nil
+            })
+            if err != nil {
+                errorObject.Message = err.Error()
+                utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
+                return
+            }
+            if token.Valid {
+                next.ServeHTTP(w, r)
+            } else {
+                errorObject.Message = err.Error()
+                utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
+                return
+            }
+        } else {
+            errorObject.Message = "Invalid Token."
+            utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
+            return
+        }
+    })
 }
+
 func (c Controller) RefreshToken(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var jwtToken models.JWT
@@ -739,8 +740,37 @@ func GenerateRandomCode() (string, error) {
 
 
 
+func (c Controller) Logout(w http.ResponseWriter, r *http.Request) {
+    // Get token from Authorization header
+    authHeader := r.Header.Get("Authorization")
+    bearerToken := strings.Split(authHeader, " ")
 
+    if len(bearerToken) == 2 {
+        tokenString := bearerToken[1]
+        token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+            if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+                return nil, fmt.Errorf("there was an error")
+            }
+            return []byte(os.Getenv("SECRET")), nil
+        })
 
+        if err != nil || !token.Valid {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid or expired token"})
+            return
+        }
 
+        // Continue with logging out, e.g., clearing session or token
+        http.SetCookie(w, &http.Cookie{
+            Name:     "token",
+            Value:    "",
+            Expires:  time.Unix(0, 0), // Set expiration time
+            HttpOnly: true,
+        })
 
-
+        utils.ResponseJSON(w, map[string]string{"message": "Successfully logged out"})
+        return
+    } else {
+        utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+        return
+    }
+}
