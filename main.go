@@ -55,8 +55,9 @@ func main() {
 
 	// *** Школы ***
 	router.HandleFunc("/schools", schoolController.GetSchools(db)).Methods("GET")
-	router.HandleFunc("/schools/create", schoolController.CreateSchool(db)).Methods("POST")
-
+    router.HandleFunc("/schools/create", schoolController.CreateSchool(db)).Methods("POST")
+	router.HandleFunc("/schools/GetSchoolForDirector", schoolController.GetSchoolForDirector(db)).Methods("GET")
+	
 	// *** UNT Score ***
 	router.HandleFunc("/unt_scores", untScoreController.GetUNTScores(db)).Methods("GET")
 	router.HandleFunc("/unt_scores/create", untScoreController.CreateUNTScore(db)).Methods("POST")

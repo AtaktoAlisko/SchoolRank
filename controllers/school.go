@@ -29,9 +29,23 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Проверяем, что пользователь имеет роль "director" или "admin"
+        // Проверяем, что пользователь имеет роль "director" или "superadmin"
         if userRole != "director" && userRole != "superadmin" {
             utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create a school"})
+            return
+        }
+
+        // Проверяем, есть ли уже школа для этого директора
+        var existingSchoolID int
+        err = db.QueryRow("SELECT school_id FROM schools WHERE user_id = ?", userID).Scan(&existingSchoolID)
+        if err == nil {
+            // Если школа уже существует, возвращаем ошибку
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "You already have a school associated with your account"})
+            return
+        } else if err != sql.ErrNoRows {
+            // Ошибка при запросе
+            log.Println("Error checking for existing school:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking for existing school"})
             return
         }
 
@@ -43,27 +57,9 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Проверяем существование UNT Score
-        var untExists bool
-        err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM UNT_Score WHERE unt_score_id = ?)", school.UNTID).Scan(&untExists)
-        if err != nil || !untExists {
-            log.Println("UNT Score ID not found:", err)
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "UNT Score ID does not exist"})
-            return
-        }
-
-        // Проверяем существование студента
-        var studentExists bool
-        err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM Student WHERE student_id = ?)", school.ID).Scan(&studentExists)
-        if err != nil || !studentExists {
-            log.Println("Student ID not found:", err)
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Student ID does not exist"})
-            return
-        }
-
         // Вставляем школу в БД
-        query := "INSERT INTO School (unt_id, student_id, avg_unt_score) VALUES (?, ?, ?)"
-        result, err := db.Exec(query, school.UNTID, school.ID, school.AvgUNTScore)
+        query := "INSERT INTO schools (user_id, name, address, title, description, contacts, photo_url) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        result, err := db.Exec(query, userID, school.Name, school.Address, school.Title, school.Description, school.Contacts, school.PhotoURL)
         if err != nil {
             log.Println("SQL Insert Error:", err)
             utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create school"})
@@ -71,14 +67,14 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
         }
 
         id, _ := result.LastInsertId()
-        school.SchoolID = int(id)
+        school.SchoolID = int(id) // Получаем ID созданной школы
 
         utils.ResponseJSON(w, school)
     }
 }
 func (sc SchoolController) GetSchools(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		rows, err := db.Query("SELECT school_id, unt_id, student_id, avg_unt_score FROM School")
+		rows, err := db.Query("SELECT school_id, name, address, title, description, contacts, photo_url FROM schools")
 		if err != nil {
 			log.Println("SQL Select Error:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get schools"})
@@ -89,7 +85,7 @@ func (sc SchoolController) GetSchools(db *sql.DB) http.HandlerFunc {
 		var schools []models.School
 		for rows.Next() {
 			var school models.School
-			if err := rows.Scan(&school.SchoolID, &school.UNTID, &school.ID, &school.AvgUNTScore); err != nil {
+			if err := rows.Scan(&school.SchoolID, &school.Name, &school.Address, &school.Title, &school.Description, &school.Contacts, &school.PhotoURL); err != nil {
 				log.Println("SQL Scan Error:", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse schools"})
 				return
@@ -100,43 +96,46 @@ func (sc SchoolController) GetSchools(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, schools)
 	}
 }
-func (sc SchoolController) CreateStudent(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var student models.Student
-		if err := json.NewDecoder(r.Body).Decode(&student); err != nil {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
-			return
-		}
+func (sc SchoolController) GetSchoolForDirector(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Проверяем токен и получаем userID
+        userID, err := utils.VerifyToken(r)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+            return
+        }
 
-		query := `INSERT INTO Student (first_name, last_name, patronymic, iin) VALUES(?, ?, ?, ?)`
-		_, err := db.Exec(query, student.FirstName, student.LastName, student.Patronymic, student.IIN)
-		if err != nil {
-			log.Println("SQL Error:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create student"})
-			return
-		}
+        // Получаем роль пользователя
+        var userRole string
+        err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user role"})
+            return
+        }
 
-		utils.ResponseJSON(w, "Student created successfully")
-	}
-}
-func (sc SchoolController) CreateUNTType(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var untType models.UNTType
-		if err := json.NewDecoder(r.Body).Decode(&untType); err != nil {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
-			return
-		}
+        // Проверяем, что пользователь имеет роль "director"
+        if userRole != "director" {
+            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view this school"})
+            return
+        }
 
-		query := `INSERT INTO UNT_Type (first_type_id, second_type_id) VALUES(?, ?)`
-		_, err := db.Exec(query, untType.FirstTypeID, untType.SecondTypeID)
-		if err != nil {
-			log.Println("SQL Error:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create UNT Type"})
-			return
-		}
+        // Получаем информацию о школе, связанной с директором
+        var school models.School
+        err = db.QueryRow("SELECT school_id, name, address, title, description, contacts, photo_url FROM schools WHERE user_id = ?", userID).Scan(
+            &school.SchoolID, &school.Name, &school.Address, &school.Title, &school.Description, &school.Contacts, &school.PhotoURL,
+        )
+        if err != nil {
+            if err == sql.ErrNoRows {
+                utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No school found for this director"})
+            } else {
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching school"})
+            }
+            return
+        }
 
-		utils.ResponseJSON(w, "UNT Type created successfully")
-	}
+        // Возвращаем данные о школе
+        utils.ResponseJSON(w, school)
+    }
 }
 func (sc SchoolController) CalculateScore(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
