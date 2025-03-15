@@ -5,7 +5,8 @@ import (
 	"ranking-school/utils"
 )
 
-type Controller struct{}
+type Controller struct{
+}
 
 func (c Controller) ProtectedEndpoint() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

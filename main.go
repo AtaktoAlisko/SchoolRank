@@ -51,14 +51,14 @@ func main() {
 	router.HandleFunc("/delete-account", controller.DeleteAccount(db)).Methods("DELETE")
 	router.HandleFunc("/edit-profile", controller.TokenVerifyMiddleware(controller.EditProfile(db))).Methods("PUT")
 	router.HandleFunc("/update-password", controller.TokenVerifyMiddleware(controller.UpdatePassword(db))).Methods("PUT")
-
+	router.HandleFunc("/admin/change-role", controller.ChangeUserRole(db)).Methods("POST")
 
 	// *** Школы ***
 	router.HandleFunc("/schools", schoolController.GetSchools(db)).Methods("GET")
-	router.HandleFunc("/schools", schoolController.CreateSchool(db)).Methods("POST")
+	router.HandleFunc("/schools/create", schoolController.CreateSchool(db)).Methods("POST")
 
 	// *** UNT Score ***
-	    router.HandleFunc("/unt_scores", untScoreController.GetUNTScores(db)).Methods("GET")
+	router.HandleFunc("/unt_scores", untScoreController.GetUNTScores(db)).Methods("GET")
 	router.HandleFunc("/unt_scores/create", untScoreController.CreateUNTScore(db)).Methods("POST")
 	router.HandleFunc("/unt_scores/{student_id}", untScoreController.GetUNTScoreByStudent(db)).Methods("GET")
 

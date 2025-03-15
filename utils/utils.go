@@ -46,21 +46,29 @@ func GenerateToken(user models.User) (string, error) {
         return "", errors.New("SECRET environment variable is not set")
     }
 
-    // Создаем payload для токена
-    claims := jwt.MapClaims{
-        "iss": "course",
-        "user_id": user.ID, // Добавляем user_id
+    // Ensure the user has either email or phone
+    if user.Email == "" && user.Phone == "" {
+        return "", errors.New("user must have either email or phone")
     }
 
-    // Добавляем email или phone в зависимости от того, что предоставил пользователь
+    // Create the claims for the token
+    claims := jwt.MapClaims{
+        "iss": "course",    // Issuer of the token
+        "user_id": user.ID, // Add user ID claim
+        "role": user.Role,  // Add role claim (make sure this exists in your user model)
+    }
+
+    // Add email or phone depending on what the user provided
     if user.Email != "" {
         claims["email"] = user.Email
     } else if user.Phone != "" {
         claims["phone"] = user.Phone
     }
 
-    // Генерация токена
+    // Generate the token
     token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+    // Sign the token with the secret
     tokenString, err := token.SignedString([]byte(secret))
     if err != nil {
         return "", err

@@ -22,6 +22,7 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
 		var user models.User
 		var error models.Error
 
+		// Декодируем запрос
 		err := json.NewDecoder(r.Body).Decode(&user)
 		if err != nil {
 			error.Message = "Invalid request body."
@@ -29,23 +30,17 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Устанавливаем роль "user" по умолчанию
+		user.Role = "user"  // Роль будет всегда "user" при регистрации
+
+		// Проверяем, что email или телефон предоставлены
 		if user.Email == "" && user.Phone == "" {
 			error.Message = "Email or phone is required."
 			utils.RespondWithError(w, http.StatusBadRequest, error)
 			return
 		}
-		validRoles := map[string]bool{
-			"student":        true,
-			"parent":         true,
-			"teacher":        true,
-			"vice_principal": true,
-			"director":       true,
-		}
-		if !validRoles[user.Role] {
-			error.Message = "Invalid role. Allowed roles: student, parent, teacher, vice_principal, director."
-			utils.RespondWithError(w, http.StatusBadRequest, error)
-			return
-		}
+
+		// Проверяем, что формат email или телефона правильный
 		var isEmail bool
 		if user.Email != "" && strings.Contains(user.Email, "@") {
 			isEmail = true
@@ -56,11 +51,15 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
 			utils.RespondWithError(w, http.StatusBadRequest, error)
 			return
 		}
+
+		// Проверяем, что пароль не пустой
 		if user.Password == "" {
 			error.Message = "Password is required."
 			utils.RespondWithError(w, http.StatusBadRequest, error)
 			return
 		}
+
+		// Проверяем, существует ли уже email или телефон в базе
 		var existingID int
 		var query string
 		var identifier string
@@ -84,6 +83,8 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
 			utils.RespondWithError(w, http.StatusInternalServerError, error)
 			return
 		}
+
+		// Хэшируем пароль
 		hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 		if err != nil {
 			log.Printf("Error hashing password: %v", err)
@@ -92,6 +93,8 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		user.Password = string(hash)
+
+		// Генерация OTP кода для верификации
 		otpCode, err := utils.GenerateOTP()
 		if err != nil {
 			log.Printf("Error generating OTP: %v", err)
@@ -99,6 +102,8 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
 			utils.RespondWithError(w, http.StatusInternalServerError, error)
 			return
 		}
+
+		// Генерация токена для верификации
 		verificationToken, err := utils.GenerateVerificationToken(user.Email)
 		if err != nil {
 			log.Printf("Error generating verification token: %v", err)
@@ -106,6 +111,8 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
 			utils.RespondWithError(w, http.StatusInternalServerError, error)
 			return
 		}
+
+		// Вставка данных в базу
 		if isEmail {
 			query = "INSERT INTO users (email, password, first_name, last_name, age, role, verified, otp_code, verification_token) VALUES (?, ?, ?, ?, ?, ?, false, ?, ?)"
 			_, err = db.Exec(query, user.Email, user.Password, user.FirstName, user.LastName, user.Age, user.Role, otpCode, verificationToken)
@@ -120,11 +127,14 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
 			utils.RespondWithError(w, http.StatusInternalServerError, error)
 			return
 		}
+
+		// Отправка email с OTP для верификации
 		if isEmail {
 			utils.SendVerificationEmail(user.Email, verificationToken, otpCode)
 		}
 
-		user.Password = ""  
+		user.Password = ""  // Убираем пароль из ответа
+
 		message := "User registered successfully."
 		if isEmail {
 			message += " Please verify your email with the OTP code."
@@ -138,6 +148,7 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
 		var user models.User
 		var error models.Error
 
+		// Декодируем запрос
 		err := json.NewDecoder(r.Body).Decode(&user)
 		if err != nil {
 			error.Message = "Invalid request body."
@@ -145,6 +156,7 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Проверяем, что email или телефон указаны
 		var query string
 		var identifier string
 		var hashedPassword string
@@ -249,7 +261,6 @@ func (c Controller) Logout(w http.ResponseWriter, r *http.Request) {
         return
     }
 }
-
 func (c Controller) DeleteAccount(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var errorObject models.Error
@@ -654,7 +665,6 @@ func (c Controller) ResetPassword(db *sql.DB) http.HandlerFunc {
         json.NewEncoder(w).Encode(map[string]string{"message": "Password reset and email verified successfully"})
     }
 }
-
 func (c Controller) ResetPasswordConfirm(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var requestData struct {
@@ -838,43 +848,49 @@ func (c Controller) ForgotPassword(db *sql.DB) http.HandlerFunc {
     }
 }
 func (c *Controller) GetMe(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Проверяем токен и получаем userID
-		id, err := utils.VerifyToken(r)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
-			return
-		}
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Проверяем токен и получаем userID
+        id, err := utils.VerifyToken(r)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+            return
+        }
 
-		// Запрос к базе для получения данных пользователя
-		var user models.User
-		var email sql.NullString // Используем sql.NullString для обработки NULL
-		var phone sql.NullString // Используем sql.NullString для обработки NULL
+        // Запрос к базе для получения данных пользователя
+        var user models.User
+        var email sql.NullString // Используем sql.NullString для обработки NULL
+        var phone sql.NullString // Используем sql.NullString для обработки NULL
+        var role sql.NullString  // Добавляем поле для роли пользователя
 
-		err = db.QueryRow("SELECT id, first_name, last_name, email, phone FROM users WHERE id = ?", id).
-			Scan(&user.ID, &user.FirstName, &user.LastName, &email, &phone)
+        err = db.QueryRow("SELECT id, first_name, last_name, email, phone, role FROM users WHERE id = ?", id).
+            Scan(&user.ID, &user.FirstName, &user.LastName, &email, &phone, &role)
 
-		if err != nil {
-			if err == sql.ErrNoRows {
-				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "User not found"})
-			} else {
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: err.Error()})
-			}
-			return
-		}
+        if err != nil {
+            if err == sql.ErrNoRows {
+                utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "User not found"})
+            } else {
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: err.Error()})
+            }
+            return
+        }
 
-		// Если email не NULL, присваиваем его
-		if email.Valid {
-			user.Email = email.String
-		}
+        // Если email не NULL, присваиваем его
+        if email.Valid {
+            user.Email = email.String
+        }
 
-		// Если phone не NULL, присваиваем его
-		if phone.Valid {
-			user.Phone = phone.String
-		}
+        // Если phone не NULL, присваиваем его
+        if phone.Valid {
+            user.Phone = phone.String
+        }
 
-		utils.ResponseJSON(w, user)
-	}
+        // Если роль не NULL, присваиваем роль
+        if role.Valid {
+            user.Role = role.String
+        }
+
+        utils.ResponseJSON(w, user)
+    }
 }
 func (c Controller) ConfirmResetPassword(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
@@ -961,6 +977,72 @@ func GenerateRandomCode() (string, error) {
 	}
 	return fmt.Sprintf("%x", code[:6]), nil
 }
+func (c Controller) ChangeUserRole(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        var requestData struct {
+            UserID int    `json:"user_id"`
+            Role   string `json:"role"`
+        }
+
+        // Декодируем тело запроса для получения user_id и новой роли
+        err := json.NewDecoder(r.Body).Decode(&requestData)
+        if err != nil || requestData.UserID == 0 || requestData.Role == "" {
+            log.Printf("Invalid request body: %v", err)
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
+            return
+        }
+
+        // Проверяем, что роль правильная (например, "user", "director", "superadmin")
+        if requestData.Role != "user" && requestData.Role != "director" && requestData.Role != "superadmin" {
+            log.Printf("Invalid role provided: %s", requestData.Role)
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid role"})
+            return
+        }
+
+        // Получаем ID пользователя из токена
+        userID, err := utils.VerifyToken(r)
+        if err != nil {
+            log.Printf("Unauthorized access: %v", err)
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+            return
+        }
+
+        // Проверяем роль пользователя (если это "admin", он может менять роль других пользователей)
+        var userRole string
+        err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+        if err != nil {
+            log.Printf("Error fetching user role: %v", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user role"})
+            return
+        }
+
+        // Если роль пользователя не admin, он может изменить только свою роль
+        if userRole != "superadmin" && userID != requestData.UserID {
+            log.Printf("Forbidden: User %d is trying to change another user's role", userID)
+            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only change your own role"})
+            return
+        }
+
+        // Обновляем роль в базе данных
+        _, err = db.Exec("UPDATE users SET role = ? WHERE id = ?", requestData.Role, requestData.UserID)
+        if err != nil {
+            log.Printf("Failed to update role for user %d: %v", requestData.UserID, err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update role"})
+            return
+        }
+
+        // Отправляем успешный ответ
+        utils.ResponseJSON(w, map[string]string{"message": "User role updated successfully"})
+    }
+}
+
+
+
+
+
+
+
+
 
 
 

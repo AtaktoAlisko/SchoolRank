@@ -37,6 +37,16 @@ func (usc UNTScoreController) CreateUNTScore(db *sql.DB) http.HandlerFunc {
             untScore.ReadingLiteracy = 0
         }
 
+        // Log to verify values are correctly parsed
+        log.Printf("FirstSubjectScore: %d, SecondSubjectScore: %d, HistoryKazakhstan: %d, MathematicalLiteracy: %d, ReadingLiteracy: %d\n",
+            untScore.FirstSubjectScore, untScore.SecondSubjectScore, untScore.HistoryKazakhstan, untScore.MathematicalLiteracy, untScore.ReadingLiteracy)
+
+        // Calculate total score based on subject scores directly in Go
+        totalScore := untScore.FirstSubjectScore + untScore.SecondSubjectScore + untScore.HistoryKazakhstan + untScore.MathematicalLiteracy + untScore.ReadingLiteracy
+
+        // Log to verify total score calculation
+        log.Printf("Calculated Total Score: %d\n", totalScore)
+
         // Check if UNT_Type and Student exists
         var exists bool
         if untScore.UNTTypeID != 0 {
@@ -55,33 +65,6 @@ func (usc UNTScoreController) CreateUNTScore(db *sql.DB) http.HandlerFunc {
             }
         }
 
-        // Calculate total score based on subject scores
-        var totalScore int
-        if untScore.UNTTypeID != 0 {
-            err := db.QueryRow(`
-                SELECT 
-                    COALESCE(SUM(fs.score), 0) + 
-                    COALESCE(MAX(ft.history_of_kazakhstan), 0) + 
-                    COALESCE(MAX(ft.mathematical_literacy), 0) +  
-                    COALESCE(MAX(ft.reading_literacy), 0) 
-                FROM UNT_Score us
-                LEFT JOIN UNT_Type ut ON us.unt_type_id = ut.unt_type_id
-                LEFT JOIN First_Type ft ON ut.first_type_id = ft.first_type_id
-                LEFT JOIN First_Subject fs ON ft.first_subject_id = fs.first_subject_id
-                LEFT JOIN Second_Subject ss ON ft.second_subject_id = ss.second_subject_id
-                LEFT JOIN Second_Type st ON ut.second_type_id = st.second_type_id
-                WHERE us.unt_type_id = ?
-            `, untScore.UNTTypeID).Scan(&totalScore)
-
-            if err != nil {
-                log.Println("Error calculating total score:", err)
-                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to calculate total score"})
-                return
-            }
-        } else {
-            totalScore = untScore.FirstSubjectScore + untScore.SecondSubjectScore + untScore.HistoryKazakhstan + untScore.MathematicalLiteracy + untScore.ReadingLiteracy
-        }
-
         // Insert data into UNT_Score table
         query := `INSERT INTO UNT_Score (year, unt_type_id, student_id, total_score) VALUES (?, ?, ?, ?)`
         _, err := db.Exec(query, untScore.Year, untScore.UNTTypeID, untScore.StudentID, totalScore)
@@ -94,6 +77,8 @@ func (usc UNTScoreController) CreateUNTScore(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, "UNT Score created successfully")
     }
 }
+
+
 func (sc UNTScoreController) GetUNTScores(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         query := `

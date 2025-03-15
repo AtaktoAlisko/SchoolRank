@@ -12,47 +12,69 @@ import (
 type SchoolController struct{}
 
 func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var school models.School
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Проверяем токен и получаем userID
+        userID, err := utils.VerifyToken(r)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+            return
+        }
 
-		if err := json.NewDecoder(r.Body).Decode(&school); err != nil {
-			log.Println("JSON Decode Error:", err)
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
-			return
-		}
+        // Получаем роль пользователя из базы данных
+        var userRole string
+        err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+        if err != nil {
+            log.Println("Error fetching user role:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user role"})
+            return
+        }
 
-		// Проверяем существование UNT Score
-		var untExists bool
-		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM UNT_Score WHERE unt_score_id = ?)", school.UNTID).Scan(&untExists)
-		if err != nil || !untExists {
-			log.Println("UNT Score ID not found:", err)
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "UNT Score ID does not exist"})
-			return
-		}
+        // Проверяем, что пользователь имеет роль "director" или "admin"
+        if userRole != "director" && userRole != "superadmin" {
+            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create a school"})
+            return
+        }
 
-		// Проверяем существование студента
-		var studentExists bool
-		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM Student WHERE student_id = ?)", school.ID).Scan(&studentExists)
-		if err != nil || !studentExists {
-			log.Println("Student ID not found:", err)
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Student ID does not exist"})
-			return
-		}
+        // Декодируем запрос на создание школы
+        var school models.School
+        if err := json.NewDecoder(r.Body).Decode(&school); err != nil {
+            log.Println("JSON Decode Error:", err)
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
+            return
+        }
 
-		// Вставляем школу в БД
-		query := "INSERT INTO School (unt_id, student_id, avg_unt_score) VALUES (?, ?, ?)"
-		result, err := db.Exec(query, school.UNTID, school.ID, school.AvgUNTScore)
-		if err != nil {
-			log.Println("SQL Insert Error:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create school"})
-			return
-		}
+        // Проверяем существование UNT Score
+        var untExists bool
+        err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM UNT_Score WHERE unt_score_id = ?)", school.UNTID).Scan(&untExists)
+        if err != nil || !untExists {
+            log.Println("UNT Score ID not found:", err)
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "UNT Score ID does not exist"})
+            return
+        }
 
-		id, _ := result.LastInsertId()
-		school.SchoolID = int(id)
+        // Проверяем существование студента
+        var studentExists bool
+        err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM Student WHERE student_id = ?)", school.ID).Scan(&studentExists)
+        if err != nil || !studentExists {
+            log.Println("Student ID not found:", err)
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Student ID does not exist"})
+            return
+        }
 
-		utils.ResponseJSON(w, school)
-	}
+        // Вставляем школу в БД
+        query := "INSERT INTO School (unt_id, student_id, avg_unt_score) VALUES (?, ?, ?)"
+        result, err := db.Exec(query, school.UNTID, school.ID, school.AvgUNTScore)
+        if err != nil {
+            log.Println("SQL Insert Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create school"})
+            return
+        }
+
+        id, _ := result.LastInsertId()
+        school.SchoolID = int(id)
+
+        utils.ResponseJSON(w, school)
+    }
 }
 func (sc SchoolController) GetSchools(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

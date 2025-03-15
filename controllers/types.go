@@ -19,8 +19,6 @@ func nullableValue(value interface{}) interface{} {
 	return value
 }
 
-// Создание FirstType
-// Создание FirstType
 func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var firstType models.FirstType
@@ -62,8 +60,6 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, map[string]string{"message": "First Type created successfully"})
     }
 }
-
-// Getting all First Types
 func (c *TypeController) GetFirstTypes(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         query := `SELECT 
