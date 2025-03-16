@@ -3,24 +3,28 @@ package controllers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"ranking-school/models"
 	"ranking-school/utils"
+	"time"
 )
 
 type SchoolController struct{}
 
+
 func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
-        // Проверяем токен и получаем userID
+        // 1. Проверяем токен и получаем userID
         userID, err := utils.VerifyToken(r)
         if err != nil {
+            // Если токен неверный/просрочен — 401 Unauthorized
             utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
             return
         }
 
-        // Получаем роль пользователя из базы данных
+        // 2. Проверяем роль пользователя (director или superadmin)
         var userRole string
         err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
         if err != nil {
@@ -28,47 +32,65 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
             utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user role"})
             return
         }
-
-        // Проверяем, что пользователь имеет роль "director" или "superadmin"
         if userRole != "director" && userRole != "superadmin" {
             utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create a school"})
             return
         }
 
-        // Проверяем, есть ли уже школа для этого директора
-        var existingSchoolID int
-        err = db.QueryRow("SELECT school_id FROM schools WHERE user_id = ?", userID).Scan(&existingSchoolID)
-        if err == nil {
-            // Если школа уже существует, возвращаем ошибку
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "You already have a school associated with your account"})
+        // 3. Считываем файл из form-data (поле "photo")
+        file, _, err := r.FormFile("photo")
+        if err != nil {
+            log.Println("Error reading file:", err)
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Error reading file"})
             return
-        } else if err != sql.ErrNoRows {
-            // Ошибка при запросе
-            log.Println("Error checking for existing school:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking for existing school"})
+        }
+        defer file.Close()
+
+        // 4. Генерируем уникальное имя файла, чтобы фото не перезаписывались
+        // Например, используем userID и текущий Unix-временной штамп
+        uniqueFileName := fmt.Sprintf("school-%d-%d.jpg", userID, time.Now().Unix())
+
+        // 5. Загружаем файл в S3
+        photoURL, err := utils.UploadFileToS3(file, uniqueFileName)
+        if err != nil {
+            log.Println("Error uploading file:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to upload file"})
             return
         }
 
-        // Декодируем запрос на создание школы
+        // 6. Считываем остальные поля из form-data (так как JSON Decode не подойдёт для multipart/form-data)
         var school models.School
-        if err := json.NewDecoder(r.Body).Decode(&school); err != nil {
-            log.Println("JSON Decode Error:", err)
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
-            return
-        }
+        school.Name = r.FormValue("name")
+        school.Address = r.FormValue("address")
+        school.Title = r.FormValue("title")
+        school.Description = r.FormValue("description")
+        school.Contacts = r.FormValue("contacts")
+        school.PhotoURL = photoURL // URL к файлу в S3
 
-        // Вставляем школу в БД
-        query := "INSERT INTO schools (user_id, name, address, title, description, contacts, photo_url) VALUES (?, ?, ?, ?, ?, ?, ?)"
-        result, err := db.Exec(query, userID, school.Name, school.Address, school.Title, school.Description, school.Contacts, school.PhotoURL)
+        // 7. Сохраняем данные школы в таблицу `schools`
+        query := `
+            INSERT INTO schools (name, address, title, description, contacts, photo_url)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `
+        result, err := db.Exec(query,
+            school.Name,
+            school.Address,
+            school.Title,
+            school.Description,
+            school.Contacts,
+            school.PhotoURL,
+        )
         if err != nil {
             log.Println("SQL Insert Error:", err)
             utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create school"})
             return
         }
 
+        // Получаем ID вставленной записи
         id, _ := result.LastInsertId()
-        school.SchoolID = int(id) // Получаем ID созданной школы
+        school.SchoolID = int(id)
 
+        // 8. Возвращаем результат в JSON
         utils.ResponseJSON(w, school)
     }
 }

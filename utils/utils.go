@@ -1,13 +1,16 @@
 package utils
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math/big"
+	"mime/multipart"
 	"net/http"
 	"net/smtp"
 	"os"
@@ -16,6 +19,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/golang-jwt/jwt"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -236,6 +243,61 @@ func NullableValue(value interface{}) interface{} {
         return nil
     }
     return value
+}
+
+
+func UploadFileToS3(file multipart.File, fileName string) (string, error) {
+    // 1. Считываем ключи и регион из окружения
+    accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
+    secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
+    region := os.Getenv("AWS_REGION") // Например, "eu-north-1"
+
+    if accessKey == "" || secretKey == "" || region == "" {
+        return "", fmt.Errorf("AWS credentials or region not set in environment")
+    }
+
+    // 2. Создаём AWS-сессию
+    sess, err := session.NewSession(&aws.Config{
+        Region: aws.String(region),
+        Credentials: credentials.NewStaticCredentials(
+            accessKey,
+            secretKey,
+            "",
+        ),
+    })
+    if err != nil {
+        return "", fmt.Errorf("failed to create AWS session: %v", err)
+    }
+
+    // 3. Клиент S3
+    svc := s3.New(sess)
+
+    // 4. Читаем файл в буфер
+    buf := new(bytes.Buffer)
+    _, err = io.Copy(buf, file)
+    if err != nil {
+        return "", fmt.Errorf("failed to read file buffer: %v", err)
+    }
+
+    // 5. Параметры загрузки
+    bucketName := "schoolrank-schoolphotos" // Ваш бакет
+    input := &s3.PutObjectInput{
+        Bucket: aws.String(bucketName),
+        Key:    aws.String(fileName),
+        Body:   bytes.NewReader(buf.Bytes()),
+        // Если бакет не поддерживает ACL, уберите:
+        // ACL: aws.String("public-read"),
+    }
+
+    // 6. Загружаем файл
+    _, err = svc.PutObject(input)
+    if err != nil {
+        return "", fmt.Errorf("failed to upload file to S3: %v", err)
+    }
+
+    // 7. Формируем URL
+    url := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", bucketName, region, fileName)
+    return url, nil
 }
 
 
