@@ -47,7 +47,6 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
         defer file.Close()
 
         // 4. Генерируем уникальное имя файла, чтобы фото не перезаписывались
-        // Например, используем userID и текущий Unix-временной штамп
         uniqueFileName := fmt.Sprintf("school-%d-%d.jpg", userID, time.Now().Unix())
 
         // 5. Загружаем файл в S3
@@ -58,7 +57,7 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // 6. Считываем остальные поля из form-data (так как JSON Decode не подойдёт для multipart/form-data)
+        // 6. Считываем остальные поля из form-data
         var school models.School
         school.Name = r.FormValue("name")
         school.Address = r.FormValue("address")
@@ -69,8 +68,8 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 
         // 7. Сохраняем данные школы в таблицу `schools`
         query := `
-            INSERT INTO schools (name, address, title, description, contacts, photo_url)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO schools (name, address, title, description, contacts, photo_url, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         `
         result, err := db.Exec(query,
             school.Name,
@@ -79,6 +78,7 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
             school.Description,
             school.Contacts,
             school.PhotoURL,
+            userID,  // Add the userID here to link the school with the user
         )
         if err != nil {
             log.Println("SQL Insert Error:", err)
@@ -118,47 +118,56 @@ func (sc SchoolController) GetSchools(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, schools)
 	}
 }
+// GetSchoolForDirector - получение школы для директора
 func (sc SchoolController) GetSchoolForDirector(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // Проверяем токен и получаем userID
-        userID, err := utils.VerifyToken(r)
-        if err != nil {
-            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
-            return
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Проверяем токен и получаем userID
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
 
-        // Получаем роль пользователя
-        var userRole string
-        err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
-        if err != nil {
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user role"})
-            return
-        }
+		// Получаем роль пользователя
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user role"})
+			return
+		}
 
-        // Проверяем, что пользователь имеет роль "director"
-        if userRole != "director" {
-            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view this school"})
-            return
-        }
+		// Проверяем, что пользователь имеет роль "director"
+		if userRole != "director" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view this school"})
+			return
+		}
 
-        // Получаем информацию о школе, связанной с директором
-        var school models.School
-        err = db.QueryRow("SELECT school_id, name, address, title, description, contacts, photo_url FROM schools WHERE user_id = ?", userID).Scan(
-            &school.SchoolID, &school.Name, &school.Address, &school.Title, &school.Description, &school.Contacts, &school.PhotoURL,
-        )
-        if err != nil {
-            if err == sql.ErrNoRows {
-                utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No school found for this director"})
-            } else {
-                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching school"})
-            }
-            return
-        }
+		// Логируем userID
+		log.Printf("Fetching school for user ID: %d", userID)
 
-        // Возвращаем данные о школе
-        utils.ResponseJSON(w, school)
-    }
+		// Получаем информацию о школе для директора
+		var school models.School
+		err = db.QueryRow(`
+			SELECT s.school_id, s.name, s.address, s.title, s.description, s.contacts, s.photo_url
+			FROM schools s
+			INNER JOIN users u ON u.school_id = s.school_id
+			WHERE u.id = ?`, userID).Scan(
+			&school.SchoolID, &school.Name, &school.Address, &school.Title, &school.Description, &school.Contacts, &school.PhotoURL,
+		)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No school found for this director"})
+			} else {
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching school"})
+			}
+			return
+		}
+
+		// Возвращаем данные о школе
+		utils.ResponseJSON(w, school)
+	}
 }
+// CalculateScore - расчет и сохранение результата UNT
 func (sc SchoolController) CalculateScore(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var score models.UNTScore

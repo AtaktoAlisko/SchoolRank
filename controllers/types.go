@@ -21,6 +21,23 @@ func nullableValue(value interface{}) interface{} {
 
 func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
+        // Получаем userID из токена
+        userID, err := utils.VerifyToken(r)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+            return
+        }
+
+        // Проверяем роль и школу директора
+        var userRole string
+        var userSchoolID sql.NullInt64
+        err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+        if err != nil || userRole != "director" || !userSchoolID.Valid {
+            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create First Type"})
+            return
+        }
+
+        // Чтение данных первого типа
         var firstType models.FirstType
         if err := json.NewDecoder(r.Body).Decode(&firstType); err != nil {
             utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
@@ -29,7 +46,7 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 
         // Проверяем существование First_Subject и Second_Subject
         var firstSubjectExists, secondSubjectExists bool
-        err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM First_Subject WHERE first_subject_id = ?)", firstType.FirstSubjectID).Scan(&firstSubjectExists)
+        err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM First_Subject WHERE first_subject_id = ?)", firstType.FirstSubjectID).Scan(&firstSubjectExists)
         if err != nil || !firstSubjectExists {
             utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "First Subject ID does not exist"})
             return
@@ -41,15 +58,16 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Вставляем First Type в БД
-        query := `INSERT INTO First_Type (first_subject_id, second_subject_id, history_of_kazakhstan, mathematical_literacy, reading_literacy) 
-                  VALUES (?, ?, ?, ?, ?)`
+        // Вставляем First Type в БД с привязкой к школе директора
+        query := `INSERT INTO First_Type (first_subject_id, second_subject_id, history_of_kazakhstan, mathematical_literacy, reading_literacy, school_id) 
+                  VALUES (?, ?, ?, ?, ?, ?)`
         _, err = db.Exec(query, 
             nullableValue(firstType.FirstSubjectID), 
             nullableValue(firstType.SecondSubjectID), 
             nullableValue(firstType.HistoryOfKazakhstan), 
             nullableValue(firstType.MathematicalLiteracy), 
-            nullableValue(firstType.ReadingLiteracy))
+            nullableValue(firstType.ReadingLiteracy),
+            userSchoolID.Int64)  // Добавляем school_id директора
 
         if err != nil {
             log.Println("SQL Error:", err)
@@ -60,6 +78,7 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, map[string]string{"message": "First Type created successfully"})
     }
 }
+
 func (c *TypeController) GetFirstTypes(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         query := `SELECT 
@@ -106,29 +125,44 @@ func (c *TypeController) GetFirstTypes(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, types)
     }
 }
-// Создание SecondType
+
 func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var secondType models.SecondType
-		if err := json.NewDecoder(r.Body).Decode(&secondType); err != nil {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
-			return
-		}
+    return func(w http.ResponseWriter, r *http.Request) {
+        var secondType models.SecondType
+        if err := json.NewDecoder(r.Body).Decode(&secondType); err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
+            return
+        }
 
-		// Вставляем Second Type в БД
-		query := `INSERT INTO Second_Type (history_of_kazakhstan, reading_literacy) VALUES (?, ?)`
-		_, err := db.Exec(query, secondType.HistoryOfKazakhstan, secondType.ReadingLiteracy)
-		if err != nil {
-			log.Println("SQL Error:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create Second Type"})
-			return
-		}
+        // Получаем userID из токена
+        userID, err := utils.VerifyToken(r)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+            return
+        }
 
-		utils.ResponseJSON(w, map[string]string{"message": "Second Type created successfully"})
-	}
+        // Проверяем роль пользователя (директор)
+        var userRole string
+        var userSchoolID sql.NullInt64
+        err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+        if err != nil || userRole != "director" || !userSchoolID.Valid {
+            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create second type"})
+            return
+        }
+
+        // Вставляем Second Type в таблицу базы данных с привязкой к школе
+        query := `INSERT INTO Second_Type (history_of_kazakhstan, reading_literacy, school_id) VALUES (?, ?, ?)`
+        _, err = db.Exec(query, secondType.HistoryOfKazakhstan, secondType.ReadingLiteracy, userSchoolID.Int64)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create Second Type"})
+            return
+        }
+
+        utils.ResponseJSON(w, map[string]string{"message": "Second Type created successfully"})
+    }
 }
 
-// Получение всех Second Types
 func (c *TypeController) GetSecondTypes(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := `SELECT second_type_id, 
