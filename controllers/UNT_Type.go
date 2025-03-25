@@ -11,7 +11,7 @@ import (
 
 type UNTTypeController struct{}
 
-// Create UNT Type by selecting either First_Type or Second_Type
+
 func (sc UNTTypeController) CreateUNTType(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var untType models.UNTType
@@ -58,9 +58,6 @@ func (sc UNTTypeController) CreateUNTType(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, "UNT Type created successfully")
 	}
 }
-
-// Get all UNT Types with their respective names
-// Get all UNT Types with their respective names
 func (sc UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         query := `
@@ -139,6 +136,26 @@ func (sc UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
                 *untType.ReadingLiteracy = int(readingLiteracy.Int64)
             }
 
+            // Calculate total score
+            totalScore := 0
+            if untType.FirstSubjectScore != nil {
+                totalScore += *untType.FirstSubjectScore
+            }
+            if untType.SecondSubjectScore != nil {
+                totalScore += *untType.SecondSubjectScore
+            }
+            if untType.HistoryKazakhstan != nil {
+                totalScore += *untType.HistoryKazakhstan
+            }
+            if untType.MathematicalLiteracy != nil {
+                totalScore += *untType.MathematicalLiteracy
+            }
+            if untType.ReadingLiteracy != nil {
+                totalScore += *untType.ReadingLiteracy
+            }
+            untType.TotalScore = new(int)
+            *untType.TotalScore = totalScore
+
             // Add the populated UNTType to the result slice
             types = append(types, untType)
         }
@@ -147,4 +164,5 @@ func (sc UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, types)
     }
 }
+
 

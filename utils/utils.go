@@ -16,6 +16,7 @@ import (
 	"os"
 	"ranking-school/models"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -300,5 +301,9 @@ func UploadFileToS3(file multipart.File, fileName string) (string, error) {
     return url, nil
 }
 
+func StrToInt(s string) (int, error) {
+	s = strings.TrimSpace(s)  // Убираем все пробельные символы (включая новую строку)
+	return strconv.Atoi(s)
+}
 
 

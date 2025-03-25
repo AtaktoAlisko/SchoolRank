@@ -11,6 +11,7 @@ import (
 
 type UNTScoreController struct{}
 
+
 func (usc UNTScoreController) CreateUNTScore(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var untScore models.UNTScore
@@ -77,24 +78,21 @@ func (usc UNTScoreController) CreateUNTScore(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, "UNT Score created successfully")
     }
 }
-
-
-func (sc UNTScoreController) GetUNTScores(db *sql.DB) http.HandlerFunc {
+func (usc *UNTScoreController) GetUNTScores(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         query := `
         SELECT 
             us.unt_score_id, 
             us.year, 
-            us.unt_type_id, 
+            COALESCE(us.unt_type_id, 0) AS unt_type_id, 
             us.student_id, 
-            us.total_score,
             fs.subject AS first_subject_name, 
-            fs.score AS first_subject_score,
+            COALESCE(fs.score, 0) AS first_subject_score,
             ss.subject AS second_subject_name, 
-            ss.score AS second_subject_score,
-            COALESCE(st.history_of_kazakhstan, ft.history_of_kazakhstan, 0) AS history_of_kazakhstan,
-            COALESCE(st.mathematical_literacy, ft.mathematical_literacy, 0) AS mathematical_literacy,
-            COALESCE(st.reading_literacy, ft.reading_literacy, 0) AS reading_literacy,
+            COALESCE(ss.score, 0) AS second_subject_score,
+            COALESCE(ft.history_of_kazakhstan, 0) AS history_of_kazakhstan,
+            COALESCE(ft.mathematical_literacy, 0) AS mathematical_literacy,
+            COALESCE(ft.reading_literacy, 0) AS reading_literacy,
             s.first_name, 
             s.last_name, 
             s.iin
@@ -103,10 +101,10 @@ func (sc UNTScoreController) GetUNTScores(db *sql.DB) http.HandlerFunc {
         LEFT JOIN First_Type ft ON ut.first_type_id = ft.first_type_id
         LEFT JOIN First_Subject fs ON ft.first_subject_id = fs.first_subject_id
         LEFT JOIN Second_Subject ss ON ft.second_subject_id = ss.second_subject_id
-        LEFT JOIN Second_Type st ON ut.second_type_id = st.second_type_id
         LEFT JOIN Student s ON us.student_id = s.student_id
         `
-        
+        log.Println("Executing query: ", query)
+
         rows, err := db.Query(query)
         if err != nil {
             log.Println("SQL Error:", err)
@@ -118,205 +116,186 @@ func (sc UNTScoreController) GetUNTScores(db *sql.DB) http.HandlerFunc {
         var scores []models.UNTScore
         for rows.Next() {
             var score models.UNTScore
-
-            // Using sql.Null* for fields that may have NULL values
-            var untTypeID, studentID, totalScore sql.NullInt64
+            var untTypeID sql.NullInt64
             var firstSubjectScore, secondSubjectScore sql.NullInt64
             var historyKazakhstan, mathematicalLiteracy, readingLiteracy sql.NullInt64
             var firstSubjectName, secondSubjectName sql.NullString
             var firstName, lastName, iin sql.NullString
 
-            // Scanning the row into appropriate variables
-            if err := rows.Scan(
-                &score.ID, &score.Year, &untTypeID, &studentID, &totalScore,
+            err := rows.Scan(
+                &score.ID, &score.Year, &untTypeID, &score.StudentID,
                 &firstSubjectName, &firstSubjectScore,
                 &secondSubjectName, &secondSubjectScore,
                 &historyKazakhstan, &mathematicalLiteracy, &readingLiteracy,
                 &firstName, &lastName, &iin,
-            ); err != nil {
+            )
+            if err != nil {
                 log.Println("Scan Error:", err)
                 utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse UNT Scores"})
                 return
             }
 
-            // Handling sql.Null* types to set actual values
+            // Заполнение значений
             if untTypeID.Valid {
                 score.UNTTypeID = int(untTypeID.Int64)
+            } else {
+                score.UNTTypeID = 0
             }
-
-            if studentID.Valid {
-                score.StudentID = int(studentID.Int64)
-            }
-
-            if totalScore.Valid {
-                score.TotalScore = int(totalScore.Int64)
-            }
-
             if firstSubjectScore.Valid {
                 score.FirstSubjectScore = int(firstSubjectScore.Int64)
             }
-
             if secondSubjectScore.Valid {
                 score.SecondSubjectScore = int(secondSubjectScore.Int64)
             }
-
             if historyKazakhstan.Valid {
                 score.HistoryKazakhstan = int(historyKazakhstan.Int64)
-            } else {
-                score.HistoryKazakhstan = 0 // default value
             }
-
             if mathematicalLiteracy.Valid {
                 score.MathematicalLiteracy = int(mathematicalLiteracy.Int64)
-            } else {
-                score.MathematicalLiteracy = 0 // default value
             }
-
             if readingLiteracy.Valid {
                 score.ReadingLiteracy = int(readingLiteracy.Int64)
-            } else {
-                score.ReadingLiteracy = 0 // default value
             }
-
             if firstSubjectName.Valid {
                 score.FirstSubjectName = firstSubjectName.String
             }
-
             if secondSubjectName.Valid {
                 score.SecondSubjectName = secondSubjectName.String
             }
-
             if firstName.Valid {
                 score.FirstName = firstName.String
             }
-
             if lastName.Valid {
                 score.LastName = lastName.String
             }
-
             if iin.Valid {
                 score.IIN = iin.String
             }
 
-            // Add to the result slice
+            // Расчет total_score
+            totalScore := score.FirstSubjectScore + score.SecondSubjectScore + score.HistoryKazakhstan + score.MathematicalLiteracy + score.ReadingLiteracy
+            score.TotalScore = totalScore
+
+            // Установка рейтинга
+            score.Rating = float64(totalScore)
+
+            // Обновление рейтинга в базе данных
+            _, err = db.Exec("UPDATE UNT_Score SET rating = ? WHERE unt_score_id = ?", score.Rating, score.ID)
+            if err != nil {
+                log.Println("Error updating rating:", err)
+            }
+
             scores = append(scores, score)
         }
 
-        // Send back the result as JSON
         utils.ResponseJSON(w, scores)
     }
 }
-func (sc *UNTScoreController) GetUNTScoreByStudent(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		studentID := r.URL.Query().Get("student_id")
-		if studentID == "" {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "student_id is required"})
-			return
-		}
+func (usc UNTScoreController) GetAverageScoreForSchool(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        schoolID := r.URL.Query().Get("school_id")
+        if schoolID == "" {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "school_id is required"})
+            return
+        }
 
-		query := `
-			SELECT us.unt_score_id, us.year, us.unt_type_id, us.student_id, us.total_score,
-			       s.first_name, s.last_name, s.iin
-			FROM UNT_Score us
-			JOIN Student s ON us.student_id = s.student_id
-			WHERE us.student_id = ?
-		`
+        // Query to retrieve total scores for students in this school
+        query := `
+            SELECT total_score
+            FROM UNT_Score us
+            JOIN Student s ON us.student_id = s.student_id
+            WHERE s.school_id = ?`
+        
+        rows, err := db.Query(query, schoolID)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get student scores"})
+            return
+        }
+        defer rows.Close()
 
-		var result models.UNTScore
-		err := db.QueryRow(query, studentID).Scan(
-			&result.ID, &result.Year, &result.UNTTypeID, &result.StudentID, &result.TotalScore,
-			&result.FirstName, &result.LastName, &result.IIN,
-		)
+        var totalScoreSum, studentCount int
+        for rows.Next() {
+            var score int
+            err := rows.Scan(&score)
+            if err != nil {
+                log.Println("Scan Error:", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse scores"})
+                return
+            }
+            totalScoreSum += score
+            studentCount++
+        }
 
-		if err != nil {
-			log.Printf("Error retrieving UNT score: %v", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve UNT score"})
-			return
-		}
+        // Debugging log to ensure calculation
+        log.Printf("Total Score Sum: %d, Student Count: %d", totalScoreSum, studentCount)
 
-		utils.ResponseJSON(w, result)
-	}
+        if studentCount == 0 {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "No students found for this school"})
+            return
+        }
+
+        // Calculate average rating
+        averageRating := float64(totalScoreSum) / float64(studentCount)
+        log.Printf("Calculated Average Rating: %f", averageRating)
+
+        // Send response with average rating
+        utils.ResponseJSON(w, map[string]float64{"average_rating": averageRating})
+    }
 }
-func (usc UNTScoreController) CalculateStudentRatings(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Запрос для получения всех студентов и их баллов
-		query := `
-			SELECT us.student_id, us.year, us.total_score, ut.first_type_id, ut.second_type_id,
-			       fs.subject AS first_subject_name, fs.score AS first_subject_score,
-			       ss.subject AS second_subject_name, ss.score AS second_subject_score,
-			       st.history_of_kazakhstan, st.reading_literacy
-			FROM UNT_Score us
-			JOIN UNT_Type ut ON us.unt_type_id = ut.unt_type_id
-			LEFT JOIN First_Type ft ON ut.first_type_id = ft.first_type_id
-			LEFT JOIN First_Subject fs ON ft.first_subject_id = fs.first_subject_id
-			LEFT JOIN Second_Subject ss ON ft.second_subject_id = ss.second_subject_id
-			LEFT JOIN Second_Type st ON ut.second_type_id = st.second_type_id
-		`
+func (usc UNTScoreController) CalculateSchoolAverageRating(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        schoolID := r.URL.Query().Get("school_id")
+        if schoolID == "" {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "school_id is required"})
+            return
+        }
 
-		rows, err := db.Query(query)
-		if err != nil {
-			log.Println("SQL Error:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get student data"})
-			return
-		}
-		defer rows.Close()
+        // Получаем все total_score для учеников этой школы
+        query := `
+            SELECT 
+                (COALESCE(fs.score, 0) + COALESCE(ss.score, 0) +
+                 COALESCE(ft.history_of_kazakhstan, 0) + 
+                 COALESCE(ft.mathematical_literacy, 0) + 
+                 COALESCE(ft.reading_literacy, 0)) AS total_score
+            FROM UNT_Score us
+            JOIN Student s ON us.student_id = s.student_id
+            LEFT JOIN UNT_Type ut ON us.unt_type_id = ut.unt_type_id
+            LEFT JOIN First_Type ft ON ut.first_type_id = ft.first_type_id
+            LEFT JOIN First_Subject fs ON ft.first_subject_id = fs.first_subject_id
+            LEFT JOIN Second_Subject ss ON ft.second_subject_id = ss.second_subject_id
+            WHERE s.school_id = ?
+        `
 
-		// Массив для хранения всех студентов и их баллов
-		var students []models.StudentRating
-		var totalMaxScore int
-		var totalStudentScore int
+        rows, err := db.Query(query, schoolID)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get UNT Scores"})
+            return
+        }
+        defer rows.Close()
 
-		for rows.Next() {
-			var rating models.StudentRating
-			var firstSubjectScore, secondSubjectScore, historyKazakhstan, readingLiteracy int
-			var firstSubjectName, secondSubjectName string
+        var totalScoreSum, studentCount int
+        for rows.Next() {
+            var totalScore int
+            if err := rows.Scan(&totalScore); err != nil {
+                log.Println("Scan Error:", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse UNT Scores"})
+                return
+            }
+            totalScoreSum += totalScore
+            studentCount++
+        }
 
-			// Сканируем данные о студенте и его баллы
-			err := rows.Scan(
-				&rating.StudentID, &rating.Year, &rating.TotalScore,
-				&rating.FirstTypeID, &rating.SecondTypeID,
-				&firstSubjectName, &firstSubjectScore,
-				&secondSubjectName, &secondSubjectScore,
-				&historyKazakhstan, &readingLiteracy,
-			)
-			if err != nil {
-				log.Println("Error scanning data:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to scan student data"})
-				return
-			}
+        if studentCount == 0 {
+            utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No students found for this school"})
+            return
+        }
 
-			// Рассчитываем процент для каждого студента
-			rating.FirstSubjectName = firstSubjectName
-			rating.SecondSubjectName = secondSubjectName
-			rating.FirstSubjectScore = firstSubjectScore
-			rating.SecondSubjectScore = secondSubjectScore
-			rating.HistoryKazakhstan = historyKazakhstan
-			rating.ReadingLiteracy = readingLiteracy
+        averageRating := float64(totalScoreSum) / float64(studentCount)
 
-			// В данном случае используем максимальный возможный балл для 1 типа (140) и 2 типа (30) экзамена
-			maxScore := 140
-			if rating.SecondTypeID != nil {
-				maxScore = 30
-			}
-
-			rating.Rating = float64(rating.TotalScore) / float64(maxScore) * 100
-
-			// Добавляем информацию о студенте в список
-			students = append(students, rating)
-			totalMaxScore += maxScore
-			totalStudentScore += rating.TotalScore
-		}
-
-		// Рассчитываем общий рейтинг для класса
-		classAverage := (float64(totalStudentScore) / float64(totalMaxScore)) * 100
-
-		// Добавляем общий рейтинг в ответ
-		utils.ResponseJSON(w, struct {
-			AverageRating float64         `json:"average_rating"`
-			Students      []models.StudentRating `json:"students"`
-		}{
-			AverageRating: classAverage,
-			Students:      students,
-		})
-	}
+        utils.ResponseJSON(w, map[string]interface{}{
+            "average_rating": averageRating,
+        })
+    }
 }

@@ -90,7 +90,20 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
         id, _ := result.LastInsertId()
         school.SchoolID = int(id)
 
-        // 8. Возвращаем результат в JSON
+        // 8. Обновляем поле school_id в таблице users для текущего пользователя
+        updateQuery := `
+            UPDATE users
+            SET school_id = ?
+            WHERE id = ?
+        `
+        _, err = db.Exec(updateQuery, school.SchoolID, userID)
+        if err != nil {
+            log.Println("SQL Update Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update user with school_id"})
+            return
+        }
+
+        // 9. Возвращаем результат в JSON
         utils.ResponseJSON(w, school)
     }
 }
@@ -191,3 +204,133 @@ func (sc SchoolController) CalculateScore(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, "Score calculated and saved successfully")
 	}
 }
+// Deleting school only if it is not linked to a user
+func (sc SchoolController) DeleteSchool(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Get school_id from request parameters
+		schoolID := r.URL.Query().Get("school_id")
+		if schoolID == "" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School ID is required"})
+			return
+		}
+
+		// First, check if there are any users linked to this school
+		var userCount int
+		err := db.QueryRow("SELECT COUNT(*) FROM users WHERE school_id = ?", schoolID).Scan(&userCount)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to check users"})
+			return
+		}
+
+		// If there are users assigned to this school, prevent deletion
+		if userCount > 0 {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "This school is assigned to a user and cannot be deleted"})
+			return
+		}
+
+		// Now delete the school
+		query := "DELETE FROM schools WHERE school_id = ?"
+		_, err = db.Exec(query, schoolID)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete school"})
+			return
+		}
+
+		// Return success message
+		utils.ResponseJSON(w, map[string]string{"message": "School deleted successfully"})
+	}
+}
+func (sc SchoolController) CalculateAverageRating(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // 1. Get the school ID from query parameters
+        schoolID := r.URL.Query().Get("school_id")
+        if schoolID == "" {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School ID is required"})
+            return
+        }
+
+        // 2. Calculate the average rating from various sources
+
+        // Get the total score from UNT scores for this school
+        var totalUNTScore int
+        var totalStudents int
+        rows, err := db.Query(`
+            SELECT COUNT(*) AS student_count, SUM(total_score) AS total_score
+            FROM UNT_Score us
+            JOIN Student s ON us.student_id = s.student_id
+            WHERE s.school_id = ?
+        `, schoolID)
+
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to calculate UNT score"})
+            return
+        }
+        defer rows.Close()
+
+        if rows.Next() {
+            err = rows.Scan(&totalStudents, &totalUNTScore)
+            if err != nil {
+                log.Println("Error scanning UNT data:", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error scanning UNT data"})
+                return
+            }
+        }
+
+        // Calculate average UNT score
+        var averageUNTScore float64
+        if totalStudents > 0 {
+            averageUNTScore = float64(totalUNTScore) / float64(totalStudents)
+        }
+
+        // 3. Get reviews score (e.g., average of reviews from a `reviews` table)
+        var averageReviewScore float64
+        err = db.QueryRow(`
+            SELECT AVG(review_score) 
+            FROM reviews 
+            WHERE school_id = ?
+        `, schoolID).Scan(&averageReviewScore)
+        if err != nil {
+            log.Println("SQL Error fetching reviews:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get reviews score"})
+            return
+        }
+
+        // 4. Get olympiad participation score
+        var olympiadScore int
+        err = db.QueryRow(`
+            SELECT SUM(olympiad_points) 
+            FROM olympiad_results
+            WHERE school_id = ?
+        `, schoolID).Scan(&olympiadScore)
+        if err != nil {
+            log.Println("SQL Error fetching olympiad results:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get olympiad results"})
+            return
+        }
+
+        // 5. Calculate the final average rating based on all criteria
+        finalAverageRating := (averageUNTScore * 0.4) + (averageReviewScore * 0.3) + (float64(olympiadScore) * 0.3)
+
+        // Return the result as JSON
+        utils.ResponseJSON(w, map[string]interface{}{
+            "school_id":            schoolID,
+            "average_rating":       finalAverageRating,
+            "average_unt_score":    averageUNTScore,
+            "average_review_score": averageReviewScore,
+            "olympiad_score":       olympiadScore,
+        })
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+

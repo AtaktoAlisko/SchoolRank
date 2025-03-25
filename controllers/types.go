@@ -81,20 +81,22 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 
 func (c *TypeController) GetFirstTypes(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
-        query := `SELECT 
-                        ft.first_type_id, 
-                        ft.first_subject_id, 
-                        fs.subject AS first_subject_name, 
-                        COALESCE(fs.score, 0) AS first_subject_score,
-                        ft.second_subject_id, 
-                        ss.subject AS second_subject_name, 
-                        COALESCE(ss.score, 0) AS second_subject_score,
-                        COALESCE(ft.history_of_kazakhstan, 0) AS history_of_kazakhstan, 
-                        COALESCE(ft.mathematical_literacy, 0) AS mathematical_literacy, 
-                        COALESCE(ft.reading_literacy, 0) AS reading_literacy
-                  FROM First_Type ft
-                  LEFT JOIN First_Subject fs ON ft.first_subject_id = fs.first_subject_id
-                  LEFT JOIN Second_Subject ss ON ft.second_subject_id = ss.second_subject_id`
+        query := `
+        SELECT 
+            ft.first_type_id, 
+            ft.first_subject_id, 
+            fs.subject AS first_subject_name, 
+            COALESCE(fs.score, 0) AS first_subject_score,
+            ft.second_subject_id, 
+            ss.subject AS second_subject_name, 
+            COALESCE(ss.score, 0) AS second_subject_score,
+            COALESCE(ft.history_of_kazakhstan, 0) AS history_of_kazakhstan, 
+            COALESCE(ft.mathematical_literacy, 0) AS mathematical_literacy, 
+            COALESCE(ft.reading_literacy, 0) AS reading_literacy,
+            (COALESCE(fs.score, 0) + COALESCE(ss.score, 0) + COALESCE(ft.history_of_kazakhstan, 0) + COALESCE(ft.mathematical_literacy, 0) + COALESCE(ft.reading_literacy, 0)) AS total_score
+        FROM First_Type ft
+        LEFT JOIN First_Subject fs ON ft.first_subject_id = fs.first_subject_id
+        LEFT JOIN Second_Subject ss ON ft.second_subject_id = ss.second_subject_id`
 
         rows, err := db.Query(query)
         if err != nil {
@@ -114,6 +116,7 @@ func (c *TypeController) GetFirstTypes(db *sql.DB) http.HandlerFunc {
                 &firstType.HistoryOfKazakhstan, 
                 &firstType.MathematicalLiteracy, 
                 &firstType.ReadingLiteracy,
+                &firstType.TotalScore, // Обновляем на total_score
             ); err != nil {
                 log.Println("Scan Error:", err)
                 utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse First Types"})
@@ -125,6 +128,7 @@ func (c *TypeController) GetFirstTypes(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, types)
     }
 }
+
 
 func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
@@ -150,9 +154,20 @@ func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Вставляем Second Type в таблицу базы данных с привязкой к школе
-        query := `INSERT INTO Second_Type (history_of_kazakhstan, reading_literacy, school_id) VALUES (?, ?, ?)`
-        _, err = db.Exec(query, secondType.HistoryOfKazakhstan, secondType.ReadingLiteracy, userSchoolID.Int64)
+        // Рассчитываем total_score с учетом всех четырех компонентов
+        totalScore := secondType.HistoryOfKazakhstan + secondType.ReadingLiteracy + secondType.CreativeExam1 + secondType.CreativeExam2
+
+        // Вставляем Second Type в таблицу базы данных с привязкой к школе и total_score
+        query := `INSERT INTO Second_Type (history_of_kazakhstan, reading_literacy, creative_exam1, creative_exam2, school_id, total_score) 
+                  VALUES (?, ?, ?, ?, ?, ?)`
+        _, err = db.Exec(query, 
+            secondType.HistoryOfKazakhstan, 
+            secondType.ReadingLiteracy, 
+            secondType.CreativeExam1, 
+            secondType.CreativeExam2,
+            userSchoolID.Int64, 
+            totalScore)
+
         if err != nil {
             log.Println("SQL Error:", err)
             utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create Second Type"})
@@ -164,31 +179,44 @@ func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
 }
 
 func (c *TypeController) GetSecondTypes(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		query := `SELECT second_type_id, 
-						 COALESCE(history_of_kazakhstan, 0), 
-						 COALESCE(reading_literacy, 0) 
-				  FROM Second_Type`
-		
-		rows, err := db.Query(query)
-		if err != nil {
-			log.Println("SQL Error:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get Second Types"})
-			return
-		}
-		defer rows.Close()
+    return func(w http.ResponseWriter, r *http.Request) {
+        query := `
+        SELECT second_type_id, 
+               COALESCE(history_of_kazakhstan, 0) AS history_of_kazakhstan, 
+               COALESCE(reading_literacy, 0) AS reading_literacy,
+               COALESCE(creative_exam1, 0) AS creative_exam1,
+               COALESCE(creative_exam2, 0) AS creative_exam2,
+               (COALESCE(history_of_kazakhstan, 0) + 
+                COALESCE(reading_literacy, 0) + 
+                COALESCE(creative_exam1, 0) + 
+                COALESCE(creative_exam2, 0)) AS total_score
+        FROM Second_Type`
 
-		var types []models.SecondType
-		for rows.Next() {
-			var secondType models.SecondType
-			if err := rows.Scan(&secondType.ID, &secondType.HistoryOfKazakhstan, &secondType.ReadingLiteracy); err != nil {
-				log.Println("Scan Error:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse Second Types"})
-				return
-			}
-			types = append(types, secondType)
-		}
+        rows, err := db.Query(query)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get Second Types"})
+            return
+        }
+        defer rows.Close()
 
-		utils.ResponseJSON(w, types)
-	}
+        var types []models.SecondType
+        for rows.Next() {
+            var secondType models.SecondType
+            if err := rows.Scan(&secondType.ID, 
+                                &secondType.HistoryOfKazakhstan, 
+                                &secondType.ReadingLiteracy, 
+                                &secondType.CreativeExam1,
+                                &secondType.CreativeExam2,
+                                &secondType.TotalScore); err != nil {
+                log.Println("Scan Error:", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse Second Types"})
+                return
+            }
+            types = append(types, secondType)
+        }
+
+        utils.ResponseJSON(w, types)
+    }
 }
+

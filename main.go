@@ -57,11 +57,19 @@ func main() {
 	router.HandleFunc("/schools", schoolController.GetSchools(db)).Methods("GET")
     router.HandleFunc("/schools/create", schoolController.CreateSchool(db)).Methods("POST")
 	router.HandleFunc("/schools/GetSchoolForDirector", schoolController.GetSchoolForDirector(db)).Methods("GET")
+	// Добавьте роут для удаления школы
+    router.HandleFunc("/schools/delete", schoolController.DeleteSchool(db)).Methods("DELETE")
+	
+
 	
 	// *** UNT Score ***
 	router.HandleFunc("/unt_scores", untScoreController.GetUNTScores(db)).Methods("GET")
 	router.HandleFunc("/unt_scores/create", untScoreController.CreateUNTScore(db)).Methods("POST")
-	router.HandleFunc("/unt_scores/{student_id}", untScoreController.GetUNTScoreByStudent(db)).Methods("GET")
+	router.HandleFunc("/unt_scores/average", untScoreController.GetAverageScoreForSchool(db)).Methods("GET")
+	router.HandleFunc("/unt_scores/calculateaveragerating", untScoreController.CalculateSchoolAverageRating(db)).Methods("GET")
+	
+
+
 
 	// *** Subjects ***
 	router.HandleFunc("/subjects/first", subjectController.GetFirstSubjects(db)).Methods("GET")

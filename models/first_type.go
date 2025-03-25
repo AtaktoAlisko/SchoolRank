@@ -11,4 +11,5 @@ type FirstType struct {
 	SecondSubjectName    *string `json:"second_subject_name,omitempty"`  // Указатель на string
 	FirstSubjectScore    *int    `json:"first_subject_score,omitempty"`  // Указатель на int
 	SecondSubjectScore   *int    `json:"second_subject_score,omitempty"` // Указатель на int
+	TotalScore           *int    `json:"total_score,omitempty"`          // Новый параметр для общего балла
 }

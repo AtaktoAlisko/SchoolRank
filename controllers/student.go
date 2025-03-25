@@ -147,6 +147,7 @@ func (sc StudentController) GetStudents(db *sql.DB) http.HandlerFunc {
 	}
 }
 func (sc StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
+// UpdateStudent is an HTTP handler for updating a student's details.
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract student_id from the query parameters
 		studentID := r.URL.Query().Get("student_id")
@@ -160,9 +161,12 @@ func (sc StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 		err := db.QueryRow("SELECT student_id FROM Student WHERE student_id = ?", studentID).Scan(&existingStudent.ID)
 		if err != nil {
 			if err == sql.ErrNoRows {
+			// If the student does not exist, respond with a 404 error
 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Student not found"})
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found"})
 			} else {
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching student details"})
+				// If there was an error fetching the student, respond with a 500 error
 			}
 			return
 		}
@@ -171,6 +175,7 @@ func (sc StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 		var updatedStudent models.Student
 		if err := json.NewDecoder(r.Body).Decode(&updatedStudent); err != nil {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
+			// If the request body is invalid, respond with a 400 error
 			return
 		}
 
@@ -183,6 +188,7 @@ func (sc StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 		_, err = db.Exec(query, updatedStudent.FirstName, updatedStudent.LastName, updatedStudent.Patronymic, updatedStudent.IIN, updatedStudent.DateOfBirth, updatedStudent.Grade, updatedStudent.SchoolID, updatedStudent.ParentName, updatedStudent.ParentPhoneNumber, studentID)
 		if err != nil {
 			log.Println("Error updating student:", err)
+			// If there was an error updating the student, respond with a 500 error
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update student"})
 			return
 		}
