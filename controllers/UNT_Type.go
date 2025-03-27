@@ -11,53 +11,99 @@ import (
 
 type UNTTypeController struct{}
 
-
+// Функция создания UNT типа
 func (sc UNTTypeController) CreateUNTType(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var untType models.UNTType
-		if err := json.NewDecoder(r.Body).Decode(&untType); err != nil {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
-			return
-		}
+    return func(w http.ResponseWriter, r *http.Request) {
+        var untType models.UNTType
+        if err := json.NewDecoder(r.Body).Decode(&untType); err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
+            return
+        }
 
-		// Check if only one type is provided (either First_Type or Second_Type)
-		if (untType.FirstTypeID == nil && untType.SecondTypeID == nil) || (untType.FirstTypeID != nil && untType.SecondTypeID != nil) {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "You must provide either First_Type or Second_Type, but not both"})
-			return
-		}
+        // Проверяем, что предоставлен только один тип (либо First_Type, либо Second_Type)
+        if (untType.FirstTypeID == nil && untType.SecondTypeID == nil) || (untType.FirstTypeID != nil && untType.SecondTypeID != nil) {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "You must provide either First_Type or Second_Type, but not both"})
+            return
+        }
 
-		// Check if the provided First_Type exists
-		if untType.FirstTypeID != nil {
-			var firstTypeExists bool
-			err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM First_Type WHERE first_type_id = ?)", *untType.FirstTypeID).Scan(&firstTypeExists)
-			if err != nil || !firstTypeExists {
-				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "First Type ID does not exist"})
-				return
-			}
-		}
+        // Проверка существования First_Type, если передан first_type_id
+        if untType.FirstTypeID != nil {
+            var firstTypeExists bool
+            err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM First_Type WHERE first_type_id = ?)", *untType.FirstTypeID).Scan(&firstTypeExists)
+            if err != nil || !firstTypeExists {
+                utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "First Type ID does not exist"})
+                return
+            }
 
-		// Check if the provided Second_Type exists
-		if untType.SecondTypeID != nil {
-			var secondTypeExists bool
-			err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM Second_Type WHERE second_type_id = ?)", *untType.SecondTypeID).Scan(&secondTypeExists)
-			if err != nil || !secondTypeExists {
-				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Second Type ID does not exist"})
-				return
-			}
-		}
+            // Рассчитываем total_score для первого типа
+            totalScore := 0
+            if untType.FirstSubjectScore != nil {
+                totalScore += *untType.FirstSubjectScore
+            }
+            if untType.SecondSubjectScore != nil {
+                totalScore += *untType.SecondSubjectScore
+            }
+            if untType.HistoryKazakhstan != nil {
+                totalScore += *untType.HistoryKazakhstan
+            }
+            if untType.MathematicalLiteracy != nil {
+                totalScore += *untType.MathematicalLiteracy
+            }
+            if untType.ReadingLiteracy != nil {
+                totalScore += *untType.ReadingLiteracy
+            }
 
-		// Insert into UNT_Type
-		query := `INSERT INTO UNT_Type (first_type_id, second_type_id) VALUES (?, ?)`
-		_, err := db.Exec(query, utils.NullableValue(untType.FirstTypeID), utils.NullableValue(untType.SecondTypeID))
-		if err != nil {
-			log.Println("SQL Error:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create UNT Type"})
-			return
-		}
+            untType.TotalScore = new(int)
+            *untType.TotalScore = totalScore
+        }
 
-		utils.ResponseJSON(w, "UNT Type created successfully")
-	}
+        // Проверка существования Second_Type, если передан second_type_id
+        if untType.SecondTypeID != nil {
+            var secondTypeExists bool
+            err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM Second_Type WHERE second_type_id = ?)", *untType.SecondTypeID).Scan(&secondTypeExists)
+            if err != nil || !secondTypeExists {
+                utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Second Type ID does not exist"})
+                return
+            }
+
+            // Рассчитываем total_score_creative для второго типа
+            totalScoreCreative := 0
+            if untType.SecondTypeHistoryKazakhstan != nil {
+                totalScoreCreative += *untType.SecondTypeHistoryKazakhstan
+            }
+            if untType.SecondTypeReadingLiteracy != nil {
+                totalScoreCreative += *untType.SecondTypeReadingLiteracy
+            }
+            if untType.CreativeExam1 != nil {
+                totalScoreCreative += *untType.CreativeExam1
+            }
+            if untType.CreativeExam2 != nil {
+                totalScoreCreative += *untType.CreativeExam2
+            }
+
+            untType.TotalScoreCreative = new(int)
+            *untType.TotalScoreCreative = totalScoreCreative
+        }
+
+        // Вставка в UNT_Type таблицу
+        query := `INSERT INTO UNT_Type (first_type_id, second_type_id, second_type_history_kazakhstan, second_type_reading_literacy, creative_exam1, creative_exam2, total_score, total_score_creative) 
+				  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        _, err := db.Exec(query, utils.NullableValue(untType.FirstTypeID), utils.NullableValue(untType.SecondTypeID),
+            utils.NullableValue(untType.SecondTypeHistoryKazakhstan), utils.NullableValue(untType.SecondTypeReadingLiteracy),
+            utils.NullableValue(untType.CreativeExam1), utils.NullableValue(untType.CreativeExam2),
+            utils.NullableValue(untType.TotalScore), utils.NullableValue(untType.TotalScoreCreative))
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create UNT Type"})
+            return
+        }
+
+        utils.ResponseJSON(w, "UNT Type created successfully")
+    }
 }
+
+
+// Функция получения UNT типов
 func (sc UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         query := `
@@ -69,10 +115,21 @@ func (sc UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
                 COALESCE(ss.score, 0) AS second_subject_score,
                 COALESCE(ft.history_of_kazakhstan, 0) AS history_of_kazakhstan, 
                 COALESCE(ft.mathematical_literacy, 0) AS mathematical_literacy,
-                COALESCE(ft.reading_literacy, 0) AS reading_literacy
-            FROM First_Type ft
+                COALESCE(ft.reading_literacy, 0) AS reading_literacy,
+                st.second_type_id,
+                st.history_of_kazakhstan_creative,
+                st.reading_literacy_creative,
+                st.creative_exam1,
+                st.creative_exam2,
+                -- Вставляем вычисление total_score для первого типа
+                (COALESCE(fs.score, 0) + COALESCE(ss.score, 0) + COALESCE(ft.history_of_kazakhstan, 0) + COALESCE(ft.mathematical_literacy, 0) + COALESCE(ft.reading_literacy, 0)) AS total_score,
+                -- Вставляем вычисление total_score_creative для второго типа
+                (COALESCE(st.history_of_kazakhstan_creative, 0) + COALESCE(st.reading_literacy_creative, 0) + COALESCE(st.creative_exam1, 0) + COALESCE(st.creative_exam2, 0)) AS total_score_creative
+            FROM UNT_Type ut
+            LEFT JOIN First_Type ft ON ut.first_type_id = ft.first_type_id
             LEFT JOIN First_Subject fs ON ft.first_subject_id = fs.first_subject_id
             LEFT JOIN Second_Subject ss ON ft.second_subject_id = ss.second_subject_id
+            LEFT JOIN Second_Type st ON ut.second_type_id = st.second_type_id
         `
 
         rows, err := db.Query(query)
@@ -89,20 +146,27 @@ func (sc UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
             var firstSubjectID, secondSubjectID, historyKazakhstan, mathematicalLiteracy, readingLiteracy sql.NullInt64
             var firstSubjectName, secondSubjectName sql.NullString
             var firstSubjectScore, secondSubjectScore sql.NullInt64
+            var secondTypeID sql.NullInt64
+            var secondTypeHistoryOfKazakhstan, secondTypeReadingLiteracy, creativeExam1, creativeExam2 sql.NullInt64
 
-            // Scan the values directly
+            // Сканируем данные из SQL в структуру
             if err := rows.Scan(
                 &untType.FirstTypeID,
                 &firstSubjectID, &firstSubjectName, &firstSubjectScore,
                 &secondSubjectID, &secondSubjectName, &secondSubjectScore,
                 &historyKazakhstan, &mathematicalLiteracy, &readingLiteracy,
+                &secondTypeID,
+                &secondTypeHistoryOfKazakhstan, &secondTypeReadingLiteracy,
+                &creativeExam1, &creativeExam2,
+                &untType.TotalScore,  // Добавляем total_score
+                &untType.TotalScoreCreative,  // Добавляем total_score_creative
             ); err != nil {
                 log.Println("Scan Error:", err)
                 utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse UNT Types"})
                 return
             }
 
-            // Handle the scanned sql.Null* values
+            // Преобразуем SQL NULL значения в Go значения
             if firstSubjectID.Valid {
                 untType.FirstSubjectID = new(int)
                 *untType.FirstSubjectID = int(firstSubjectID.Int64)
@@ -136,31 +200,32 @@ func (sc UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
                 *untType.ReadingLiteracy = int(readingLiteracy.Int64)
             }
 
-            // Calculate total score
-            totalScore := 0
-            if untType.FirstSubjectScore != nil {
-                totalScore += *untType.FirstSubjectScore
+            if secondTypeID.Valid {
+                untType.SecondTypeID = new(int)
+                *untType.SecondTypeID = int(secondTypeID.Int64)
             }
-            if untType.SecondSubjectScore != nil {
-                totalScore += *untType.SecondSubjectScore
+            if secondTypeHistoryOfKazakhstan.Valid {
+                untType.SecondTypeHistoryKazakhstan = new(int)
+                *untType.SecondTypeHistoryKazakhstan = int(secondTypeHistoryOfKazakhstan.Int64)
             }
-            if untType.HistoryKazakhstan != nil {
-                totalScore += *untType.HistoryKazakhstan
+            if secondTypeReadingLiteracy.Valid {
+                untType.SecondTypeReadingLiteracy = new(int)
+                *untType.SecondTypeReadingLiteracy = int(secondTypeReadingLiteracy.Int64)
             }
-            if untType.MathematicalLiteracy != nil {
-                totalScore += *untType.MathematicalLiteracy
+            if creativeExam1.Valid {
+                untType.CreativeExam1 = new(int)
+                *untType.CreativeExam1 = int(creativeExam1.Int64)
             }
-            if untType.ReadingLiteracy != nil {
-                totalScore += *untType.ReadingLiteracy
+            if creativeExam2.Valid {
+                untType.CreativeExam2 = new(int)
+                *untType.CreativeExam2 = int(creativeExam2.Int64)
             }
-            untType.TotalScore = new(int)
-            *untType.TotalScore = totalScore
 
-            // Add the populated UNTType to the result slice
+            // Добавляем тип в результирующий список
             types = append(types, untType)
         }
 
-        // Send the response
+        // Отправляем данные в формате JSON
         utils.ResponseJSON(w, types)
     }
 }

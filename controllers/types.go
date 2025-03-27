@@ -81,6 +81,7 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 
 func (c *TypeController) GetFirstTypes(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
+        // Запрос с JOIN, который соединяет несколько таблиц
         query := `
         SELECT 
             ft.first_type_id, 
@@ -128,8 +129,6 @@ func (c *TypeController) GetFirstTypes(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, types)
     }
 }
-
-
 func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var secondType models.SecondType
@@ -154,19 +153,39 @@ func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Рассчитываем total_score с учетом всех четырех компонентов
-        totalScore := secondType.HistoryOfKazakhstan + secondType.ReadingLiteracy + secondType.CreativeExam1 + secondType.CreativeExam2
+        // Рассчитываем total_score_creative с учетом всех компонентов
+        totalScoreCreative := 0
 
-        // Вставляем Second Type в таблицу базы данных с привязкой к школе и total_score
-        query := `INSERT INTO Second_Type (history_of_kazakhstan, reading_literacy, creative_exam1, creative_exam2, school_id, total_score) 
+        // Проверяем, если HistoryOfKazakhstanCreative не nil
+        if secondType.HistoryOfKazakhstanCreative != nil {
+            totalScoreCreative += *secondType.HistoryOfKazakhstanCreative
+        }
+
+        // Проверяем, если ReadingLiteracyCreative не nil
+        if secondType.ReadingLiteracyCreative != nil {
+            totalScoreCreative += *secondType.ReadingLiteracyCreative
+        }
+
+        // Проверяем, если CreativeExam1 не nil
+        if secondType.CreativeExam1 != nil {
+            totalScoreCreative += *secondType.CreativeExam1
+        }
+
+        // Проверяем, если CreativeExam2 не nil
+        if secondType.CreativeExam2 != nil {
+            totalScoreCreative += *secondType.CreativeExam2
+        }
+
+        // Вставляем Second Type в таблицу базы данных с привязкой к школе и total_score_creative
+        query := `INSERT INTO Second_Type (history_of_kazakhstan_creative, reading_literacy_creative, creative_exam1, creative_exam2, school_id, total_score_creative) 
                   VALUES (?, ?, ?, ?, ?, ?)`
         _, err = db.Exec(query, 
-            secondType.HistoryOfKazakhstan, 
-            secondType.ReadingLiteracy, 
+            secondType.HistoryOfKazakhstanCreative, 
+            secondType.ReadingLiteracyCreative, 
             secondType.CreativeExam1, 
             secondType.CreativeExam2,
             userSchoolID.Int64, 
-            totalScore)
+            totalScoreCreative)
 
         if err != nil {
             log.Println("SQL Error:", err)
@@ -177,19 +196,18 @@ func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, map[string]string{"message": "Second Type created successfully"})
     }
 }
-
 func (c *TypeController) GetSecondTypes(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         query := `
         SELECT second_type_id, 
-               COALESCE(history_of_kazakhstan, 0) AS history_of_kazakhstan, 
-               COALESCE(reading_literacy, 0) AS reading_literacy,
+               COALESCE(history_of_kazakhstan_creative, 0) AS history_of_kazakhstan_creative, 
+               COALESCE(reading_literacy_creative, 0) AS reading_literacy_creative,
                COALESCE(creative_exam1, 0) AS creative_exam1,
                COALESCE(creative_exam2, 0) AS creative_exam2,
-               (COALESCE(history_of_kazakhstan, 0) + 
-                COALESCE(reading_literacy, 0) + 
+               (COALESCE(history_of_kazakhstan_creative, 0) + 
+                COALESCE(reading_literacy_creative, 0) + 
                 COALESCE(creative_exam1, 0) + 
-                COALESCE(creative_exam2, 0)) AS total_score
+                COALESCE(creative_exam2, 0)) AS total_score_creative
         FROM Second_Type`
 
         rows, err := db.Query(query)
@@ -204,11 +222,11 @@ func (c *TypeController) GetSecondTypes(db *sql.DB) http.HandlerFunc {
         for rows.Next() {
             var secondType models.SecondType
             if err := rows.Scan(&secondType.ID, 
-                                &secondType.HistoryOfKazakhstan, 
-                                &secondType.ReadingLiteracy, 
+                                &secondType.HistoryOfKazakhstanCreative, 
+                                &secondType.ReadingLiteracyCreative, 
                                 &secondType.CreativeExam1,
                                 &secondType.CreativeExam2,
-                                &secondType.TotalScore); err != nil {
+                                &secondType.TotalScoreCreative); err != nil {
                 log.Println("Scan Error:", err)
                 utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse Second Types"})
                 return
@@ -219,4 +237,6 @@ func (c *TypeController) GetSecondTypes(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, types)
     }
 }
+
+
 

@@ -69,8 +69,6 @@ func main() {
 	router.HandleFunc("/unt_scores/calculateaveragerating", untScoreController.CalculateSchoolAverageRating(db)).Methods("GET")
 	
 
-
-
 	// *** Subjects ***
 	router.HandleFunc("/subjects/first", subjectController.GetFirstSubjects(db)).Methods("GET")
 	router.HandleFunc("/subjects/first/create", subjectController.CreateFirstSubject(db)).Methods("POST")
@@ -94,8 +92,6 @@ func main() {
 	// *** Second Type ***
 	router.HandleFunc("/second_types", typeController.GetSecondTypes(db)).Methods("GET")
 	router.HandleFunc("/second_types/create", typeController.CreateSecondType(db)).Methods("POST")
-
-
 
 
 	// Включаем CORS

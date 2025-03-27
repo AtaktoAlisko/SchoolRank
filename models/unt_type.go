@@ -12,5 +12,12 @@ type UNTType struct {
     HistoryKazakhstan  *int    `json:"history_of_kazakhstan,omitempty"`
     MathematicalLiteracy *int  `json:"mathematical_literacy,omitempty"`
     ReadingLiteracy    *int    `json:"reading_literacy,omitempty"`
-    TotalScore         *int    `json:"total_score,omitempty"` // добавляем новое поле для общего балла
+    TotalScore         *int    `json:"total_score,omitempty"`  // Для первого типа ЕНТ
+
+    // Поля для второго типа (творческого)
+    SecondTypeHistoryKazakhstan *int `json:"second_type_history_kazakhstan,omitempty"`
+    SecondTypeReadingLiteracy   *int `json:"second_type_reading_literacy,omitempty"`
+    CreativeExam1               *int `json:"creative_exam1,omitempty"`
+    CreativeExam2               *int `json:"creative_exam2,omitempty"`
+    TotalScoreCreative          *int `json:"total_score_creative,omitempty"` // Итоговый балл для второго типа ЕНТ
 }
