@@ -39,6 +39,8 @@ func main() {
 	cityOlympiadController := controllers.CityOlympiadController{}
 	regionalOlympiadController := controllers.RegionalOlympiadController{}
 	republicanOlympiadController := controllers.RepublicanOlympiadController{}
+	TotalOlympiadRatingController := controllers.TotalOlympiadRatingController{}
+
 
 	
 	router := mux.NewRouter()
@@ -113,6 +115,8 @@ func main() {
 	router.HandleFunc("/republican_olympiad", republicanOlympiadController.GetRepublicanOlympiad(db)).Methods("GET")
 	router.HandleFunc("/republican_olympiad/delete", republicanOlympiadController.DeleteRepublicanOlympiad(db)).Methods("DELETE")
 	router.HandleFunc("/regional_olympiad/GetAverageRepublicanOlympiadScore", republicanOlympiadController.GetAverageRepublicanOlympiadScore(db)).Methods("GET")
+	router.HandleFunc("/olympiad/total-rating", TotalOlympiadRatingController.GetTotalOlympiadRating(db)).Methods("GET")
+
 
 
 
