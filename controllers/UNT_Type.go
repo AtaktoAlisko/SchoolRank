@@ -26,6 +26,13 @@ func (sc UNTTypeController) CreateUNTType(db *sql.DB) http.HandlerFunc {
             return
         }
 
+        // Устанавливаем тип (type-1 или type-2) в зависимости от того, какой тип был передан
+        if untType.FirstTypeID != nil {
+            untType.Type = "type-1" // Первый тип
+        } else if untType.SecondTypeID != nil {
+            untType.Type = "type-2" // Второй тип
+        }
+
         // Проверка существования First_Type, если передан first_type_id
         if untType.FirstTypeID != nil {
             var firstTypeExists bool
@@ -86,12 +93,12 @@ func (sc UNTTypeController) CreateUNTType(db *sql.DB) http.HandlerFunc {
         }
 
         // Вставка в UNT_Type таблицу
-        query := `INSERT INTO UNT_Type (first_type_id, second_type_id, second_type_history_kazakhstan, second_type_reading_literacy, creative_exam1, creative_exam2, total_score, total_score_creative) 
-				  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        query := `INSERT INTO UNT_Type (first_type_id, second_type_id, second_type_history_kazakhstan, second_type_reading_literacy, creative_exam1, creative_exam2, total_score, total_score_creative, type) 
+				  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         _, err := db.Exec(query, utils.NullableValue(untType.FirstTypeID), utils.NullableValue(untType.SecondTypeID),
             utils.NullableValue(untType.SecondTypeHistoryKazakhstan), utils.NullableValue(untType.SecondTypeReadingLiteracy),
             utils.NullableValue(untType.CreativeExam1), utils.NullableValue(untType.CreativeExam2),
-            utils.NullableValue(untType.TotalScore), utils.NullableValue(untType.TotalScoreCreative))
+            utils.NullableValue(untType.TotalScore), utils.NullableValue(untType.TotalScoreCreative), untType.Type)  // Добавляем тип в запрос
         if err != nil {
             log.Println("SQL Error:", err)
             utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create UNT Type"})
@@ -101,13 +108,13 @@ func (sc UNTTypeController) CreateUNTType(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, "UNT Type created successfully")
     }
 }
-
-
 // Функция получения UNT типов
-func (sc UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
+func (sc *UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         query := `
             SELECT 
+                ut.unt_type_id, 
+                ut.type AS unt_type, 
                 ft.first_type_id, 
                 fs.first_subject_id, fs.subject AS first_subject_name, 
                 COALESCE(fs.score, 0) AS first_subject_score,
@@ -121,9 +128,7 @@ func (sc UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
                 st.reading_literacy_creative,
                 st.creative_exam1,
                 st.creative_exam2,
-                -- Вставляем вычисление total_score для первого типа
                 (COALESCE(fs.score, 0) + COALESCE(ss.score, 0) + COALESCE(ft.history_of_kazakhstan, 0) + COALESCE(ft.mathematical_literacy, 0) + COALESCE(ft.reading_literacy, 0)) AS total_score,
-                -- Вставляем вычисление total_score_creative для второго типа
                 (COALESCE(st.history_of_kazakhstan_creative, 0) + COALESCE(st.reading_literacy_creative, 0) + COALESCE(st.creative_exam1, 0) + COALESCE(st.creative_exam2, 0)) AS total_score_creative
             FROM UNT_Type ut
             LEFT JOIN First_Type ft ON ut.first_type_id = ft.first_type_id
@@ -149,8 +154,9 @@ func (sc UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
             var secondTypeID sql.NullInt64
             var secondTypeHistoryOfKazakhstan, secondTypeReadingLiteracy, creativeExam1, creativeExam2 sql.NullInt64
 
-            // Сканируем данные из SQL в структуру
             if err := rows.Scan(
+                &untType.UNTTypeID,
+                &untType.Type,
                 &untType.FirstTypeID,
                 &firstSubjectID, &firstSubjectName, &firstSubjectScore,
                 &secondSubjectID, &secondSubjectName, &secondSubjectScore,
@@ -158,15 +164,14 @@ func (sc UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
                 &secondTypeID,
                 &secondTypeHistoryOfKazakhstan, &secondTypeReadingLiteracy,
                 &creativeExam1, &creativeExam2,
-                &untType.TotalScore,  // Добавляем total_score
-                &untType.TotalScoreCreative,  // Добавляем total_score_creative
+                &untType.TotalScore,
+                &untType.TotalScoreCreative,
             ); err != nil {
                 log.Println("Scan Error:", err)
                 utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse UNT Types"})
                 return
             }
 
-            // Преобразуем SQL NULL значения в Go значения
             if firstSubjectID.Valid {
                 untType.FirstSubjectID = new(int)
                 *untType.FirstSubjectID = int(firstSubjectID.Int64)
@@ -225,7 +230,6 @@ func (sc UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
             types = append(types, untType)
         }
 
-        // Отправляем данные в формате JSON
         utils.ResponseJSON(w, types)
     }
 }

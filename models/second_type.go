@@ -7,4 +7,5 @@ type SecondType struct {
     CreativeExam1              *int    `json:"creative_exam1,omitempty"`
     CreativeExam2              *int    `json:"creative_exam2,omitempty"`
     TotalScoreCreative         *int    `json:"total_score_creative,omitempty"` // изменено с TotalScore на TotalScoreCreative
+    Type                       string  `json:"type"` // Новый параметр для типа экзамена
 }

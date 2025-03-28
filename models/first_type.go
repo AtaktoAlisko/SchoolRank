@@ -12,4 +12,5 @@ type FirstType struct {
 	FirstSubjectScore    *int    `json:"first_subject_score,omitempty"`  // Указатель на int
 	SecondSubjectScore   *int    `json:"second_subject_score,omitempty"` // Указатель на int
 	TotalScore           *int    `json:"total_score,omitempty"`          // Новый параметр для общего балла
+	Type                 string  `json:"type"`                           // Поле для типа ЕН
 }
