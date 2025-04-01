@@ -2,12 +2,17 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"ranking-school/controllers"
 	"ranking-school/driver"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 )
@@ -15,15 +20,42 @@ import (
 var db *sql.DB
 
 func main() {
+	// Загрузка переменных из .env
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Ошибка загрузки .env файла")
 	}
 
-	secret := os.Getenv("SECRET")
-	if secret == "" {
-		log.Fatal("Ошибка: переменная SECRET не установлена")
+	// Получаем переменные из окружения
+	awsAccessKeyID := os.Getenv("AWS_ACCESS_KEY_ID")
+	awsSecretAccessKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
+	awsRegion := os.Getenv("AWS_REGION")
+
+	// Создаем сессию с AWS
+	sess, err := session.NewSession(&aws.Config{
+		Region:      aws.String(awsRegion),
+		Credentials: credentials.NewStaticCredentials(awsAccessKeyID, awsSecretAccessKey, ""),
+	})
+	if err != nil {
+		log.Fatal("Не удалось создать сессию:", err)
 	}
+
+	// Создаем клиент для S3
+	svc := s3.New(sess)
+
+	// Пример получения списка бакетов
+	result, err := svc.ListBuckets(nil)
+	if err != nil {
+		log.Fatal("Не удалось получить список бакетов:", err)
+	}
+
+	// Выводим список бакетов
+	fmt.Println("Бакеты:")
+	for _, b := range result.Buckets {
+		fmt.Printf("* %s создан в %s\n", *b.Name, b.CreationDate)
+	}
+
+	// Подключение к базе данных
 	db = driver.ConnectDB()
 	defer db.Close()
 
@@ -46,18 +78,22 @@ func main() {
 	router := mux.NewRouter()
 
 	// *** Аутентификация и пароли ***
-	router.HandleFunc("/signup", controller.Signup(db)).Methods("POST")
-	router.HandleFunc("/login", controller.Login(db)).Methods("POST")
-	router.HandleFunc("/getMe", controller.GetMe(db)).Methods("GET")
-	router.HandleFunc("/protected", controller.TokenVerifyMiddleware(controller.ProtectedEndpoint())).Methods("GET")
-	router.HandleFunc("/reset-password", controller.ResetPassword(db)).Methods("POST")
-	router.HandleFunc("/forgot-password", controller.ForgotPassword(db)).Methods("POST")
-	router.HandleFunc("/verify-email", controller.VerifyEmail(db)).Methods("POST")
-	router.HandleFunc("/logout", controller.Logout).Methods("POST")
-	router.HandleFunc("/delete-account", controller.DeleteAccount(db)).Methods("DELETE")
-	router.HandleFunc("/edit-profile", controller.TokenVerifyMiddleware(controller.EditProfile(db))).Methods("PUT")
-	router.HandleFunc("/update-password", controller.TokenVerifyMiddleware(controller.UpdatePassword(db))).Methods("PUT")
-	router.HandleFunc("/admin/change-role", controller.ChangeUserRole(db)).Methods("POST")
+    router.HandleFunc("/api/user/sign_up", controller.Signup(db)).Methods("POST")
+	router.HandleFunc("/api/user/sign_in", controller.Login(db)).Methods("POST")
+	router.HandleFunc("/api/user/getMe", controller.GetMe(db)).Methods("GET")
+	router.HandleFunc("/api/protected", controller.TokenVerifyMiddleware(controller.ProtectedEndpoint())).Methods("GET")
+	router.HandleFunc("/api/user/reset-password", controller.ResetPassword(db)).Methods("POST")
+	router.HandleFunc("/api/user/forgot-password", controller.ForgotPassword(db)).Methods("POST")
+	router.HandleFunc("/api/user/verify-email", controller.VerifyEmail(db)).Methods("POST")
+	router.HandleFunc("/api/user/logout", controller.Logout).Methods("POST")
+	router.HandleFunc("/api/user/delete-account", controller.DeleteAccount(db)).Methods("DELETE")
+	router.HandleFunc("/api/user/edit-profile", controller.TokenVerifyMiddleware(controller.EditProfile(db))).Methods("PUT")
+	router.HandleFunc("/api/user/update-password", controller.TokenVerifyMiddleware(controller.UpdatePassword(db))).Methods("PUT")
+	router.HandleFunc("/api/admin/change-role", controller.ChangeUserRole(db)).Methods("POST")
+	router.HandleFunc("/api/user/upload-avatar", controller.UploadAvatar(db)).Methods("POST")
+	router.HandleFunc("/api/user/update-avatar", controller.UpdateAvatar(db)).Methods("PUT")
+	router.HandleFunc("/api/user/delete-avatar", controller.DeleteAvatar(db)).Methods("DELETE")
+	
 
 	// *** Школы ***
 	router.HandleFunc("/schools", schoolController.GetSchools(db)).Methods("GET")
@@ -94,6 +130,8 @@ func main() {
 	// *** First Type ***
 	router.HandleFunc("/first_types", typeController.GetFirstTypes(db)).Methods("GET")
 	router.HandleFunc("/first_types/create", typeController.CreateFirstType(db)).Methods("POST") 
+	router.HandleFunc("/unt_scores/average", typeController.GetAverageUNTScore(db)).Methods("GET")
+
 	// *** Second Type ***
 	router.HandleFunc("/second_types", typeController.GetSecondTypes(db)).Methods("GET")
 	router.HandleFunc("/second_types/create", typeController.CreateSecondType(db)).Methods("POST")

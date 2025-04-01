@@ -18,214 +18,218 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var user models.User
-		var error models.Error
+    return func(w http.ResponseWriter, r *http.Request) {
+        var user models.User
+        var error models.Error
 
-		// Декодируем запрос
-		err := json.NewDecoder(r.Body).Decode(&user)
-		if err != nil {
-			error.Message = "Invalid request body."
-			utils.RespondWithError(w, http.StatusBadRequest, error)
-			return
-		}
+        // Декодируем запрос
+        err := json.NewDecoder(r.Body).Decode(&user)
+        if err != nil {
+            error.Message = "Invalid request body."
+            utils.RespondWithError(w, http.StatusBadRequest, error)
+            return
+        }
 
-		// Устанавливаем роль "user" по умолчанию
-		user.Role = "user"  // Роль будет всегда "user" при регистрации
+        // Устанавливаем роль "user" по умолчанию
+        user.Role = "user"  // Роль будет всегда "user" при регистрации
 
-		// Проверяем, что email или телефон предоставлены
-		if user.Email == "" && user.Phone == "" {
-			error.Message = "Email or phone is required."
-			utils.RespondWithError(w, http.StatusBadRequest, error)
-			return
-		}
+        // Устанавливаем дефолтный аватар, если не указан
+        if user.AvatarURL == "" {
+            user.AvatarURL = "https://your-bucket-name.s3.amazonaws.com/default-avatar.jpg" // Дефолтный аватар
+        }
 
-		// Проверяем, что формат email или телефона правильный
-		var isEmail bool
-		if user.Email != "" && strings.Contains(user.Email, "@") {
-			isEmail = true
-		} else if user.Phone != "" && utils.IsPhoneNumber(user.Phone) {
-			isEmail = false
-		} else {
-			error.Message = "Invalid email or phone format."
-			utils.RespondWithError(w, http.StatusBadRequest, error)
-			return
-		}
+        // Проверяем, что email или телефон предоставлены
+        if user.Email == "" && user.Phone == "" {
+            error.Message = "Email or phone is required."
+            utils.RespondWithError(w, http.StatusBadRequest, error)
+            return
+        }
 
-		// Проверяем, что пароль не пустой
-		if user.Password == "" {
-			error.Message = "Password is required."
-			utils.RespondWithError(w, http.StatusBadRequest, error)
-			return
-		}
+        // Проверяем, что формат email или телефона правильный
+        var isEmail bool
+        if user.Email != "" && strings.Contains(user.Email, "@") {
+            isEmail = true
+        } else if user.Phone != "" && utils.IsPhoneNumber(user.Phone) {
+            isEmail = false
+        } else {
+            error.Message = "Invalid email or phone format."
+            utils.RespondWithError(w, http.StatusBadRequest, error)
+            return
+        }
 
-		// Проверяем, существует ли уже email или телефон в базе
-		var existingID int
-		var query string
-		var identifier string
+        // Проверяем, что пароль не пустой
+        if user.Password == "" {
+            error.Message = "Password is required."
+            utils.RespondWithError(w, http.StatusBadRequest, error)
+            return
+        }
 
-		if isEmail {
-			query = "SELECT id FROM users WHERE email = ?"
-			identifier = user.Email
-		} else {
-			query = "SELECT id FROM users WHERE phone = ?"
-			identifier = user.Phone
-		}
+        // Проверяем, существует ли уже email или телефон в базе
+        var existingID int
+        var query string
+        var identifier string
 
-		err = db.QueryRow(query, identifier).Scan(&existingID)
-		if err == nil {
-			error.Message = "Email or phone already exists."
-			utils.RespondWithError(w, http.StatusConflict, error)
-			return
-		} else if err != sql.ErrNoRows {
-			log.Printf("Error checking existing user: %v", err)
-			error.Message = "Server error."
-			utils.RespondWithError(w, http.StatusInternalServerError, error)
-			return
-		}
+        if isEmail {
+            query = "SELECT id FROM users WHERE email = ?"
+            identifier = user.Email
+        } else {
+            query = "SELECT id FROM users WHERE phone = ?"
+            identifier = user.Phone
+        }
 
-		// Хэшируем пароль
-		hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
-		if err != nil {
-			log.Printf("Error hashing password: %v", err)
-			error.Message = "Server error."
-			utils.RespondWithError(w, http.StatusInternalServerError, error)
-			return
-		}
-		user.Password = string(hash)
+        err = db.QueryRow(query, identifier).Scan(&existingID)
+        if err == nil {
+            error.Message = "Email or phone already exists."
+            utils.RespondWithError(w, http.StatusConflict, error)
+            return
+        } else if err != sql.ErrNoRows {
+            log.Printf("Error checking existing user: %v", err)
+            error.Message = "Server error."
+            utils.RespondWithError(w, http.StatusInternalServerError, error)
+            return
+        }
 
-		// Генерация OTP кода для верификации
-		otpCode, err := utils.GenerateOTP()
-		if err != nil {
-			log.Printf("Error generating OTP: %v", err)
-			error.Message = "Failed to generate OTP."
-			utils.RespondWithError(w, http.StatusInternalServerError, error)
-			return
-		}
+        // Хэшируем пароль
+        hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+        if err != nil {
+            log.Printf("Error hashing password: %v", err)
+            error.Message = "Server error."
+            utils.RespondWithError(w, http.StatusInternalServerError, error)
+            return
+        }
+        user.Password = string(hash)
 
-		// Генерация токена для верификации
-		verificationToken, err := utils.GenerateVerificationToken(user.Email)
-		if err != nil {
-			log.Printf("Error generating verification token: %v", err)
-			error.Message = "Failed to generate verification token."
-			utils.RespondWithError(w, http.StatusInternalServerError, error)
-			return
-		}
+        // Генерация OTP кода для верификации
+        otpCode, err := utils.GenerateOTP()
+        if err != nil {
+            log.Printf("Error generating OTP: %v", err)
+            error.Message = "Failed to generate OTP."
+            utils.RespondWithError(w, http.StatusInternalServerError, error)
+            return
+        }
 
-		// Вставка данных в базу
-		if isEmail {
-			query = "INSERT INTO users (email, password, first_name, last_name, age, role, verified, otp_code, verification_token) VALUES (?, ?, ?, ?, ?, ?, false, ?, ?)"
-			_, err = db.Exec(query, user.Email, user.Password, user.FirstName, user.LastName, user.Age, user.Role, otpCode, verificationToken)
-		} else {
-			query = "INSERT INTO users (phone, password, first_name, last_name, age, role, verified, otp_code, verification_token) VALUES (?, ?, ?, ?, ?, ?, true, NULL, ?)"
-			_, err = db.Exec(query, user.Phone, user.Password, user.FirstName, user.LastName, user.Age, user.Role, verificationToken)
-		}
+        // Генерация токена для верификации
+        verificationToken, err := utils.GenerateVerificationToken(user.Email)
+        if err != nil {
+            log.Printf("Error generating verification token: %v", err)
+            error.Message = "Failed to generate verification token."
+            utils.RespondWithError(w, http.StatusInternalServerError, error)
+            return
+        }
 
-		if err != nil {
-			log.Printf("Error inserting user: %v", err)
-			error.Message = "Server error."
-			utils.RespondWithError(w, http.StatusInternalServerError, error)
-			return
-		}
+        // Вставка данных в базу
+        if isEmail {
+            query = "INSERT INTO users (email, password, first_name, last_name, age, role, avatar_url, verified, otp_code, verification_token) VALUES (?, ?, ?, ?, ?, ?, ?, false, ?, ?)"
+            _, err = db.Exec(query, user.Email, user.Password, user.FirstName, user.LastName, user.Age, user.Role, user.AvatarURL, otpCode, verificationToken)
+        } else {
+            query = "INSERT INTO users (phone, password, first_name, last_name, age, role, avatar_url, verified, otp_code, verification_token) VALUES (?, ?, ?, ?, ?, ?, ?, true, NULL, ?)"
+            _, err = db.Exec(query, user.Phone, user.Password, user.FirstName, user.LastName, user.Age, user.Role, user.AvatarURL, verificationToken)
+        }
 
-		// Отправка email с OTP для верификации
-		if isEmail {
-			utils.SendVerificationEmail(user.Email, verificationToken, otpCode)
-		}
+        if err != nil {
+            log.Printf("Error inserting user: %v", err)
+            error.Message = "Server error."
+            utils.RespondWithError(w, http.StatusInternalServerError, error)
+            return
+        }
 
-		user.Password = ""  // Убираем пароль из ответа
+        // Отправка email с OTP для верификации
+        if isEmail {
+            utils.SendVerificationEmail(user.Email, verificationToken, otpCode)
+        }
 
-		message := "User registered successfully."
-		if isEmail {
-			message += " Please verify your email with the OTP code."
-		}
+        user.Password = ""  // Убираем пароль из ответа
 
-		utils.ResponseJSON(w, map[string]string{"message": message})
-	}
+        message := "User registered successfully."
+        if isEmail {
+            message += " Please verify your email with the OTP code."
+        }
+
+        utils.ResponseJSON(w, map[string]string{"message": message})
+    }
 }
 func (c Controller) Login(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var user models.User
-		var error models.Error
+    return func(w http.ResponseWriter, r *http.Request) {
+        var user models.User
+        var error models.Error
 
-		// Декодируем запрос
-		err := json.NewDecoder(r.Body).Decode(&user)
-		if err != nil {
-			error.Message = "Invalid request body."
-			utils.RespondWithError(w, http.StatusBadRequest, error)
-			return
-		}
+        // Decode the request body into the user model
+        err := json.NewDecoder(r.Body).Decode(&user)
+        if err != nil {
+            error.Message = "Invalid request body."
+            utils.RespondWithError(w, http.StatusBadRequest, error)
+            return
+        }
 
-		// Проверяем, что email или телефон указаны
-		var query string
-		var identifier string
-		var hashedPassword string
-		var email sql.NullString
-		var phone sql.NullString
-		var role string
-		var isVerified bool
+        var query string
+        var identifier string
+        var hashedPassword string
+        var email sql.NullString
+        var phone sql.NullString
+        var role string
+        var isVerified bool
 
-		// Проверка email или телефона
-		if user.Email != "" {
-			query = "SELECT id, email, phone, password, first_name, last_name, age, role, is_verified FROM users WHERE email = ?"
-			identifier = user.Email
-		} else {
-			query = "SELECT id, email, phone, password, first_name, last_name, age, role, is_verified FROM users WHERE phone = ?"
-			identifier = user.Phone
-		}
+        // Check if email or phone is provided for login
+        if user.Email != "" {
+            query = "SELECT id, email, phone, password, first_name, last_name, age, role, is_verified FROM users WHERE email = ?"
+            identifier = user.Email
+        } else {
+            query = "SELECT id, email, phone, password, first_name, last_name, age, role, is_verified FROM users WHERE phone = ?"
+            identifier = user.Phone
+        }
 
-		row := db.QueryRow(query, identifier)
-		err = row.Scan(&user.ID, &email, &phone, &hashedPassword, &user.FirstName, &user.LastName, &user.Age, &role, &isVerified)
+        row := db.QueryRow(query, identifier)
+        err = row.Scan(&user.ID, &email, &phone, &hashedPassword, &user.FirstName, &user.LastName, &user.Age, &role, &isVerified)
+        if err != nil {
+            if err == sql.ErrNoRows {
+                error.Message = "User not found."
+                utils.RespondWithError(w, http.StatusNotFound, error)
+                return
+            }
+            log.Printf("Error querying user: %v", err)
+            error.Message = "Server error."
+            utils.RespondWithError(w, http.StatusInternalServerError, error)
+            return
+        }
 
-		if err != nil {
-			if err == sql.ErrNoRows {
-				error.Message = "User not found."
-				utils.RespondWithError(w, http.StatusNotFound, error)
-				return
-			}
-			log.Printf("Error querying user: %v", err)
-			error.Message = "Server error."
-			utils.RespondWithError(w, http.StatusInternalServerError, error)
-			return
-		}
+        // Check email verification status
+        if !isVerified {
+            error.Message = "Please verify your email before logging in."
+            utils.RespondWithError(w, http.StatusForbidden, error)
+            return
+        }
 
-		// Проверка подтверждения email
-		if !isVerified {
-			error.Message = "Please verify your email before logging in."
-			utils.RespondWithError(w, http.StatusForbidden, error)
-			return
-		}
+        // Compare the entered password with the hashed password
+        err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(user.Password))
+        if err != nil {
+            error.Message = "Invalid password."
+            utils.RespondWithError(w, http.StatusUnauthorized, error)
+            return
+        }
 
-		// Проверка пароля
-		err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(user.Password))
-		if err != nil {
-			error.Message = "Invalid password."
-			utils.RespondWithError(w, http.StatusUnauthorized, error)
-			return
-		}
+        // Generate access token
+        accessToken, err := utils.GenerateToken(user)
+        if err != nil {
+            log.Printf("Error generating token: %v", err)
+            error.Message = "Server error."
+            utils.RespondWithError(w, http.StatusInternalServerError, error)
+            return
+        }
 
-		// Генерация токенов
-		accessToken, err := utils.GenerateToken(user)
-		if err != nil {
-			log.Printf("Error generating token: %v", err)
-			error.Message = "Server error."
-			utils.RespondWithError(w, http.StatusInternalServerError, error)
-			return
-		}
+        // Generate refresh token
+        refreshToken, err := utils.GenerateRefreshToken(user)
+        if err != nil {
+            log.Printf("Error generating refresh token: %v", err)
+            error.Message = "Server error."
+            utils.RespondWithError(w, http.StatusInternalServerError, error)
+            return
+        }
 
-		refreshToken, err := utils.GenerateRefreshToken(user)
-		if err != nil {
-			log.Printf("Error generating refresh token: %v", err)
-			error.Message = "Server error."
-			utils.RespondWithError(w, http.StatusInternalServerError, error)
-			return
-		}
-
-		utils.ResponseJSON(w, map[string]string{
-			"token":         accessToken,
-			"refresh_token": refreshToken,
-		})
-	}
+        utils.ResponseJSON(w, map[string]string{
+            "token":         accessToken,
+            "refresh_token": refreshToken,
+        })
+    }
 }
 func (c Controller) Logout(w http.ResponseWriter, r *http.Request) {
     // Get token from Authorization header
@@ -378,67 +382,68 @@ func (c Controller) EditProfile(db *sql.DB) http.HandlerFunc {
     }
 }
 func (c Controller) UpdatePassword(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var requestData struct {
-			CurrentPassword string `json:"current_password"`
-			NewPassword     string `json:"new_password"`
-			ConfirmPassword string `json:"confirm_password"`
-		}
+    return func(w http.ResponseWriter, r *http.Request) {
+        var requestData struct {
+            CurrentPassword string `json:"current_password"`
+            NewPassword     string `json:"new_password"`
+            ConfirmPassword string `json:"confirm_password"`
+        }
 
-		// Декодируем тело запроса
-		err := json.NewDecoder(r.Body).Decode(&requestData)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body."})
-			return
-		}
+        // Decode the request body into the password change struct
+        err := json.NewDecoder(r.Body).Decode(&requestData)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body."})
+            return
+        }
 
-		// Верификация токена, чтобы получить userID
-		userID, err := utils.VerifyToken(r)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
-			return
-		}
+        // Verify the token to get the user ID
+        userID, err := utils.VerifyToken(r)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+            return
+        }
 
-		// Проверяем, совпадают ли новый пароль и подтвержденный пароль
-		if requestData.NewPassword != requestData.ConfirmPassword {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "New password and confirm password do not match."})
-			return
-		}
+        // Check if new password matches confirm password
+        if requestData.NewPassword != requestData.ConfirmPassword {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "New password and confirm password do not match."})
+            return
+        }
 
-		// Получаем текущий пароль из базы данных
-		var hashedPassword string
-		query := "SELECT password FROM users WHERE id = ?"
-		err = db.QueryRow(query, userID).Scan(&hashedPassword)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error retrieving user password."})
-			return
-		}
+        // Get the current password from the database
+        var hashedPassword string
+        query := "SELECT password FROM users WHERE id = ?"
+        err = db.QueryRow(query, userID).Scan(&hashedPassword)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error retrieving user password."})
+            return
+        }
 
-		// Проверяем текущий пароль
-		err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(requestData.CurrentPassword))
-		if err != nil {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Incorrect current password."})
-			return
-		}
+        // Compare current password with the stored hashed password
+        err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(requestData.CurrentPassword))
+        if err != nil {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Incorrect current password."})
+            return
+        }
 
-		// Хешируем новый пароль
-		hashedNewPassword, err := bcrypt.GenerateFromPassword([]byte(requestData.NewPassword), bcrypt.DefaultCost)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error hashing the new password."})
-			return
-		}
+        // Hash the new password
+        hashedNewPassword, err := bcrypt.GenerateFromPassword([]byte(requestData.NewPassword), bcrypt.DefaultCost)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error hashing the new password."})
+            return
+        }
 
-		// Обновляем пароль в базе данных
-		_, err = db.Exec("UPDATE users SET password = ? WHERE id = ?", hashedNewPassword, userID)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error updating password."})
-			return
-		}
+        // Update the password in the database
+        _, err = db.Exec("UPDATE users SET password = ? WHERE id = ?", hashedNewPassword, userID)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error updating password."})
+            return
+        }
 
-		// Отправляем успешный ответ
-		utils.ResponseJSON(w, map[string]string{"message": "Password updated successfully."})
-	}
+        // Send success response
+        utils.ResponseJSON(w, map[string]string{"message": "Password updated successfully."})
+    }
 }
+
 func (c Controller) TokenVerifyMiddleware(next http.HandlerFunc) http.HandlerFunc {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         var errorObject models.Error
@@ -486,29 +491,38 @@ func (c Controller) RefreshToken(db *sql.DB) http.HandlerFunc {
             utils.RespondWithError(w, http.StatusBadRequest, error)
             return
         }
+
+        // Разбираем refresh token
         token, err := utils.ParseToken(jwtToken.RefreshToken)
         if err != nil {
             error.Message = "Invalid refresh token."
             utils.RespondWithError(w, http.StatusUnauthorized, error)
             return
         }
+
+        // Проверяем, действителен ли токен
         if !token.Valid {
             error.Message = "Refresh token expired."
             utils.RespondWithError(w, http.StatusUnauthorized, error)
             return
         }
+
+        // Извлекаем claims из токена
         claims, ok := token.Claims.(jwt.MapClaims)
         if !ok {
             error.Message = "Invalid claims."
             utils.RespondWithError(w, http.StatusUnauthorized, error)
             return
         }
+
+        // Извлекаем user_id из claims
         userID, ok := claims["user_id"].(float64)
         if !ok {
             error.Message = "Invalid user_id in token."
             utils.RespondWithError(w, http.StatusUnauthorized, error)
             return
         }
+
         var user models.User
         query := "SELECT id, email, phone, first_name, last_name, age, status FROM users WHERE id = ?"
         err = db.QueryRow(query, int(userID)).Scan(&user.ID, &user.Email, &user.Phone, &user.FirstName, &user.LastName, &user.Age, &user.Role)
@@ -517,12 +531,16 @@ func (c Controller) RefreshToken(db *sql.DB) http.HandlerFunc {
             utils.RespondWithError(w, http.StatusNotFound, error)
             return
         }
+
+        // Генерация нового access токена
         newAccessToken, err := utils.GenerateToken(user)
         if err != nil {
             error.Message = "Error generating new access token."
             utils.RespondWithError(w, http.StatusInternalServerError, error)
             return
         }
+
+        // Возвращаем новый токен
         jwtToken.Token = newAccessToken
         utils.ResponseJSON(w, jwtToken)
     }
@@ -530,6 +548,7 @@ func (c Controller) RefreshToken(db *sql.DB) http.HandlerFunc {
 func (c Controller) VerifyResetToken(w http.ResponseWriter, r *http.Request) {
     tokenStr := r.FormValue("token")
     if tokenStr == "" {
+        // Return the new access token in the response
         http.Error(w, "Token is required", http.StatusBadRequest)
         return
     }
@@ -992,13 +1011,13 @@ func (c Controller) ChangeUserRole(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Проверяем, что роль правильная (например, "user", "director", "superadmin")
-        if requestData.Role != "user" && requestData.Role != "director" && requestData.Role != "superadmin" {
+        // Проверяем, что роль правильная (например, "user", "schooladmin", "superadmin")
+        if requestData.Role != "user" && requestData.Role != "schooladmin" && requestData.Role != "superadmin" {
             log.Printf("Invalid role provided: %s", requestData.Role)
             utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid role"})
             return
         }
-
+        
         // Получаем ID пользователя из токена
         userID, err := utils.VerifyToken(r)
         if err != nil {
@@ -1007,7 +1026,7 @@ func (c Controller) ChangeUserRole(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Проверяем роль пользователя (если это "admin", он может менять роль других пользователей)
+        // Получаем роль пользователя, который отправил запрос
         var userRole string
         err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
         if err != nil {
@@ -1016,10 +1035,9 @@ func (c Controller) ChangeUserRole(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Если роль пользователя не admin, он может изменить только свою роль
-        if userRole != "superadmin" && userID != requestData.UserID {
-            log.Printf("Forbidden: User %d is trying to change another user's role", userID)
-            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only change your own role"})
+        // Проверяем, что роль пользователя - superadmin
+        if userRole != "superadmin" {
+            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to change roles"})
             return
         }
 
@@ -1035,6 +1053,164 @@ func (c Controller) ChangeUserRole(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, map[string]string{"message": "User role updated successfully"})
     }
 }
+func (c Controller) UploadAvatar(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Получаем userID из токена
+        userID, err := utils.VerifyToken(r)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+            return
+        }
+
+        // Чтение файла аватара
+        file, _, err := r.FormFile("avatar")
+        if err != nil {
+            log.Println("Error reading file:", err)
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Error reading file"})
+            return
+        }
+        defer file.Close()
+
+        // Генерация уникального имени файла для аватара
+        uniqueFileName := fmt.Sprintf("avatar-%d-%d.jpg", userID, time.Now().Unix())
+
+        // Загружаем файл в S3
+        photoURL, err := utils.UploadFileToS3(file, uniqueFileName, true) // передаем true для использования второго набора ключей (для аватарки)
+        if err != nil {
+            log.Println("Error uploading file:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to upload avatar"})
+            return
+        }
+
+        // Обновление URL аватара в базе данных
+        query := "UPDATE users SET avatar_url = ? WHERE id = ?"
+        _, err = db.Exec(query, photoURL, userID)
+        if err != nil {
+            log.Println("Error updating avatar URL:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update avatar URL"})
+            return
+        }
+
+        // Ответ с подтверждением
+        utils.ResponseJSON(w, map[string]string{"message": "Avatar uploaded successfully", "avatar_url": photoURL})
+    }
+}
+
+func (c Controller) UpdateAvatar(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Получаем userID из токена
+        userID, err := utils.VerifyToken(r)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+            return
+        }
+
+        // Получаем данные о старом аватаре
+        var currentAvatarURL string
+        query := "SELECT avatar_url FROM users WHERE id = ?"
+        err = db.QueryRow(query, userID).Scan(&currentAvatarURL)
+        if err != nil {
+            log.Println("Error fetching current avatar:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch current avatar"})
+            return
+        }
+
+        // Удаление старого аватара с S3, если он существует
+        if currentAvatarURL != "" && currentAvatarURL != "https://your-bucket-name.s3.amazonaws.com/default-avatar.jpg" {
+            err := utils.DeleteFileFromS3(currentAvatarURL)
+            if err != nil {
+                log.Println("Error deleting old avatar from S3:", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete old avatar"})
+                return
+            }
+        }
+
+        // Чтение нового аватара
+        file, _, err := r.FormFile("avatar")
+        if err != nil {
+            log.Println("Error reading file:", err)
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Error reading file"})
+            return
+        }
+        defer file.Close()
+
+        // Генерация уникального имени файла для аватара
+        uniqueFileName := fmt.Sprintf("avatar-%d-%d.jpg", userID, time.Now().Unix())
+
+        // Загружаем новый файл в S3 с третьим аргументом `true` для аватарок
+        newAvatarURL, err := utils.UploadFileToS3(file, uniqueFileName, true) // Передаем true, чтобы использовать второй набор ключей для аватарок
+        if err != nil {
+            log.Println("Error uploading new avatar:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to upload new avatar"})
+            return
+        }
+
+        // Обновление URL аватара в базе данных
+        query = "UPDATE users SET avatar_url = ? WHERE id = ?"
+        _, err = db.Exec(query, newAvatarURL, userID)
+        if err != nil {
+            log.Println("Error updating avatar URL:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update avatar URL"})
+            return
+        }
+
+        // Ответ с подтверждением
+        utils.ResponseJSON(w, map[string]string{"message": "Avatar updated successfully", "avatar_url": newAvatarURL})
+    }
+}
+
+func (c Controller) DeleteAvatar(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Получаем userID из токена
+        userID, err := utils.VerifyToken(r)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+            return
+        }
+
+        // Получаем текущий URL аватара из базы данных
+        var currentAvatarURL string
+        query := "SELECT avatar_url FROM users WHERE id = ?"
+        err = db.QueryRow(query, userID).Scan(&currentAvatarURL)
+        if err != nil {
+            log.Println("Error fetching current avatar:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch current avatar"})
+            return
+        }
+
+        // Проверяем, что у пользователя есть аватар, который можно удалить
+        if currentAvatarURL == "" || currentAvatarURL == "https://your-bucket-name.s3.amazonaws.com/default-avatar.jpg" {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "No avatar to delete"})
+            return
+        }
+
+        // Удаляем старое изображение с S3
+        err = utils.DeleteFileFromS3(currentAvatarURL) // Здесь больше не передаем параметр bool
+        if err != nil {
+            log.Println("Error deleting avatar from S3:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete avatar"})
+            return
+        }
+
+        // Сбрасываем URL аватара на дефолтный в базе данных
+        query = "UPDATE users SET avatar_url = ? WHERE id = ?"
+        _, err = db.Exec(query, "https://your-bucket-name.s3.amazonaws.com/default-avatar.jpg", userID)
+        if err != nil {
+            log.Println("Error resetting avatar URL:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to reset avatar URL"})
+            return
+        }
+
+        // Ответ с подтверждением
+        utils.ResponseJSON(w, map[string]string{"message": "Avatar deleted successfully"})
+    }
+}
+
+
+
+
+
+
 
 
 

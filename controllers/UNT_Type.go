@@ -233,5 +233,77 @@ func (sc *UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, types)
     }
 }
+func (tc *TypeController) GetAverageUNTScore(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        schoolID := r.URL.Query().Get("school_id")
+        if schoolID == "" {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "school_id is required"})
+            return
+        }
+
+        query := `
+            SELECT 
+                first_subject_score, 
+                second_subject_score, 
+                history_of_kazakhstan, 
+                mathematical_literacy, 
+                reading_literacy
+            FROM UNT_Type
+            WHERE school_id = ? AND type = 'type-1';
+        `
+        
+        rows, err := db.Query(query, schoolID)
+        if err != nil {
+            log.Printf("Error fetching UNT Type records: %v", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch UNT Type records"})
+            return
+        }
+        defer rows.Close()
+
+        var totalScore float64
+        var count int
+
+        for rows.Next() {
+            var firstSubjectScore, secondSubjectScore, historyKazakhstan, mathematicalLiteracy, readingLiteracy sql.NullInt64
+            err := rows.Scan(&firstSubjectScore, &secondSubjectScore, &historyKazakhstan, &mathematicalLiteracy, &readingLiteracy)
+            if err != nil {
+                log.Printf("Error scanning row: %v", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error scanning UNT Type records"})
+                return
+            }
+
+            // Суммируем баллы всех предметов
+            totalScore += float64(firstSubjectScore.Int64 + secondSubjectScore.Int64 + historyKazakhstan.Int64 + mathematicalLiteracy.Int64 + readingLiteracy.Int64)
+            count++
+        }
+
+        if count == 0 {
+            utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No students found"})
+            return
+        }
+
+        // Рассчитываем среднюю оценку
+        averageScore := totalScore / float64(count)
+
+        // Обновляем рейтинг школы
+        updateQuery := `
+            UPDATE Schools
+            SET average_unt_score = ?
+            WHERE school_id = ?
+        `
+        _, err = db.Exec(updateQuery, averageScore, schoolID)
+        if err != nil {
+            log.Printf("Error updating school rating: %v", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update school rating"})
+            return
+        }
+
+        // Возвращаем результат
+        utils.ResponseJSON(w, map[string]interface{}{
+            "average_unt_score": averageScore,
+        })
+    }
+}
+
 
 

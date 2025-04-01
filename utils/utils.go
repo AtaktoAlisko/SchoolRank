@@ -136,11 +136,11 @@ func GenerateRefreshToken(user models.User) (string, error) {
         return "", errors.New("SECRET environment variable is not set")
     }
 
-    // Create refresh token claims
+    // Create refresh token claims with expiration time of 5 minutes
     claims := jwt.MapClaims{
-        "iss": "course",
+        "iss":    "course",
         "user_id": user.ID, // Adding user_id
-        "exp": time.Now().Add(30 * 24 * time.Hour).Unix(), // Refresh token validity (30 days)
+        "exp":    time.Now().Add(2 * time.Minute).Unix(), // Refresh token validity (5 minutes)
     }
 
     // Adding email or phone based on provided information
@@ -245,58 +245,61 @@ func NullableValue(value interface{}) interface{} {
     }
     return value
 }
+func UploadFileToS3(file multipart.File, fileName string, isAvatar bool) (string, error) {
+    var accessKey, secretKey, region, bucketName string
 
+    // Если это аватар, используем второй набор ключей и бакет для аватаров
+    if isAvatar {
+        accessKey = os.Getenv("AWS_ACCESS_KEY2_ID")
+        secretKey = os.Getenv("AWS_SECRET_ACCESS2_KEY")
+        region = os.Getenv("AWS_REGION2")
+        bucketName = "avatarschoolrank" // Бакет для аватаров
+    } else {
+        // Для школьных фото используем первый набор ключей и бакет для фото
+        accessKey = os.Getenv("AWS_ACCESS_KEY_ID")
+        secretKey = os.Getenv("AWS_SECRET_ACCESS_KEY")
+        region = os.Getenv("AWS_REGION")
+        bucketName = "schoolrank-schoolphotos" // Бакет для школьных фото
+    }
 
-func UploadFileToS3(file multipart.File, fileName string) (string, error) {
-    // 1. Считываем ключи и регион из окружения
-    accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
-    secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
-    region := os.Getenv("AWS_REGION") // Например, "eu-north-1"
-
+    // Проверяем, что ключи и регион заданы
     if accessKey == "" || secretKey == "" || region == "" {
         return "", fmt.Errorf("AWS credentials or region not set in environment")
     }
 
-    // 2. Создаём AWS-сессию
+    // Создаем сессию с AWS
     sess, err := session.NewSession(&aws.Config{
-        Region: aws.String(region),
-        Credentials: credentials.NewStaticCredentials(
-            accessKey,
-            secretKey,
-            "",
-        ),
+        Region:      aws.String(region),
+        Credentials: credentials.NewStaticCredentials(accessKey, secretKey, ""),
     })
     if err != nil {
         return "", fmt.Errorf("failed to create AWS session: %v", err)
     }
 
-    // 3. Клиент S3
+    // Создаем клиент для S3
     svc := s3.New(sess)
 
-    // 4. Читаем файл в буфер
+    // Считываем файл в буфер
     buf := new(bytes.Buffer)
     _, err = io.Copy(buf, file)
     if err != nil {
         return "", fmt.Errorf("failed to read file buffer: %v", err)
     }
 
-    // 5. Параметры загрузки
-    bucketName := "schoolrank-schoolphotos" // Ваш бакет
+    // Задаем имя бакета
     input := &s3.PutObjectInput{
         Bucket: aws.String(bucketName),
         Key:    aws.String(fileName),
         Body:   bytes.NewReader(buf.Bytes()),
-        // Если бакет не поддерживает ACL, уберите:
-        // ACL: aws.String("public-read"),
     }
 
-    // 6. Загружаем файл
+    // Загружаем файл в S3
     _, err = svc.PutObject(input)
     if err != nil {
         return "", fmt.Errorf("failed to upload file to S3: %v", err)
     }
 
-    // 7. Формируем URL
+    // Формируем URL для доступа к файлу
     url := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", bucketName, region, fileName)
     return url, nil
 }
@@ -305,5 +308,51 @@ func StrToInt(s string) (int, error) {
 	s = strings.TrimSpace(s)  // Убираем все пробельные символы (включая новую строку)
 	return strconv.Atoi(s)
 }
+func DeleteFileFromS3(fileURL string) error {
+    // Определяем, какой бакет использовать
+    var accessKey, secretKey, region, bucketName string
+
+    if strings.Contains(fileURL, "avatar") {
+        // Для аватаров
+        accessKey = os.Getenv("AWS_ACCESS_KEY2_ID")
+        secretKey = os.Getenv("AWS_SECRET_ACCESS2_KEY")
+        region = os.Getenv("AWS_REGION2")
+        bucketName = "avatarschoolrank" // Бакет для аватаров
+    } else {
+        // Для других файлов (школьных фото)
+        accessKey = os.Getenv("AWS_ACCESS_KEY_ID")
+        secretKey = os.Getenv("AWS_SECRET_ACCESS_KEY")
+        region = os.Getenv("AWS_REGION")
+        bucketName = "your-school-photo-bucket" // Бакет для школьных фото
+    }
+
+    // Создаем сессию с AWS
+    sess, err := session.NewSession(&aws.Config{
+        Region:      aws.String(region),
+        Credentials: credentials.NewStaticCredentials(accessKey, secretKey, ""),
+    })
+    if err != nil {
+        return fmt.Errorf("failed to create AWS session: %v", err)
+    }
+
+    svc := s3.New(sess)
+    // Извлекаем ключ из URL
+    key := strings.TrimPrefix(fileURL, "https://"+bucketName+".s3."+region+".amazonaws.com/")
+
+    // Удаляем объект из S3
+    _, err = svc.DeleteObject(&s3.DeleteObjectInput{
+        Bucket: aws.String(bucketName),
+        Key:    aws.String(key),
+    })
+    if err != nil {
+        return fmt.Errorf("failed to delete file from S3: %v", err)
+    }
+
+    return nil
+}
+
+
+
+
 
 

@@ -55,11 +55,11 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Step 6: Insert the student into the database
-		query := `INSERT INTO Student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, parent_name, parent_phone_number) 
-		          VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		query := `INSERT INTO Student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email) 
+		          VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 		// Execute the query
-		result, err := db.Exec(query, student.FirstName, student.LastName, student.Patronymic, student.IIN, student.SchoolID, student.DateOfBirth, student.Grade, student.ParentName, student.ParentPhoneNumber)
+		result, err := db.Exec(query, student.FirstName, student.LastName, student.Patronymic, student.IIN, student.SchoolID, student.DateOfBirth, student.Grade, student.Letter, student.Gender, student.Phone, student.Email)
 		if err != nil {
 			log.Println("Error inserting student:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create student"})
@@ -81,10 +81,11 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, student)
 	}
 }
+
 func (sc StudentController) GetStudents(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Step 1: Query the database for student details, including parent info
-		rows, err := db.Query("SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, parent_name, parent_phone_number FROM Student")
+		// Step 1: Query the database for student details
+		rows, err := db.Query("SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email FROM Student")
 		if err != nil {
 			log.Println("SQL Error:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get students"})
@@ -97,13 +98,13 @@ func (sc StudentController) GetStudents(db *sql.DB) http.HandlerFunc {
 			var student models.Student
 
 			// Step 2: Handle the possibility of NULL values using sql.Null types
-			var firstName, lastName, patronymic, iin, parentName, parentPhoneNumber sql.NullString
+			var firstName, lastName, patronymic, iin, letter, gender, phone, email sql.NullString
 			var schoolID sql.NullInt64
 			var dateOfBirth sql.NullString
 			var grade sql.NullInt64
 
 			// Step 3: Scan the row into the student object
-			if err := rows.Scan(&student.ID, &firstName, &lastName, &patronymic, &iin, &schoolID, &dateOfBirth, &grade, &parentName, &parentPhoneNumber); err != nil {
+			if err := rows.Scan(&student.ID, &firstName, &lastName, &patronymic, &iin, &schoolID, &dateOfBirth, &grade, &letter, &gender, &phone, &email); err != nil {
 				log.Println("Scan Error:", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse students"})
 				return
@@ -131,11 +132,17 @@ func (sc StudentController) GetStudents(db *sql.DB) http.HandlerFunc {
 			if grade.Valid {
 				student.Grade = int(grade.Int64)
 			}
-			if parentName.Valid {
-				student.ParentName = parentName.String
+			if letter.Valid {
+				student.Letter = letter.String
 			}
-			if parentPhoneNumber.Valid {
-				student.ParentPhoneNumber = parentPhoneNumber.String
+			if gender.Valid {
+				student.Gender = gender.String
+			}
+			if phone.Valid {
+				student.Phone = phone.String
+			}
+			if email.Valid {
+				student.Email = email.String
 			}
 
 			// Step 5: Append the student to the students slice
@@ -146,8 +153,9 @@ func (sc StudentController) GetStudents(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, students)
 	}
 }
+
 func (sc StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
-// UpdateStudent is an HTTP handler for updating a student's details.
+	// UpdateStudent is an HTTP handler for updating a student's details.
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract student_id from the query parameters
 		studentID := r.URL.Query().Get("student_id")
@@ -161,12 +169,9 @@ func (sc StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 		err := db.QueryRow("SELECT student_id FROM Student WHERE student_id = ?", studentID).Scan(&existingStudent.ID)
 		if err != nil {
 			if err == sql.ErrNoRows {
-			// If the student does not exist, respond with a 404 error
-				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Student not found"})
 				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found"})
 			} else {
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching student details"})
-				// If there was an error fetching the student, respond with a 500 error
 			}
 			return
 		}
@@ -175,20 +180,21 @@ func (sc StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 		var updatedStudent models.Student
 		if err := json.NewDecoder(r.Body).Decode(&updatedStudent); err != nil {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
-			// If the request body is invalid, respond with a 400 error
 			return
 		}
 
 		// Prepare the update query
 		query := `UPDATE Student 
-				  SET first_name = ?, last_name = ?, patronymic = ?, iin = ?, date_of_birth = ?, grade = ?, school_id = ?, parent_name = ?, parent_phone_number = ? 
+				  SET first_name = ?, last_name = ?, patronymic = ?, iin = ?, date_of_birth = ?, grade = ?, school_id = ?, 
+				  letter = ?, gender = ?, phone = ?, email = ?
 				  WHERE student_id = ?`
 
 		// Execute the update query
-		_, err = db.Exec(query, updatedStudent.FirstName, updatedStudent.LastName, updatedStudent.Patronymic, updatedStudent.IIN, updatedStudent.DateOfBirth, updatedStudent.Grade, updatedStudent.SchoolID, updatedStudent.ParentName, updatedStudent.ParentPhoneNumber, studentID)
+		_, err = db.Exec(query, updatedStudent.FirstName, updatedStudent.LastName, updatedStudent.Patronymic, 
+							updatedStudent.IIN, updatedStudent.DateOfBirth, updatedStudent.Grade, updatedStudent.SchoolID, 
+							updatedStudent.Letter, updatedStudent.Gender, updatedStudent.Phone, updatedStudent.Email, studentID)
 		if err != nil {
 			log.Println("Error updating student:", err)
-			// If there was an error updating the student, respond with a 500 error
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update student"})
 			return
 		}
@@ -197,6 +203,7 @@ func (sc StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, updatedStudent)
 	}
 }
+
 func (sc StudentController) DeleteStudent(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Get student_id from the query parameters
@@ -211,7 +218,7 @@ func (sc StudentController) DeleteStudent(db *sql.DB) http.HandlerFunc {
 		err := db.QueryRow("SELECT student_id FROM Student WHERE student_id = ?", studentID).Scan(&existingStudent.ID)
 		if err != nil {
 			if err == sql.ErrNoRows {
-				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Student not found"})
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found"})
 			} else {
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching student details"})
 			}
@@ -230,85 +237,6 @@ func (sc StudentController) DeleteStudent(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, map[string]string{"message": "Student deleted successfully"})
 	}
 }
-func (sc StudentController) CreateUNTResults(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var result models.UNTScore
-		if err := json.NewDecoder(r.Body).Decode(&result); err != nil {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
-			return
-		}
 
-		// Проверяем существование Student и UNT_Type
-		var studentExists, untTypeExists bool
-		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM Student WHERE student_id = ?)", result.StudentID).Scan(&studentExists)
-		if err != nil || !studentExists {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Student ID does not exist"})
-			return
-		}
-
-		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM UNT_Type WHERE unt_type_id = ?)", result.UNTTypeID).Scan(&untTypeExists)
-		if err != nil || !untTypeExists {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "UNT Type ID does not exist"})
-			return
-		}
-
-		// Считаем totalScore корректно по типу
-		totalScore := 0
-		if result.UNTTypeID == 1 {
-			totalScore = result.FirstSubjectScore + result.SecondSubjectScore + result.HistoryKazakhstan + result.MathematicalLiteracy + result.ReadingLiteracy
-		} else if result.UNTTypeID == 2 {
-			totalScore = result.HistoryKazakhstan + result.ReadingLiteracy
-		}
-
-		// Правильный запрос на вставку данных
-		query := `INSERT INTO UNT_Score (year, unt_type_id, student_id, first_subject_score, second_subject_score, history_of_kazakhstan, math_literacy, reading_literacy, total_score) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`
-		_, err = db.Exec(query, result.Year, result.UNTTypeID, result.StudentID, result.FirstSubjectScore, result.SecondSubjectScore, result.HistoryKazakhstan, result.MathematicalLiteracy, result.ReadingLiteracy, totalScore)
-		if err != nil {
-			log.Println("SQL Error:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create UNT score"})
-			return
-		}
-
-		utils.ResponseJSON(w, "UNT results saved successfully")
-	}
-}
-func (sc StudentController) GetUNTResults(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		studentID := r.URL.Query().Get("student_id")
-		if studentID == "" {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "student_id is required"})
-			return
-		}
-
-		rows, err := db.Query(`
-			SELECT unt_score_id, year, unt_type_id, student_id, 
-				   first_subject_score, second_subject_score, 
-				   history_of_kazakhstan, math_literacy, 
-				   reading_literacy, total_score
-			FROM UNT_Score 
-			WHERE student_id = ?`, studentID)
-		if err != nil {
-			log.Println("SQL Error:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get UNT results"})
-			return
-		}
-		defer rows.Close()
-
-		var results []models.UNTScore
-		for rows.Next() {
-			var result models.UNTScore
-			if err := rows.Scan(&result.ID, &result.Year, &result.UNTTypeID, &result.StudentID,
-				&result.FirstSubjectScore, &result.SecondSubjectScore, &result.HistoryKazakhstan,
-				&result.MathematicalLiteracy, &result.ReadingLiteracy, &result.TotalScore); err != nil {
-				log.Println("Scan Error:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse UNT results"})
-				return
-			}
-			results = append(results, result)
-		}
-
-		utils.ResponseJSON(w, results)
-	}
-}
 
 

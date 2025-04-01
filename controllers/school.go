@@ -50,7 +50,7 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
         uniqueFileName := fmt.Sprintf("school-%d-%d.jpg", userID, time.Now().Unix())
 
         // 5. Загружаем файл в S3
-        photoURL, err := utils.UploadFileToS3(file, uniqueFileName)
+        photoURL, err := utils.UploadFileToS3(file, uniqueFileName, false) // Передаем false для школьных фото
         if err != nil {
             log.Println("Error uploading file:", err)
             utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to upload file"})
