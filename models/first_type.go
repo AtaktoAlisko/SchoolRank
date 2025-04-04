@@ -1,16 +1,16 @@
 package models
 
 type FirstType struct {
-	ID                   int     `json:"id"`
-	FirstSubjectID       *int    `json:"first_subject_id,omitempty"`    // Указатель на int
-	SecondSubjectID      *int    `json:"second_subject_id,omitempty"`   // Указатель на int
-	HistoryOfKazakhstan  *int    `json:"history_of_kazakhstan,omitempty"`// Указатель на int
-	MathematicalLiteracy *int    `json:"mathematical_literacy,omitempty"`// Указатель на int
-	ReadingLiteracy      *int    `json:"reading_literacy,omitempty"`     // Указатель на int
-	FirstSubjectName     *string `json:"first_subject_name,omitempty"`   // Указатель на string
-	SecondSubjectName    *string `json:"second_subject_name,omitempty"`  // Указатель на string
-	FirstSubjectScore    *int    `json:"first_subject_score,omitempty"`  // Указатель на int
-	SecondSubjectScore   *int    `json:"second_subject_score,omitempty"` // Указатель на int
-	TotalScore           *int    `json:"total_score,omitempty"`          // Новый параметр для общего балла
-	Type                 string  `json:"type"`                           // Поле для типа ЕН
+    ID                   int    `json:"id"`                   // Идентификатор записи
+    FirstSubject         string `json:"first_subject"`         // Название первого предмета
+    FirstSubjectScore    int    `json:"first_subject_score"`   // Баллы по первому предмету
+    SecondSubject        string `json:"second_subject"`        // Название второго предмета
+    SecondSubjectScore   int    `json:"second_subject_score"`  // Баллы по второму предмету
+    HistoryOfKazakhstan  int    `json:"history_of_kazakhstan"` // Баллы по истории Казахстана
+    MathematicalLiteracy int    `json:"mathematical_literacy"` // Баллы по математической грамотности
+    ReadingLiteracy      int    `json:"reading_literacy"`      // Баллы по читательской грамотности
+    TotalScore           int    `json:"total_score"`           // Общий балл
+    Type                 string `json:"type"`                  // Тип экзамена
+    StudentID            int    `json:"student_id"`            // ID студента
+	SchoolID            int     `json:"school_id"`
 }

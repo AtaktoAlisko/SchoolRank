@@ -1095,7 +1095,6 @@ func (c Controller) UploadAvatar(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, map[string]string{"message": "Avatar uploaded successfully", "avatar_url": photoURL})
     }
 }
-
 func (c Controller) UpdateAvatar(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         // Получаем userID из токена

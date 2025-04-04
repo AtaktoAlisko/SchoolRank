@@ -21,7 +21,6 @@ func nullableValue(value interface{}) interface{} {
 	}
 	return value
 }
-
 func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         // Получаем userID из токена
@@ -31,7 +30,7 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Проверяем роль и школу директора
+        // Проверка на роль и школу
         var userRole string
         var userSchoolID sql.NullInt64
         err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
@@ -47,31 +46,26 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Проверяем существование First_Subject и Second_Subject
-        var firstSubjectExists, secondSubjectExists bool
-        err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM First_Subject WHERE first_subject_id = ?)", firstType.FirstSubjectID).Scan(&firstSubjectExists)
-        if err != nil || !firstSubjectExists {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "First Subject ID does not exist"})
-            return
-        }
+        // Вычисление total_score
+        totalScore := firstType.FirstSubjectScore + firstType.SecondSubjectScore + firstType.HistoryOfKazakhstan +
+            firstType.MathematicalLiteracy + firstType.ReadingLiteracy
 
-        err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM Second_Subject WHERE second_subject_id = ?)", firstType.SecondSubjectID).Scan(&secondSubjectExists)
-        if err != nil || !secondSubjectExists {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Second Subject ID does not exist"})
-            return
-        }
-
-        // Вставляем First Type в БД с привязкой к школе директора и новым полем type
-        query := `INSERT INTO First_Type (first_subject_id, second_subject_id, history_of_kazakhstan, mathematical_literacy, reading_literacy, school_id, type) 
-                  VALUES (?, ?, ?, ?, ?, ?, ?)`
+        // Вставляем First Type в БД с привязкой к школе директора и новым полем type и student_id
+        query := `INSERT INTO First_Type (first_subject, first_subject_score, second_subject, second_subject_score, 
+                      history_of_kazakhstan, mathematical_literacy, reading_literacy, type, student_id, school_id, total_score) 
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         _, err = db.Exec(query, 
-            firstType.FirstSubjectID, 
-            firstType.SecondSubjectID, 
+            firstType.FirstSubject, 
+            firstType.FirstSubjectScore, 
+            firstType.SecondSubject, 
+            firstType.SecondSubjectScore, 
             firstType.HistoryOfKazakhstan, 
             firstType.MathematicalLiteracy, 
             firstType.ReadingLiteracy,
-            userSchoolID.Int64, 
-            firstType.Type) // Указываем type
+            firstType.Type, 
+            firstType.StudentID,
+            userSchoolID.Int64, // Добавляем school_id из токена
+            totalScore) // Добавляем вычисленный total_score
 
         if err != nil {
             log.Println("SQL Error:", err)
@@ -84,24 +78,23 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 }
 func (c *TypeController) GetFirstTypes(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
-        // Запрос с JOIN, который соединяет несколько таблиц
         query := `
         SELECT 
             ft.first_type_id, 
-            ft.first_subject_id, 
-            fs.subject AS first_subject_name, 
-            COALESCE(fs.score, 0) AS first_subject_score,
-            ft.second_subject_id, 
-            ss.subject AS second_subject_name, 
-            COALESCE(ss.score, 0) AS second_subject_score,
+            ft.first_subject AS first_subject_name, 
+            COALESCE(ft.first_subject_score, 0) AS first_subject_score,
+            ft.second_subject AS second_subject_name, 
+            COALESCE(ft.second_subject_score, 0) AS second_subject_score,
             COALESCE(ft.history_of_kazakhstan, 0) AS history_of_kazakhstan, 
             COALESCE(ft.mathematical_literacy, 0) AS mathematical_literacy, 
             COALESCE(ft.reading_literacy, 0) AS reading_literacy,
             ft.type,
-            (COALESCE(fs.score, 0) + COALESCE(ss.score, 0) + COALESCE(ft.history_of_kazakhstan, 0) + COALESCE(ft.mathematical_literacy, 0) + COALESCE(ft.reading_literacy, 0)) AS total_score
-        FROM First_Type ft
-        LEFT JOIN First_Subject fs ON ft.first_subject_id = fs.first_subject_id
-        LEFT JOIN Second_Subject ss ON ft.second_subject_id = ss.second_subject_id`
+            COALESCE(ft.student_id, 0) AS student_id, 
+            ft.school_id,
+            (COALESCE(ft.first_subject_score, 0) + COALESCE(ft.second_subject_score, 0) + 
+             COALESCE(ft.history_of_kazakhstan, 0) + COALESCE(ft.mathematical_literacy, 0) + 
+             COALESCE(ft.reading_literacy, 0)) AS total_score
+        FROM First_Type ft`
 
         rows, err := db.Query(query)
         if err != nil {
@@ -114,33 +107,57 @@ func (c *TypeController) GetFirstTypes(db *sql.DB) http.HandlerFunc {
         var types []models.FirstType
         for rows.Next() {
             var firstType models.FirstType
-            var typeColumn sql.NullString // Используем NullString для обработки NULL значений
+            var firstSubjectName sql.NullString
+            var secondSubjectName sql.NullString
+            var typeColumn sql.NullString // Для обработки значения NULL в поле type
+            var schoolID sql.NullInt64 // Для обработки значения school_id
+
             if err := rows.Scan(
                 &firstType.ID,
-                &firstType.FirstSubjectID, &firstType.FirstSubjectName, &firstType.FirstSubjectScore,
-                &firstType.SecondSubjectID, &firstType.SecondSubjectName, &firstType.SecondSubjectScore,
+                &firstSubjectName, &firstType.FirstSubjectScore,
+                &secondSubjectName, &firstType.SecondSubjectScore,
                 &firstType.HistoryOfKazakhstan, 
                 &firstType.MathematicalLiteracy, 
                 &firstType.ReadingLiteracy,
-                &typeColumn, // Получаем тип как NullString
-                &firstType.TotalScore, // Обновляем на total_score
+                &typeColumn, // Добавляем sql.NullString для поля type
+                &firstType.StudentID,
+                &schoolID, // Добавляем поле school_id
+                &firstType.TotalScore,
             ); err != nil {
                 log.Println("Scan Error:", err)
                 utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse First Types"})
                 return
             }
 
-            // Преобразуем тип из NullString в обычный string, если значение не NULL
+            // Преобразуем sql.NullString в обычные строки
+            if firstSubjectName.Valid {
+                firstType.FirstSubject = firstSubjectName.String
+            } else {
+                firstType.FirstSubject = ""
+            }
+
+            if secondSubjectName.Valid {
+                firstType.SecondSubject = secondSubjectName.String
+            } else {
+                firstType.SecondSubject = ""
+            }
+
             if typeColumn.Valid {
                 firstType.Type = typeColumn.String
             } else {
-                firstType.Type = "" // Если значение NULL, то присваиваем пустую строку
+                firstType.Type = "" // Если type равно NULL, присваиваем пустую строку
+            }
+
+            if schoolID.Valid {
+                firstType.SchoolID = int(schoolID.Int64) // Преобразуем school_id из sql.NullInt64
+            } else {
+                firstType.SchoolID = 0 // Если school_id равно NULL, присваиваем 0
             }
 
             types = append(types, firstType)
         }
 
-        utils.ResponseJSON(w, types)
+        utils.ResponseJSON(w, types)  // Возвращаем результат в формате JSON
     }
 }
 func (c *TypeController) GetFirstTypesBySchool(db *sql.DB) http.HandlerFunc {
@@ -157,21 +174,20 @@ func (c *TypeController) GetFirstTypesBySchool(db *sql.DB) http.HandlerFunc {
         query := `
         SELECT 
             ft.first_type_id, 
-            ft.first_subject_id, 
-            fs.subject AS first_subject_name, 
-            COALESCE(fs.score, 0) AS first_subject_score,
-            ft.second_subject_id, 
-            ss.subject AS second_subject_name, 
-            COALESCE(ss.score, 0) AS second_subject_score,
+            ft.first_subject,  -- Используем first_subject
+            COALESCE(ft.first_subject_score, 0) AS first_subject_score,
+            ft.second_subject, -- Используем second_subject
+            COALESCE(ft.second_subject_score, 0) AS second_subject_score,
             COALESCE(ft.history_of_kazakhstan, 0) AS history_of_kazakhstan, 
             COALESCE(ft.mathematical_literacy, 0) AS mathematical_literacy, 
             COALESCE(ft.reading_literacy, 0) AS reading_literacy,
             ft.type,
-            (COALESCE(fs.score, 0) + COALESCE(ss.score, 0) + COALESCE(ft.history_of_kazakhstan, 0) + COALESCE(ft.mathematical_literacy, 0) + COALESCE(ft.reading_literacy, 0)) AS total_score
+            COALESCE(ft.student_id, 0) AS student_id, 
+            (COALESCE(ft.first_subject_score, 0) + COALESCE(ft.second_subject_score, 0) + 
+             COALESCE(ft.history_of_kazakhstan, 0) + COALESCE(ft.mathematical_literacy, 0) + 
+             COALESCE(ft.reading_literacy, 0)) AS total_score
         FROM First_Type ft
-        LEFT JOIN First_Subject fs ON ft.first_subject_id = fs.first_subject_id
-        LEFT JOIN Second_Subject ss ON ft.second_subject_id = ss.second_subject_id
-        WHERE ft.school_id = ?`  // Фильтрация по school_id
+        WHERE ft.school_id = ?`  /* Фильтрация по school_id */
 
         rows, err := db.Query(query, schoolID)
         if err != nil {
@@ -184,26 +200,20 @@ func (c *TypeController) GetFirstTypesBySchool(db *sql.DB) http.HandlerFunc {
         var types []models.FirstType
         for rows.Next() {
             var firstType models.FirstType
-            var typeColumn sql.NullString
             if err := rows.Scan(
                 &firstType.ID,
-                &firstType.FirstSubjectID, &firstType.FirstSubjectName, &firstType.FirstSubjectScore,
-                &firstType.SecondSubjectID, &firstType.SecondSubjectName, &firstType.SecondSubjectScore,
+                &firstType.FirstSubject, &firstType.FirstSubjectScore,
+                &firstType.SecondSubject, &firstType.SecondSubjectScore,
                 &firstType.HistoryOfKazakhstan, 
                 &firstType.MathematicalLiteracy, 
                 &firstType.ReadingLiteracy,
-                &typeColumn, 
+                &firstType.Type, 
+                &firstType.StudentID, 
                 &firstType.TotalScore,
             ); err != nil {
                 log.Println("Scan Error:", err)
                 utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse First Types"})
                 return
-            }
-
-            if typeColumn.Valid {
-                firstType.Type = typeColumn.String
-            } else {
-                firstType.Type = ""
             }
 
             types = append(types, firstType)
@@ -326,6 +336,57 @@ func (c *TypeController) GetSecondTypes(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, types)
     }
 }
+func (c *TypeController) GetAverageRatingBySchool(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Извлекаем school_id из параметров URL
+        vars := mux.Vars(r)
+        schoolID, err := strconv.Atoi(vars["school_id"])
+        if err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+            return
+        }
+
+        // Запрос для получения среднего балла по всем предметам для школы
+        query := `
+        SELECT 
+            AVG(CASE WHEN ft.first_subject_score IS NOT NULL THEN ft.first_subject_score ELSE 0 END) AS avg_first_subject_score,
+            AVG(CASE WHEN ft.second_subject_score IS NOT NULL THEN ft.second_subject_score ELSE 0 END) AS avg_second_subject_score,
+            AVG(CASE WHEN ft.history_of_kazakhstan IS NOT NULL THEN ft.history_of_kazakhstan ELSE 0 END) AS avg_history_of_kazakhstan,
+            AVG(CASE WHEN ft.mathematical_literacy IS NOT NULL THEN ft.mathematical_literacy ELSE 0 END) AS avg_mathematical_literacy,
+            AVG(CASE WHEN ft.reading_literacy IS NOT NULL THEN ft.reading_literacy ELSE 0 END) AS avg_reading_literacy,
+            AVG(CASE WHEN ft.first_subject_score IS NOT NULL AND ft.second_subject_score IS NOT NULL AND 
+                     ft.history_of_kazakhstan IS NOT NULL AND ft.mathematical_literacy IS NOT NULL AND 
+                     ft.reading_literacy IS NOT NULL 
+                     THEN (ft.first_subject_score + ft.second_subject_score + ft.history_of_kazakhstan + 
+                           ft.mathematical_literacy + ft.reading_literacy) ELSE 0 END) AS avg_total_score
+        FROM First_Type ft
+        WHERE ft.school_id = ?`
+
+        row := db.QueryRow(query, schoolID)
+
+        var avgFirstSubjectScore, avgSecondSubjectScore, avgHistoryOfKazakhstan, avgMathematicalLiteracy, avgReadingLiteracy, avgTotalScore float64
+
+        err = row.Scan(&avgFirstSubjectScore, &avgSecondSubjectScore, &avgHistoryOfKazakhstan, &avgMathematicalLiteracy, &avgReadingLiteracy, &avgTotalScore)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to calculate average rating"})
+            return
+        }
+
+        // Ответ с данными среднего балла
+        result := map[string]float64{
+            "avg_first_subject_score":      avgFirstSubjectScore,
+            "avg_second_subject_score":     avgSecondSubjectScore,
+            "avg_history_of_kazakhstan":    avgHistoryOfKazakhstan,
+            "avg_mathematical_literacy":    avgMathematicalLiteracy,
+            "avg_reading_literacy":         avgReadingLiteracy,
+            "avg_total_score":              avgTotalScore,
+        }
+
+        utils.ResponseJSON(w, result)  // Возвращаем результат в формате JSON
+    }
+}
+
 
 
 

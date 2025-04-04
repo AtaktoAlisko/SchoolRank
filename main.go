@@ -63,7 +63,6 @@ func main() {
 	controller := controllers.Controller{}
 	schoolController := controllers.SchoolController{}
 	untScoreController := controllers.UNTScoreController{}
-	subjectController := controllers.SubjectController{}
 	typeController := controllers.TypeController{}
 	untTypeController := controllers.UNTTypeController{}
 	studentController := controllers.StudentController{}
@@ -105,16 +104,8 @@ func main() {
 	router.HandleFunc("/reviews/create", reviewController.CreateReview(db)).Methods("POST")
 	router.HandleFunc("/reviews/school/{school_id}", reviewController.GetReviewsBySchool(db)).Methods("GET")
 	router.HandleFunc("/reviews/average-rating/{school_id}", reviewController.GetAverageRating(db)).Methods("GET")
-	
-	// *** Subjects ***
-	router.HandleFunc("/api/subjects/first", subjectController.GetFirstSubjects(db)).Methods("GET")
-	router.HandleFunc("/api/subjects/first/create", subjectController.CreateFirstSubject(db)).Methods("POST")
-	router.HandleFunc("/api/subjects/second", subjectController.GetSecondSubjects(db)).Methods("GET")
-	router.HandleFunc("/api/subjects/second/create", subjectController.CreateSecondSubject(db)).Methods("POST")
-    router.HandleFunc("/api/subjects/first/school/{school_id}", subjectController.GetFirstSubjectsBySchool(db)).Methods("GET")
-    router.HandleFunc("/api/subjects/second/school/{school_id}", subjectController.GetSecondSubjectsBySchool(db)).Methods("GET")
 
-
+	// *** Types ***
 	router.HandleFunc("/api/unt-types/create", untTypeController.CreateUNTType(db)).Methods("POST")
 	router.HandleFunc("/api/unt-types", untTypeController.GetUNTTypes(db)).Methods("GET")
 	
@@ -129,6 +120,7 @@ func main() {
 
 	// *** First Type ***
 	router.HandleFunc("/api/first_types/create", typeController.CreateFirstType(db)).Methods("POST")
+    router.HandleFunc("/api/average-rating/{school_id}", typeController.GetAverageRatingBySchool(db)).Methods("GET")
 	router.HandleFunc("/first_types", typeController.GetFirstTypes(db)).Methods("GET")
 	router.HandleFunc("/unt_scores/average", typeController.GetAverageUNTScore(db)).Methods("GET")
 	router.HandleFunc("/api/types/first/school/{school_id}", typeController.GetFirstTypesBySchool(db)).Methods("GET")
