@@ -93,6 +93,7 @@ func main() {
 	router.HandleFunc("/api/user/update-avatar", controller.UpdateAvatar(db)).Methods("PUT")
 	router.HandleFunc("/api/user/delete-avatar", controller.DeleteAvatar(db)).Methods("DELETE")
 
+
 	// *** Schoolsколы ***
 	router.HandleFunc("/schools", schoolController.GetSchools(db)).Methods("GET")
     router.HandleFunc("/schools/create", schoolController.CreateSchool(db)).Methods("POST")
@@ -100,14 +101,17 @@ func main() {
     router.HandleFunc("/schools/delete", schoolController.DeleteSchool(db)).Methods("DELETE")
 	router.HandleFunc("/unt_scores/create", untScoreController.CreateUNTScore(db)).Methods("POST")
 
+
 	// *** Reviews ***
 	router.HandleFunc("/reviews/create", reviewController.CreateReview(db)).Methods("POST")
 	router.HandleFunc("/reviews/school/{school_id}", reviewController.GetReviewsBySchool(db)).Methods("GET")
 	router.HandleFunc("/reviews/average-rating/{school_id}", reviewController.GetAverageRating(db)).Methods("GET")
 
+
 	// *** Types ***
 	router.HandleFunc("/api/unt-types/create", untTypeController.CreateUNTType(db)).Methods("POST")
 	router.HandleFunc("/api/unt-types", untTypeController.GetUNTTypes(db)).Methods("GET")
+
 	
 	// Добавьте маршруты перед запуском сервера
     router.HandleFunc("/api/students/create", studentController.CreateStudent(db)).Methods("POST")
@@ -117,6 +121,7 @@ func main() {
 	router.HandleFunc("/api/students/school/{school_id}", studentController.GetStudentsBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/students/school/{school_id}/grade/{grade}", studentController.GetStudentsBySchoolAndGrade(db)).Methods("GET")
 	router.HandleFunc("/api/students/grade/{grade}/letter/{letter}", studentController.GetStudentsByGradeAndLetter(db)).Methods("GET")
+
 
 	// *** First Type ***
 	router.HandleFunc("/api/first_types/create", typeController.CreateFirstType(db)).Methods("POST")
@@ -128,7 +133,10 @@ func main() {
 	// *** Second Type ***
 	router.HandleFunc("/second_types", typeController.GetSecondTypes(db)).Methods("GET")
 	router.HandleFunc("/second_types/create", typeController.CreateSecondType(db)).Methods("POST")
+	router.HandleFunc("/api/second_types/school/{school_id}", typeController.GetSecondTypesBySchool(db)).Methods("GET")
+    router.HandleFunc("/api/second_types/average-rating/{school_id}", typeController.GetAverageRatingSecondBySchool(db)).Methods("GET")
 
+    // *** Second Unt Scores ***
 	router.HandleFunc("/api/unt_scores/create", untScoreController.CreateUNTScore(db)).Methods("POST")
     router.HandleFunc("/api/unt_scores", untScoreController.GetUNTScore(db)).Methods("GET")
     router.HandleFunc("/api/unt_scores/total-score-school", untScoreController.GetTotalScoreForSchool(db)).Methods("GET")

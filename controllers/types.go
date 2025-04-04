@@ -14,13 +14,7 @@ import (
 
 type TypeController struct{}
 
-// Функция для обработки NULL значений
-func nullableValue(value interface{}) interface{} {
-	if value == nil {
-		return nil
-	}
-	return value
-}
+
 func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         // Получаем userID из токена
@@ -226,6 +220,7 @@ func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var secondType models.SecondType
         if err := json.NewDecoder(r.Body).Decode(&secondType); err != nil {
+            log.Println("Error decoding the request:", err)
             utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
             return
         }
@@ -237,7 +232,7 @@ func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Проверяем роль пользователя (директор)
+        // Проверка роли пользователя
         var userRole string
         var userSchoolID sql.NullInt64
         err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
@@ -265,8 +260,8 @@ func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
         secondType.Type = "type-2" // Добавляем тип
 
         // Вставляем Second Type в таблицу базы данных с привязкой к школе и total_score_creative
-        query := `INSERT INTO Second_Type (history_of_kazakhstan_creative, reading_literacy_creative, creative_exam1, creative_exam2, school_id, total_score_creative, type) 
-                  VALUES (?, ?, ?, ?, ?, ?, ?)`
+        query := `INSERT INTO Second_Type (history_of_kazakhstan_creative, reading_literacy_creative, creative_exam1, creative_exam2, school_id, total_score_creative, type, student_id) 
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
         _, err = db.Exec(query, 
             secondType.HistoryOfKazakhstanCreative, 
             secondType.ReadingLiteracyCreative, 
@@ -274,7 +269,8 @@ func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
             secondType.CreativeExam2,
             userSchoolID.Int64, 
             totalScoreCreative,
-            secondType.Type) // Сохраняем тип как 'type-2'
+            secondType.Type,
+            secondType.StudentID) // Добавляем student_id
 
         if err != nil {
             log.Println("SQL Error:", err)
@@ -317,6 +313,7 @@ func (c *TypeController) GetSecondTypes(db *sql.DB) http.HandlerFunc {
         var types []models.SecondType
         for rows.Next() {
             var secondType models.SecondType
+            var typeColumn sql.NullString  // Используем sql.NullString для обработки type как строки
             if err := rows.Scan(
                 &secondType.ID, 
                 &secondType.HistoryOfKazakhstanCreative, 
@@ -324,16 +321,89 @@ func (c *TypeController) GetSecondTypes(db *sql.DB) http.HandlerFunc {
                 &secondType.CreativeExam1,
                 &secondType.CreativeExam2,
                 &secondType.TotalScoreCreative,
-                &secondType.Type,
+                &typeColumn, // Сканируем поле type как строку
             ); err != nil {
                 log.Println("Scan Error:", err)
                 utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse Second Types"})
                 return
             }
+
+            // Преобразуем sql.NullString в обычную строку
+            if typeColumn.Valid {
+                secondType.Type = typeColumn.String
+            } else {
+                secondType.Type = ""
+            }
+
             types = append(types, secondType)
         }
 
         utils.ResponseJSON(w, types)
+    }
+}
+func (c *TypeController) GetSecondTypesBySchool(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Извлекаем school_id из параметров URL
+        vars := mux.Vars(r)
+        schoolID, err := strconv.Atoi(vars["school_id"])
+        if err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+            return
+        }
+
+        // Запрос для получения данных для конкретной школы
+        query := `
+        SELECT 
+            second_type_id,
+            history_of_kazakhstan_creative,
+            reading_literacy_creative,
+            creative_exam1,
+            creative_exam2,
+            total_score_creative,
+            type,
+            student_id
+        FROM Second_Type
+        WHERE school_id = ?`
+
+        rows, err := db.Query(query, schoolID)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get Second Types by School"})
+            return
+        }
+        defer rows.Close()
+
+        var types []models.SecondType
+        for rows.Next() {
+            var secondType models.SecondType
+            var studentID sql.NullInt64 // Для обработки NULL значений в student_id
+
+            if err := rows.Scan(
+                &secondType.ID,
+                &secondType.HistoryOfKazakhstanCreative,
+                &secondType.ReadingLiteracyCreative,
+                &secondType.CreativeExam1,
+                &secondType.CreativeExam2,
+                &secondType.TotalScoreCreative,
+                &secondType.Type,
+                &studentID, // Убираем второй раз сканирование studentID
+            ); err != nil {
+                log.Println("Scan Error:", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse Second Types"})
+                return
+            }
+
+            // Проверка, если student_id действителен, то присваиваем его
+            if studentID.Valid {
+                secondType.StudentID = int(studentID.Int64) // Преобразуем int64 в int
+            } else {
+                secondType.StudentID = 0 // Значение по умолчанию, если NULL
+            }
+
+            types = append(types, secondType)
+        }
+
+        utils.ResponseJSON(w, types) // Возвращаем результат в формате JSON
     }
 }
 func (c *TypeController) GetAverageRatingBySchool(db *sql.DB) http.HandlerFunc {
@@ -346,6 +416,7 @@ func (c *TypeController) GetAverageRatingBySchool(db *sql.DB) http.HandlerFunc {
             return
         }
 
+        // Query to get average score by school
         // Запрос для получения среднего балла по всем предметам для школы
         query := `
         SELECT 
@@ -373,6 +444,7 @@ func (c *TypeController) GetAverageRatingBySchool(db *sql.DB) http.HandlerFunc {
             return
         }
 
+        // Response with average score
         // Ответ с данными среднего балла
         result := map[string]float64{
             "avg_first_subject_score":      avgFirstSubjectScore,
@@ -383,9 +455,74 @@ func (c *TypeController) GetAverageRatingBySchool(db *sql.DB) http.HandlerFunc {
             "avg_total_score":              avgTotalScore,
         }
 
+        utils.ResponseJSON(w, result)  // Return result in JSON format
         utils.ResponseJSON(w, result)  // Возвращаем результат в формате JSON
     }
 }
+func (c *TypeController) GetAverageRatingSecondBySchool(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Извлекаем school_id из параметров URL
+        vars := mux.Vars(r)
+        schoolID, err := strconv.Atoi(vars["school_id"])
+        if err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+            return
+        }
+
+        // Запрос для получения всех оценок по конкретной школе
+        query := `
+        SELECT 
+            history_of_kazakhstan_creative,
+            reading_literacy_creative,
+            creative_exam1,
+            creative_exam2
+        FROM Second_Type
+        WHERE school_id = ?`
+
+        rows, err := db.Query(query, schoolID)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get Second Types by School"})
+            return
+        }
+        defer rows.Close()
+
+        var totalScore float64
+        var studentCount int
+
+        for rows.Next() {
+            var historyOfKazakhstanCreative, readingLiteracyCreative, creativeExam1, creativeExam2 sql.NullInt64
+
+            // Считываем данные для каждого экзамена
+            if err := rows.Scan(&historyOfKazakhstanCreative, &readingLiteracyCreative, &creativeExam1, &creativeExam2); err != nil {
+                log.Println("Scan Error:", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse Second Types"})
+                return
+            }
+
+            // Вычисляем сумму оценок для каждого студента
+            totalScore += float64(historyOfKazakhstanCreative.Int64 + readingLiteracyCreative.Int64 + creativeExam1.Int64 + creativeExam2.Int64)
+            studentCount++
+        }
+
+        if studentCount == 0 {
+            utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No students found for this school"})
+            return
+        }
+
+        // Рассчитываем средний балл
+        averageRating := totalScore / float64(studentCount)
+
+        // Возвращаем результат в формате JSON
+        utils.ResponseJSON(w, map[string]interface{}{
+            "average_rating": averageRating,
+        })
+    }
+}
+
+
+
+
 
 
 

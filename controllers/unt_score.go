@@ -112,7 +112,6 @@ func (usc *UNTScoreController) GetUNTScore(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, untScore)
 	}
 }
-
 // GetTotalScoreForSchool calculates the total UNT score for a specific school
 func (usc *UNTScoreController) GetTotalScoreForSchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
