@@ -108,7 +108,6 @@ func (sc UNTTypeController) CreateUNTType(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, "UNT Type created successfully")
     }
 }
-// Функция получения UNT типов
 func (sc *UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         query := `

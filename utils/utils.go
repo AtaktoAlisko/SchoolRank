@@ -140,7 +140,7 @@ func GenerateRefreshToken(user models.User) (string, error) {
     claims := jwt.MapClaims{
         "iss":    "course",
         "user_id": user.ID, // Adding user_id
-        "exp":    time.Now().Add(2 * time.Minute).Unix(), // Refresh token validity (5 minutes)
+        "exp":    time.Now().Add(24 * time.Hour).Unix(), 
     }
 
     // Adding email or phone based on provided information

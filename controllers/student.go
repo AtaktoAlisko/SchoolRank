@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"ranking-school/models"
 	"ranking-school/utils"
+	"strconv"
+
+	"github.com/gorilla/mux"
 )
 
 type StudentController struct{}
@@ -31,7 +34,7 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Step 3: Ensure the user is a director and has a school assigned
-		if userRole != "director" {
+		if userRole != "schooladmin" {
 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create a student"})
 			return
 		}
@@ -153,7 +156,258 @@ func (sc StudentController) GetStudents(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, students)
 	}
 }
+func (sc StudentController) GetStudentsBySchool(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Извлекаем school_id из URL параметров
+		vars := mux.Vars(r)
+		schoolIDParam := vars["school_id"]
+		schoolID, err := strconv.Atoi(schoolIDParam)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+			return
+		}
 
+		// Шаг 1: Запрос к базе данных для получения студентов по school_id
+		rows, err := db.Query("SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email FROM Student WHERE school_id = ?", schoolID)
+		if err != nil {
+			log.Println("SQL Error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get students"})
+			return
+		}
+		defer rows.Close()
+
+		var students []models.Student
+		for rows.Next() {
+			var student models.Student
+
+			// Шаг 2: Обработка возможных NULL значений с помощью sql.Null типов
+			var firstName, lastName, patronymic, iin, letter, gender, phone, email sql.NullString
+			var schoolID sql.NullInt64
+			var dateOfBirth sql.NullString
+			var grade sql.NullInt64
+
+			// Шаг 3: Сканирование строки в объект student
+			if err := rows.Scan(&student.ID, &firstName, &lastName, &patronymic, &iin, &schoolID, &dateOfBirth, &grade, &letter, &gender, &phone, &email); err != nil {
+				log.Println("Scan Error:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse students"})
+				return
+			}
+
+			// Шаг 4: Присваивание значений студенту
+			if firstName.Valid {
+				student.FirstName = firstName.String
+			}
+			if lastName.Valid {
+				student.LastName = lastName.String
+			}
+			if patronymic.Valid {
+				student.Patronymic = patronymic.String
+			}
+			if iin.Valid {
+				student.IIN = iin.String
+			}
+			if schoolID.Valid {
+				student.SchoolID = int(schoolID.Int64)
+			}
+			if dateOfBirth.Valid {
+				student.DateOfBirth = dateOfBirth.String
+			}
+			if grade.Valid {
+				student.Grade = int(grade.Int64)
+			}
+			if letter.Valid {
+				student.Letter = letter.String
+			}
+			if gender.Valid {
+				student.Gender = gender.String
+			}
+			if phone.Valid {
+				student.Phone = phone.String
+			}
+			if email.Valid {
+				student.Email = email.String
+			}
+
+			// Шаг 5: Добавляем студента в срез
+			students = append(students, student)
+		}
+
+		// Шаг 6: Ответ с данным списком студентов
+		utils.ResponseJSON(w, students)
+	}
+}
+func (sc StudentController) GetStudentsBySchoolAndGrade(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Извлекаем параметры school_id и grade из URL
+        vars := mux.Vars(r)
+        schoolIDParam := vars["school_id"]
+        gradeParam := vars["grade"]
+
+        // Преобразуем параметры в нужные типы
+        schoolID, err := strconv.Atoi(schoolIDParam)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+            return
+        }
+        
+        grade, err := strconv.Atoi(gradeParam)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade"})
+            return
+        }
+
+        // Запрос к базе данных для получения студентов по school_id и grade
+        rows, err := db.Query("SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email FROM Student WHERE school_id = ? AND grade = ?", schoolID, grade)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get students"})
+            return
+        }
+        defer rows.Close()
+
+        var students []models.Student
+        for rows.Next() {
+            var student models.Student
+
+            // Обработка возможных NULL значений с помощью sql.Null типов
+            var firstName, lastName, patronymic, iin, letter, gender, phone, email sql.NullString
+            var schoolID sql.NullInt64
+            var dateOfBirth sql.NullString
+            var grade sql.NullInt64
+
+            // Сканирование строки в объект student
+            if err := rows.Scan(&student.ID, &firstName, &lastName, &patronymic, &iin, &schoolID, &dateOfBirth, &grade, &letter, &gender, &phone, &email); err != nil {
+                log.Println("Scan Error:", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse students"})
+                return
+            }
+
+            // Присваивание значений студенту
+            if firstName.Valid {
+                student.FirstName = firstName.String
+            }
+            if lastName.Valid {
+                student.LastName = lastName.String
+            }
+            if patronymic.Valid {
+                student.Patronymic = patronymic.String
+            }
+            if iin.Valid {
+                student.IIN = iin.String
+            }
+            if schoolID.Valid {
+                student.SchoolID = int(schoolID.Int64)
+            }
+            if dateOfBirth.Valid {
+                student.DateOfBirth = dateOfBirth.String
+            }
+            if grade.Valid {
+                student.Grade = int(grade.Int64)
+            }
+            if letter.Valid {
+                student.Letter = letter.String
+            }
+            if gender.Valid {
+                student.Gender = gender.String
+            }
+            if phone.Valid {
+                student.Phone = phone.String
+            }
+            if email.Valid {
+                student.Email = email.String
+            }
+
+            // Добавляем студента в срез
+            students = append(students, student)
+        }
+
+        // Ответ с данным списком студентов
+        utils.ResponseJSON(w, students)
+    }
+}
+func (sc StudentController) GetStudentsByGradeAndLetter(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Извлекаем параметры grade и letter из URL
+        vars := mux.Vars(r)
+        gradeParam := vars["grade"]
+        letterParam := vars["letter"]
+
+        // Преобразуем grade в целое число
+        grade, err := strconv.Atoi(gradeParam)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade"})
+            return
+        }
+
+        // Запрос к базе данных для получения студентов по grade и letter
+        rows, err := db.Query("SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email FROM Student WHERE grade = ? AND letter = ?", grade, letterParam)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get students"})
+            return
+        }
+        defer rows.Close()
+
+        var students []models.Student
+        for rows.Next() {
+            var student models.Student
+
+            // Обработка возможных NULL значений с помощью sql.Null типов
+            var firstName, lastName, patronymic, iin, letter, gender, phone, email sql.NullString
+            var schoolID sql.NullInt64
+            var dateOfBirth sql.NullString
+            var grade sql.NullInt64
+
+            // Сканирование строки в объект student
+            if err := rows.Scan(&student.ID, &firstName, &lastName, &patronymic, &iin, &schoolID, &dateOfBirth, &grade, &letter, &gender, &phone, &email); err != nil {
+                log.Println("Scan Error:", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse students"})
+                return
+            }
+
+            // Присваивание значений студенту
+            if firstName.Valid {
+                student.FirstName = firstName.String
+            }
+            if lastName.Valid {
+                student.LastName = lastName.String
+            }
+            if patronymic.Valid {
+                student.Patronymic = patronymic.String
+            }
+            if iin.Valid {
+                student.IIN = iin.String
+            }
+            if schoolID.Valid {
+                student.SchoolID = int(schoolID.Int64)
+            }
+            if dateOfBirth.Valid {
+                student.DateOfBirth = dateOfBirth.String
+            }
+            if grade.Valid {
+                student.Grade = int(grade.Int64)
+            }
+            if letter.Valid {
+                student.Letter = letter.String
+            }
+            if gender.Valid {
+                student.Gender = gender.String
+            }
+            if phone.Valid {
+                student.Phone = phone.String
+            }
+            if email.Valid {
+                student.Email = email.String
+            }
+
+            // Добавляем студента в срез
+            students = append(students, student)
+        }
+
+        // Ответ с данным списком студентов
+        utils.ResponseJSON(w, students)
+    }
+}
 func (sc StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 	// UpdateStudent is an HTTP handler for updating a student's details.
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -203,7 +457,6 @@ func (sc StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, updatedStudent)
 	}
 }
-
 func (sc StudentController) DeleteStudent(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Get student_id from the query parameters

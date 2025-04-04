@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"ranking-school/models"
 	"ranking-school/utils"
+	"strconv"
+
+	"github.com/gorilla/mux"
 )
 
 type SubjectController struct{}
@@ -25,7 +28,7 @@ func (sc SubjectController) CreateFirstSubject(db *sql.DB) http.HandlerFunc {
 		var userRole string
 		var userSchoolID sql.NullInt64
 		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
-		if err != nil || userRole != "director" || !userSchoolID.Valid {
+		if err != nil || userRole != "schooladmin" || !userSchoolID.Valid {
 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create subject"})
 			return
 		}
@@ -49,7 +52,6 @@ func (sc SubjectController) CreateFirstSubject(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, "First Subject created successfully")
 	}
 }
-
 // Метод для создания предметов второго типа
 func (sc SubjectController) CreateSecondSubject(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -64,7 +66,7 @@ func (sc SubjectController) CreateSecondSubject(db *sql.DB) http.HandlerFunc {
 		var userRole string
 		var userSchoolID sql.NullInt64
 		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
-		if err != nil || userRole != "director" || !userSchoolID.Valid {
+		if err != nil || userRole != "schooladmin" || !userSchoolID.Valid {
 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create second subject"})
 			return
 		}
@@ -89,7 +91,6 @@ func (sc SubjectController) CreateSecondSubject(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, "Second Subject created successfully")
 	}
 }
-
 // Метод для получения всех предметов первого типа
 func (sc SubjectController) GetFirstSubjects(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +116,6 @@ func (sc SubjectController) GetFirstSubjects(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, subjects)
 	}
 }
-
 // Метод для получения всех предметов второго типа
 func (sc SubjectController) GetSecondSubjects(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
@@ -141,3 +141,72 @@ func (sc SubjectController) GetSecondSubjects(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, subjects)
     }
 }
+func (sc SubjectController) GetFirstSubjectsBySchool(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Извлекаем school_id из параметров URL
+		vars := mux.Vars(r)
+		schoolIDParam := vars["school_id"]
+		schoolID, err := strconv.Atoi(schoolIDParam)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+			return
+		}
+
+		// SQL-запрос для получения предметов первого типа по school_id
+		rows, err := db.Query("SELECT first_subject_id, subject, score FROM First_Subject WHERE school_id = ?", schoolID)
+		if err != nil {
+			log.Println("SQL Error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get First Subjects"})
+			return
+		}
+		defer rows.Close()
+
+		var subjects []models.FirstSubject
+		for rows.Next() {
+			var subject models.FirstSubject
+			if err := rows.Scan(&subject.ID, &subject.Subject, &subject.Score); err != nil {
+				log.Println("Scan Error:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse First Subjects"})
+				return
+			}
+			subjects = append(subjects, subject)
+		}
+
+		utils.ResponseJSON(w, subjects)
+	}
+}
+func (sc SubjectController) GetSecondSubjectsBySchool(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Извлекаем school_id из параметров URL
+        vars := mux.Vars(r)
+        schoolIDParam := vars["school_id"]
+        schoolID, err := strconv.Atoi(schoolIDParam)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+            return
+        }
+
+        // SQL-запрос для получения предметов второго типа по school_id
+        rows, err := db.Query("SELECT second_subject_id, subject, score FROM Second_Subject WHERE school_id = ?", schoolID)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get Second Subjects"})
+            return
+        }
+        defer rows.Close()
+
+        var subjects []models.SecondSubject
+        for rows.Next() {
+            var subject models.SecondSubject
+            if err := rows.Scan(&subject.ID, &subject.Subject, &subject.Score); err != nil {
+                log.Println("Scan Error:", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse Second Subjects"})
+                return
+            }
+            subjects = append(subjects, subject)
+        }
+
+        utils.ResponseJSON(w, subjects)
+    }
+}
+

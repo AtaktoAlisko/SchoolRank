@@ -32,7 +32,7 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
             utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user role"})
             return
         }
-        if userRole != "director" && userRole != "superadmin" {
+        if userRole != "schooladmin" && userRole != "superadmin" {
             utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create a school"})
             return
         }

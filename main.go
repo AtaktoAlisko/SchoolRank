@@ -93,48 +93,54 @@ func main() {
 	router.HandleFunc("/api/user/upload-avatar", controller.UploadAvatar(db)).Methods("POST")
 	router.HandleFunc("/api/user/update-avatar", controller.UpdateAvatar(db)).Methods("PUT")
 	router.HandleFunc("/api/user/delete-avatar", controller.DeleteAvatar(db)).Methods("DELETE")
-	
 
-	// *** Школы ***
+	// *** Schoolsколы ***
 	router.HandleFunc("/schools", schoolController.GetSchools(db)).Methods("GET")
     router.HandleFunc("/schools/create", schoolController.CreateSchool(db)).Methods("POST")
 	router.HandleFunc("/schools/GetSchoolForDirector", schoolController.GetSchoolForDirector(db)).Methods("GET")
-	// Добавьте роут для удаления школы
     router.HandleFunc("/schools/delete", schoolController.DeleteSchool(db)).Methods("DELETE")
-	
-	// *** UNT Score ***
-	// router.HandleFunc("/unt_scores", untScoreController.GetUNTScores(db)).Methods("GET")
 	router.HandleFunc("/unt_scores/create", untScoreController.CreateUNTScore(db)).Methods("POST")
-	// router.HandleFunc("/unt_scores/average", untScoreController.GetAverageScoreForSchool(db)).Methods("GET")
-	// router.HandleFunc("/unt_scores/GetTotalScoreForSchool", untScoreController.GetTotalScoreForSchool(db)).Methods("GET")
 
+	// *** Reviews ***
 	router.HandleFunc("/reviews/create", reviewController.CreateReview(db)).Methods("POST")
 	router.HandleFunc("/reviews/school/{school_id}", reviewController.GetReviewsBySchool(db)).Methods("GET")
 	router.HandleFunc("/reviews/average-rating/{school_id}", reviewController.GetAverageRating(db)).Methods("GET")
 	
 	// *** Subjects ***
-	router.HandleFunc("/subjects/first", subjectController.GetFirstSubjects(db)).Methods("GET")
-	router.HandleFunc("/subjects/first/create", subjectController.CreateFirstSubject(db)).Methods("POST")
-	router.HandleFunc("/subjects/second", subjectController.GetSecondSubjects(db)).Methods("GET")
-	router.HandleFunc("/subjects/second/create", subjectController.CreateSecondSubject(db)).Methods("POST")
+	router.HandleFunc("/api/subjects/first", subjectController.GetFirstSubjects(db)).Methods("GET")
+	router.HandleFunc("/api/subjects/first/create", subjectController.CreateFirstSubject(db)).Methods("POST")
+	router.HandleFunc("/api/subjects/second", subjectController.GetSecondSubjects(db)).Methods("GET")
+	router.HandleFunc("/api/subjects/second/create", subjectController.CreateSecondSubject(db)).Methods("POST")
+    router.HandleFunc("/api/subjects/first/school/{school_id}", subjectController.GetFirstSubjectsBySchool(db)).Methods("GET")
+    router.HandleFunc("/api/subjects/second/school/{school_id}", subjectController.GetSecondSubjectsBySchool(db)).Methods("GET")
 
-	router.HandleFunc("/unt_types/create", untTypeController.CreateUNTType(db)).Methods("POST")
-	router.HandleFunc("/unt_types", untTypeController.GetUNTTypes(db)).Methods("GET")
+
+	router.HandleFunc("/api/unt-types/create", untTypeController.CreateUNTType(db)).Methods("POST")
+	router.HandleFunc("/api/unt-types", untTypeController.GetUNTTypes(db)).Methods("GET")
 	
 	// Добавьте маршруты перед запуском сервера
-    router.HandleFunc("/students/create", studentController.CreateStudent(db)).Methods("POST")
-    router.HandleFunc("/students", studentController.GetStudents(db)).Methods("GET")
-	router.HandleFunc("/students/update", studentController.UpdateStudent(db)).Methods("PUT")
-	router.HandleFunc("/students/delete", studentController.DeleteStudent(db)).Methods("DELETE")
+    router.HandleFunc("/api/students/create", studentController.CreateStudent(db)).Methods("POST")
+    router.HandleFunc("/api/students", studentController.GetStudents(db)).Methods("GET")
+	router.HandleFunc("/api/students/update", studentController.UpdateStudent(db)).Methods("PUT")
+	router.HandleFunc("/api/students/delete", studentController.DeleteStudent(db)).Methods("DELETE")
+	router.HandleFunc("/api/students/school/{school_id}", studentController.GetStudentsBySchool(db)).Methods("GET")
+	router.HandleFunc("/api/students/school/{school_id}/grade/{grade}", studentController.GetStudentsBySchoolAndGrade(db)).Methods("GET")
+	router.HandleFunc("/api/students/grade/{grade}/letter/{letter}", studentController.GetStudentsByGradeAndLetter(db)).Methods("GET")
 
 	// *** First Type ***
+	router.HandleFunc("/api/first_types/create", typeController.CreateFirstType(db)).Methods("POST")
 	router.HandleFunc("/first_types", typeController.GetFirstTypes(db)).Methods("GET")
-	router.HandleFunc("/first_types/create", typeController.CreateFirstType(db)).Methods("POST") 
 	router.HandleFunc("/unt_scores/average", typeController.GetAverageUNTScore(db)).Methods("GET")
-
+	router.HandleFunc("/api/types/first/school/{school_id}", typeController.GetFirstTypesBySchool(db)).Methods("GET")
+	
 	// *** Second Type ***
 	router.HandleFunc("/second_types", typeController.GetSecondTypes(db)).Methods("GET")
 	router.HandleFunc("/second_types/create", typeController.CreateSecondType(db)).Methods("POST")
+
+	router.HandleFunc("/api/unt_scores/create", untScoreController.CreateUNTScore(db)).Methods("POST")
+    router.HandleFunc("/api/unt_scores", untScoreController.GetUNTScore(db)).Methods("GET")
+    router.HandleFunc("/api/unt_scores/total-score-school", untScoreController.GetTotalScoreForSchool(db)).Methods("GET")
+
 
 	// Роуты для городской олимпиады
 	router.HandleFunc("/city_olympiad/create", cityOlympiadController.CreateCityOlympiad(db)).Methods("POST")
@@ -154,10 +160,6 @@ func main() {
 	router.HandleFunc("/republican_olympiad/delete", republicanOlympiadController.DeleteRepublicanOlympiad(db)).Methods("DELETE")
 	router.HandleFunc("/regional_olympiad/GetAverageRepublicanOlympiadScore", republicanOlympiadController.GetAverageRepublicanOlympiadScore(db)).Methods("GET")
 	router.HandleFunc("/olympiad/total-rating", TotalOlympiadRatingController.GetTotalOlympiadRating(db)).Methods("GET")
-
-
-
-
 
 	// Включаем CORS
 	handler := corsMiddleware(router)

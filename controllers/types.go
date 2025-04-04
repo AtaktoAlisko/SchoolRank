@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"ranking-school/models"
 	"ranking-school/utils"
+	"strconv"
+
+	"github.com/gorilla/mux"
 )
 
 type TypeController struct{}
@@ -32,7 +35,7 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
         var userRole string
         var userSchoolID sql.NullInt64
         err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
-        if err != nil || userRole != "director" || !userSchoolID.Valid {
+        if err != nil || userRole != "schooladmin" || !userSchoolID.Valid {
             utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create First Type"})
             return
         }
@@ -140,6 +143,75 @@ func (c *TypeController) GetFirstTypes(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, types)
     }
 }
+func (c *TypeController) GetFirstTypesBySchool(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Извлекаем school_id из параметров URL
+        vars := mux.Vars(r)
+        schoolID, err := strconv.Atoi(vars["school_id"])
+        if err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+            return
+        }
+
+        // Запрос для получения данных для конкретной школы
+        query := `
+        SELECT 
+            ft.first_type_id, 
+            ft.first_subject_id, 
+            fs.subject AS first_subject_name, 
+            COALESCE(fs.score, 0) AS first_subject_score,
+            ft.second_subject_id, 
+            ss.subject AS second_subject_name, 
+            COALESCE(ss.score, 0) AS second_subject_score,
+            COALESCE(ft.history_of_kazakhstan, 0) AS history_of_kazakhstan, 
+            COALESCE(ft.mathematical_literacy, 0) AS mathematical_literacy, 
+            COALESCE(ft.reading_literacy, 0) AS reading_literacy,
+            ft.type,
+            (COALESCE(fs.score, 0) + COALESCE(ss.score, 0) + COALESCE(ft.history_of_kazakhstan, 0) + COALESCE(ft.mathematical_literacy, 0) + COALESCE(ft.reading_literacy, 0)) AS total_score
+        FROM First_Type ft
+        LEFT JOIN First_Subject fs ON ft.first_subject_id = fs.first_subject_id
+        LEFT JOIN Second_Subject ss ON ft.second_subject_id = ss.second_subject_id
+        WHERE ft.school_id = ?`  // Фильтрация по school_id
+
+        rows, err := db.Query(query, schoolID)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get First Types by School"})
+            return
+        }
+        defer rows.Close()
+
+        var types []models.FirstType
+        for rows.Next() {
+            var firstType models.FirstType
+            var typeColumn sql.NullString
+            if err := rows.Scan(
+                &firstType.ID,
+                &firstType.FirstSubjectID, &firstType.FirstSubjectName, &firstType.FirstSubjectScore,
+                &firstType.SecondSubjectID, &firstType.SecondSubjectName, &firstType.SecondSubjectScore,
+                &firstType.HistoryOfKazakhstan, 
+                &firstType.MathematicalLiteracy, 
+                &firstType.ReadingLiteracy,
+                &typeColumn, 
+                &firstType.TotalScore,
+            ); err != nil {
+                log.Println("Scan Error:", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse First Types"})
+                return
+            }
+
+            if typeColumn.Valid {
+                firstType.Type = typeColumn.String
+            } else {
+                firstType.Type = ""
+            }
+
+            types = append(types, firstType)
+        }
+
+        utils.ResponseJSON(w, types)  // Возвращаем результат в формате JSON
+    }
+}
 func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var secondType models.SecondType
@@ -159,7 +231,7 @@ func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
         var userRole string
         var userSchoolID sql.NullInt64
         err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
-        if err != nil || userRole != "director" || !userSchoolID.Valid {
+        if err != nil || userRole != "schooladmin" || !userSchoolID.Valid {
             utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create second type"})
             return
         }
@@ -208,7 +280,6 @@ func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
         })
     }
 }
-
 func (c *TypeController) GetSecondTypes(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         query := `
