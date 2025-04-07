@@ -8,30 +8,39 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
-var db *sql.DB
-
-// ConnectDB устанавливает подключение к базе данных
+// ConnectDB establishes a connection to the database
 func ConnectDB() *sql.DB {
+	var db *sql.DB
 	var err error
 	var dbURL string
 
-	// Проверяем, есть ли переменная окружения JAWSDB_URL (для Heroku)
-	if os.Getenv("JAWSDB_URL") != "" {
-		// Если переменная окружения есть, используем её
-		dbURL = os.Getenv("JAWSDB_URL")
+	// Check for available database URLs in order of preference
+	if url := os.Getenv("JAWSDB_URL"); url != "" {
+		dbURL = url
+		log.Println("Using JAWSDB_URL for database connection")
+	} else if url := os.Getenv("DATABASE_URL"); url != "" {
+		dbURL = url
+		log.Println("Using DATABASE_URL for database connection")
+	} else if url := os.Getenv("JAWSDB_PURPLE_URL"); url != "" {
+		dbURL = url
+		log.Println("Using JAWSDB_PURPLE_URL for database connection")
 	} else {
-		// Если переменной окружения нет, подключаемся к локальной базе данных
+		// Local development fallback
 		dbURL = "root:Zhanibek321@tcp(127.0.0.1:3306)/my_database"
+		log.Println("No database URL found, using local database configuration")
 	}
 
-	// Открываем подключение к базе данных
+	// Open the database connection
 	db, err = sql.Open("mysql", dbURL)
 	if err != nil {
-		log.Fatal("Ошибка подключения к базе данных:", err)
+		log.Fatal("Error opening database connection:", err)
 	}
-	// Проверяем, что подключение успешное
+
+	// Test the connection
 	if err := db.Ping(); err != nil {
-		log.Fatal("Не удалось подключиться к базе данных:", err)
+		log.Fatal("Failed to connect to database:", err)
 	}
+
+	log.Println("Database connection successful")
 	return db
 }
