@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"ranking-school/models"
 	"ranking-school/utils"
+	"strconv"
+
+	"github.com/gorilla/mux"
 )
 
 type UNTTypeController struct{}
@@ -108,38 +111,43 @@ func (sc UNTTypeController) CreateUNTType(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, "UNT Type created successfully")
     }
 }
-func (sc *UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
+func (c *TypeController) GetUNTTypesBySchool(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
+        // Извлекаем school_id из параметров URL
+        vars := mux.Vars(r)
+        schoolID, err := strconv.Atoi(vars["school_id"]) // Извлекаем school_id из URL
+        if err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+            return
+        }
+
+        // Запрос для получения всех типов экзаменов для конкретной школы
         query := `
             SELECT 
                 ut.unt_type_id, 
                 ut.type AS unt_type, 
                 ft.first_type_id, 
-                fs.first_subject_id, fs.subject AS first_subject_name, 
-                COALESCE(fs.score, 0) AS first_subject_score,
-                ss.second_subject_id, ss.subject AS second_subject_name, 
-                COALESCE(ss.score, 0) AS second_subject_score,
-                COALESCE(ft.history_of_kazakhstan, 0) AS history_of_kazakhstan, 
-                COALESCE(ft.mathematical_literacy, 0) AS mathematical_literacy,
-                COALESCE(ft.reading_literacy, 0) AS reading_literacy,
+                ft.first_subject_id, 
+                ft.subject AS first_subject_name, 
+                COALESCE(ft.score, 0) AS first_subject_score,
                 st.second_type_id,
                 st.history_of_kazakhstan_creative,
                 st.reading_literacy_creative,
                 st.creative_exam1,
                 st.creative_exam2,
-                (COALESCE(fs.score, 0) + COALESCE(ss.score, 0) + COALESCE(ft.history_of_kazakhstan, 0) + COALESCE(ft.mathematical_literacy, 0) + COALESCE(ft.reading_literacy, 0)) AS total_score,
+                (COALESCE(ft.score, 0) + COALESCE(ft.history_of_kazakhstan, 0) + COALESCE(ft.mathematical_literacy, 0) + COALESCE(ft.reading_literacy, 0)) AS total_score,
                 (COALESCE(st.history_of_kazakhstan_creative, 0) + COALESCE(st.reading_literacy_creative, 0) + COALESCE(st.creative_exam1, 0) + COALESCE(st.creative_exam2, 0)) AS total_score_creative
             FROM UNT_Type ut
             LEFT JOIN First_Type ft ON ut.first_type_id = ft.first_type_id
-            LEFT JOIN First_Subject fs ON ft.first_subject_id = fs.first_subject_id
-            LEFT JOIN Second_Subject ss ON ft.second_subject_id = ss.second_subject_id
             LEFT JOIN Second_Type st ON ut.second_type_id = st.second_type_id
-        `
+            WHERE ft.school_id = ? 
+               OR st.school_id = ?`
 
-        rows, err := db.Query(query)
+        // Передаем два параметра schoolID для обоих условий
+        rows, err := db.Query(query, schoolID, schoolID)
         if err != nil {
             log.Println("SQL Error:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get UNT Types"})
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get UNT Types by School"})
             return
         }
         defer rows.Close()
@@ -171,6 +179,7 @@ func (sc *UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
                 return
             }
 
+            // Преобразуем значения, если они присутствуют
             if firstSubjectID.Valid {
                 untType.FirstSubjectID = new(int)
                 *untType.FirstSubjectID = int(firstSubjectID.Int64)
@@ -232,77 +241,12 @@ func (sc *UNTTypeController) GetUNTTypes(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, types)
     }
 }
-func (tc *TypeController) GetAverageUNTScore(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        schoolID := r.URL.Query().Get("school_id")
-        if schoolID == "" {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "school_id is required"})
-            return
-        }
 
-        query := `
-            SELECT 
-                first_subject_score, 
-                second_subject_score, 
-                history_of_kazakhstan, 
-                mathematical_literacy, 
-                reading_literacy
-            FROM UNT_Type
-            WHERE school_id = ? AND type = 'type-1';
-        `
-        
-        rows, err := db.Query(query, schoolID)
-        if err != nil {
-            log.Printf("Error fetching UNT Type records: %v", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch UNT Type records"})
-            return
-        }
-        defer rows.Close()
 
-        var totalScore float64
-        var count int
 
-        for rows.Next() {
-            var firstSubjectScore, secondSubjectScore, historyKazakhstan, mathematicalLiteracy, readingLiteracy sql.NullInt64
-            err := rows.Scan(&firstSubjectScore, &secondSubjectScore, &historyKazakhstan, &mathematicalLiteracy, &readingLiteracy)
-            if err != nil {
-                log.Printf("Error scanning row: %v", err)
-                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error scanning UNT Type records"})
-                return
-            }
 
-            // Суммируем баллы всех предметов
-            totalScore += float64(firstSubjectScore.Int64 + secondSubjectScore.Int64 + historyKazakhstan.Int64 + mathematicalLiteracy.Int64 + readingLiteracy.Int64)
-            count++
-        }
 
-        if count == 0 {
-            utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No students found"})
-            return
-        }
 
-        // Рассчитываем среднюю оценку
-        averageScore := totalScore / float64(count)
-
-        // Обновляем рейтинг школы
-        updateQuery := `
-            UPDATE Schools
-            SET average_unt_score = ?
-            WHERE school_id = ?
-        `
-        _, err = db.Exec(updateQuery, averageScore, schoolID)
-        if err != nil {
-            log.Printf("Error updating school rating: %v", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update school rating"})
-            return
-        }
-
-        // Возвращаем результат
-        utils.ResponseJSON(w, map[string]interface{}{
-            "average_unt_score": averageScore,
-        })
-    }
-}
 
 
 

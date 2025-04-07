@@ -110,7 +110,7 @@ func main() {
 
 	// *** Types ***
 	router.HandleFunc("/api/unt-types/create", untTypeController.CreateUNTType(db)).Methods("POST")
-	router.HandleFunc("/api/unt-types", untTypeController.GetUNTTypes(db)).Methods("GET")
+	router.HandleFunc("/api/unt_types/{school_id}", typeController.GetUNTTypesBySchool(db)).Methods("GET")
 
 	
 	// Добавьте маршруты перед запуском сервера
@@ -127,7 +127,6 @@ func main() {
 	router.HandleFunc("/api/first_types/create", typeController.CreateFirstType(db)).Methods("POST")
     router.HandleFunc("/api/average-rating/{school_id}", typeController.GetAverageRatingBySchool(db)).Methods("GET")
 	router.HandleFunc("/first_types", typeController.GetFirstTypes(db)).Methods("GET")
-	router.HandleFunc("/unt_scores/average", typeController.GetAverageUNTScore(db)).Methods("GET")
 	router.HandleFunc("/api/types/first/school/{school_id}", typeController.GetFirstTypesBySchool(db)).Methods("GET")
 	
 	// *** Second Type ***
