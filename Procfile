@@ -1,1 +1,1 @@
-web: ./your-go-app
+web: ./ranking-school
