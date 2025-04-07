@@ -22,9 +22,9 @@ var db *sql.DB
 func main() {
 	// Загрузка переменных из .env
 	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Ошибка загрузки .env файла")
-	}
+    if err != nil {
+        log.Fatal("Ошибка загрузки .env файла")
+    }
 
 	// Получаем переменные из окружения
 	awsAccessKeyID := os.Getenv("AWS_ACCESS_KEY_ID")
@@ -160,26 +160,26 @@ func main() {
 	router.HandleFunc("/regional_olympiad/GetAverageRepublicanOlympiadScore", republicanOlympiadController.GetAverageRepublicanOlympiadScore(db)).Methods("GET")
 	router.HandleFunc("/olympiad/total-rating", TotalOlympiadRatingController.GetTotalOlympiadRating(db)).Methods("GET")
 
-	// Включаем CORS
-	handler := corsMiddleware(router)
+// Включаем CORS
+handler := corsMiddleware(router)
 
-	// Запуск сервера
-	log.Println("Сервер запущен на порту 8000")
-	log.Fatal(http.ListenAndServe("0.0.0.0:8000", handler))
+// Запуск сервера
+log.Println("Сервер запущен на порту 8000")
+log.Fatal(http.ListenAndServe("0.0.0.0:8000", handler))
 }
 
 
 func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 
-		next.ServeHTTP(w, r)
-	})
+	next.ServeHTTP(w, r)
+})
 }
