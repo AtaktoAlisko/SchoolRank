@@ -14,11 +14,11 @@ func ConnectDB() *sql.DB {
     var err error
     var dbURL string
 
-    // Если переменная окружения JAWSDB_URL существует (на Heroku)
+    // Используем строку подключения для Heroku (если переменная окружения JAWSDB_URL установлена)
     if os.Getenv("JAWSDB_URL") != "" {
-        dbURL = os.Getenv("JAWSDB_URL") // Используем строку подключения для Heroku
+        dbURL = os.Getenv("mysql://qp5og7m2hwek0759:l0exy0xxnha9d4gb@ofcmikjy9x4lroa2.cbetxkdyhwsb.us-east-1.rds.amazonaws.com:3306/e1t15009mrgutxos")
     } else {
-        dbURL = "root:Zhanibek321@tcp(127.0.0.1:3306)/my_database" // Локальная база данных
+        dbURL = "root:Zhanibek321@tcp(127.0.0.1:3306)/my_database" // Локальная база данных для разработки
     }
 
     db, err = sql.Open("mysql", dbURL)
