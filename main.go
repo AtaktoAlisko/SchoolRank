@@ -94,6 +94,8 @@ func main() {
 	router.HandleFunc("/api/user/upload-avatar", controller.UploadAvatar(db)).Methods("POST")
 	router.HandleFunc("/api/user/update-avatar", controller.UpdateAvatar(db)).Methods("PUT")
 	router.HandleFunc("/api/user/delete-avatar", controller.DeleteAvatar(db)).Methods("DELETE")
+	router.HandleFunc("/api/user/set-default-avatar", controller.UploadDefaultAvatar(db)).Methods("POST")
+
 
 
 	// *** Schoolsколы ***
