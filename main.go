@@ -26,6 +26,8 @@ func main() {
         log.Fatal("Ошибка загрузки .env файла")
     }
 
+	db := driver.ConnectDB()
+	defer db.Close()
 	// Получаем переменные из окружения
 	awsAccessKeyID := os.Getenv("AWS_ACCESS_KEY_ID")
 	awsSecretAccessKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
@@ -99,7 +101,6 @@ func main() {
     router.HandleFunc("/schools/create", schoolController.CreateSchool(db)).Methods("POST")
 	router.HandleFunc("/schools/GetSchoolForDirector", schoolController.GetSchoolForDirector(db)).Methods("GET")
     router.HandleFunc("/schools/delete", schoolController.DeleteSchool(db)).Methods("DELETE")
-	router.HandleFunc("/unt_scores/create", untScoreController.CreateUNTScore(db)).Methods("POST")
 
 
 	// *** Reviews ***
@@ -134,11 +135,18 @@ func main() {
 	router.HandleFunc("/second_types/create", typeController.CreateSecondType(db)).Methods("POST")
 	router.HandleFunc("/api/second_types/school/{school_id}", typeController.GetSecondTypesBySchool(db)).Methods("GET")
     router.HandleFunc("/api/second_types/average-rating/{school_id}", typeController.GetAverageRatingSecondBySchool(db)).Methods("GET")
+	// В файл routes.go или в месте, где у вас описаны роуты, добавьте новый маршрут:
+    router.HandleFunc("/api/combined-average-rating/{school_id}", untScoreController.GetCombinedAverageRating(db)).Methods("GET")
+
 
     // *** Second Unt Scores ***
-	router.HandleFunc("/api/unt_scores/create", untScoreController.CreateUNTScore(db)).Methods("POST")
-    router.HandleFunc("/api/unt_scores", untScoreController.GetUNTScore(db)).Methods("GET")
+	// router.HandleFunc("/api/unt_scores/create", untScoreController.CreateUNTScore(db)).Methods("POST")
+    // router.HandleFunc("/api/unt_scores", untScoreController.GetUNTScore(db)).Methods("GET")
     router.HandleFunc("/api/unt_scores/total-score-school", untScoreController.GetTotalScoreForSchool(db)).Methods("GET")
+	// Включаем новый маршрут
+    router.HandleFunc("/api/average-rating/{school_id}", untScoreController.GetAverageRatingBySchool(db)).Methods("GET")
+	router.HandleFunc("/api/school/combined-average-rating", untScoreController.GetCombinedAverageRating(db)).Methods("GET")
+
 
 
 	// Роуты для городской олимпиады

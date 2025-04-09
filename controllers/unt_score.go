@@ -2,117 +2,19 @@ package controllers
 
 import (
 	"database/sql"
-	"encoding/json"
 	"log"
 	"net/http"
 	"ranking-school/models"
 	"ranking-school/utils"
+	"strconv"
+
+	"github.com/gorilla/mux"
 )
 
 type UNTScoreController struct{}
 
-// CreateUNTScore handles the creation of a UNT score entry.
-func (usc *UNTScoreController) CreateUNTScore(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var untScore models.UNTScore
 
-		// Decode incoming request
-		if err := json.NewDecoder(r.Body).Decode(&untScore); err != nil {
-			log.Println("Error decoding request body:", err)
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
-			return
-		}
 
-		// Calculate total score for the first type (profile exam subjects)
-		totalScore := untScore.FirstSubjectScore + untScore.SecondSubjectScore + untScore.HistoryKazakhstan + untScore.MathematicalLiteracy + untScore.ReadingLiteracy
-
-		// Calculate total score for the second type (creative exam and reading history)
-		totalScoreCreative := untScore.CreativeExam1 + untScore.CreativeExam2 + untScore.HistoryKazakhstan + untScore.ReadingLiteracy
-
-		// Calculate average rating for second type (creative exams)
-		creativeExamPercent := 0.0
-		if untScore.CreativeExam1 > 0 {
-			creativeExamPercent += float64(untScore.CreativeExam1) / 120 * 100
-		}
-		if untScore.CreativeExam2 > 0 {
-			creativeExamPercent += float64(untScore.CreativeExam2) / 140 * 100
-		}
-		averageRatingSecond := creativeExamPercent / 2 // Average of creative exams
-
-		// Calculate total average rating combining both types
-		averageRating := (creativeExamPercent + float64(totalScore)) / 2
-
-		// Check if UNT_Type and Student exist
-		var exists bool
-		if untScore.UNTTypeID != 0 {
-			err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM UNT_Type WHERE unt_type_id = ?)", untScore.UNTTypeID).Scan(&exists)
-			if err != nil || !exists {
-				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "UNT Type ID does not exist"})
-				return
-			}
-		}
-
-		if untScore.StudentID != 0 {
-			err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM Student WHERE student_id = ?)", untScore.StudentID).Scan(&exists)
-			if err != nil || !exists {
-				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Student ID does not exist"})
-				return
-			}
-		}
-
-		// Insert data into UNT_Score table
-		query := `INSERT INTO UNT_Score (year, unt_type_id, student_id, total_score, total_score_creative, average_rating, average_rating_second) 
-				  VALUES (?, ?, ?, ?, ?, ?, ?)`
-		_, err := db.Exec(query, untScore.Year, untScore.UNTTypeID, untScore.StudentID, totalScore, totalScoreCreative, averageRating, averageRatingSecond)
-		if err != nil {
-			log.Println("Error inserting UNT score:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create UNT score"})
-			return
-		}
-
-		utils.ResponseJSON(w, "UNT Score created successfully")
-	}
-}
-func (usc *UNTScoreController) GetUNTScore(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Получаем ID студента из параметров запроса
-		studentID := r.URL.Query().Get("student_id")
-		if studentID == "" {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Student ID is required"})
-			return
-		}
-
-		// Проверяем, существует ли студент с данным ID
-		var exists bool
-		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM Student WHERE student_id = ?)", studentID).Scan(&exists)
-		if err != nil || !exists {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Student ID does not exist"})
-			return
-		}
-
-		// Извлекаем информацию о балле из базы данных
-		var untScore models.UNTScore
-		query := `SELECT year, unt_type_id, student_id, total_score, total_score_creative, average_rating, average_rating_second 
-				  FROM UNT_Score WHERE student_id = ?`
-		row := db.QueryRow(query, studentID)
-
-		err = row.Scan(&untScore.Year, &untScore.UNTTypeID, &untScore.StudentID, 
-			&untScore.TotalScore, &untScore.TotalScoreCreative, &untScore.AverageRating, &untScore.AverageRatingSecond)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "UNT score not found"})
-			} else {
-				log.Println("Error retrieving UNT score:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve UNT score"})
-			}
-			return
-		}
-
-		// Отправляем ответ с данными
-		utils.ResponseJSON(w, untScore)
-	}
-}
-// GetTotalScoreForSchool calculates the total UNT score for a specific school
 func (usc *UNTScoreController) GetTotalScoreForSchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		schoolID := r.URL.Query().Get("school_id")
@@ -179,3 +81,210 @@ func (usc *UNTScoreController) GetTotalScoreForSchool(db *sql.DB) http.HandlerFu
 		})
 	}
 }
+func (usc *UNTScoreController) GetAverageRatingBySchool(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Извлекаем school_id из параметров URL
+        vars := mux.Vars(r)
+        schoolID, err := strconv.Atoi(vars["school_id"])
+        if err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+            return
+        }
+
+        // Запрос для получения среднего балла по школе
+        query := `
+        SELECT 
+            AVG(CASE WHEN ft.first_subject_score IS NOT NULL THEN ft.first_subject_score ELSE 0 END) AS avg_first_subject_score,
+            AVG(CASE WHEN ft.second_subject_score IS NOT NULL THEN ft.second_subject_score ELSE 0 END) AS avg_second_subject_score,
+            AVG(CASE WHEN ft.history_of_kazakhstan IS NOT NULL THEN ft.history_of_kazakhstan ELSE 0 END) AS avg_history_of_kazakhstan,
+            AVG(CASE WHEN ft.mathematical_literacy IS NOT NULL THEN ft.mathematical_literacy ELSE 0 END) AS avg_mathematical_literacy,
+            AVG(CASE WHEN ft.reading_literacy IS NOT NULL THEN ft.reading_literacy ELSE 0 END) AS avg_reading_literacy,
+            AVG(CASE WHEN ft.first_subject_score IS NOT NULL AND ft.second_subject_score IS NOT NULL AND 
+                     ft.history_of_kazakhstan IS NOT NULL AND ft.mathematical_literacy IS NOT NULL AND 
+                     ft.reading_literacy IS NOT NULL 
+                     THEN (ft.first_subject_score + ft.second_subject_score + ft.history_of_kazakhstan + 
+                           ft.mathematical_literacy + ft.reading_literacy) ELSE 0 END) AS avg_total_score
+        FROM First_Type ft
+        WHERE ft.school_id = ?`
+
+        row := db.QueryRow(query, schoolID)
+
+        var avgFirstSubjectScore, avgSecondSubjectScore, avgHistoryOfKazakhstan, avgMathematicalLiteracy, avgReadingLiteracy, avgTotalScore float64
+
+        err = row.Scan(&avgFirstSubjectScore, &avgSecondSubjectScore, &avgHistoryOfKazakhstan, &avgMathematicalLiteracy, &avgReadingLiteracy, &avgTotalScore)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to calculate average rating"})
+            return
+        }
+
+        // Response with average score
+        result := map[string]float64{
+            "avg_first_subject_score":      avgFirstSubjectScore,
+            "avg_second_subject_score":     avgSecondSubjectScore,
+            "avg_history_of_kazakhstan":    avgHistoryOfKazakhstan,
+            "avg_mathematical_literacy":    avgMathematicalLiteracy,
+            "avg_reading_literacy":         avgReadingLiteracy,
+            "avg_total_score":              avgTotalScore,
+        }
+
+        utils.ResponseJSON(w, result)
+    }
+}
+func (c *UNTScoreController) GetAverageRatingSecondBySchool(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Извлекаем school_id из параметров URL
+        vars := mux.Vars(r)
+        schoolID, err := strconv.Atoi(vars["school_id"])
+        if err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+            return
+        }
+
+        // Запрос для получения всех оценок по конкретной школе
+        query := `
+        SELECT 
+            history_of_kazakhstan_creative,
+            reading_literacy_creative,
+            creative_exam1,
+            creative_exam2
+        FROM Second_Type
+        WHERE school_id = ?`
+
+        rows, err := db.Query(query, schoolID)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get Second Types by School"})
+            return
+        }
+        defer rows.Close()
+
+        var totalScore float64
+        var studentCount int
+
+        for rows.Next() {
+            var historyOfKazakhstanCreative, readingLiteracyCreative, creativeExam1, creativeExam2 sql.NullInt64
+
+            // Считываем данные для каждого экзамена
+            if err := rows.Scan(&historyOfKazakhstanCreative, &readingLiteracyCreative, &creativeExam1, &creativeExam2); err != nil {
+                log.Println("Scan Error:", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse Second Types"})
+                return
+            }
+
+            // Вычисляем сумму оценок для каждого студента
+            totalScore += float64(historyOfKazakhstanCreative.Int64 + readingLiteracyCreative.Int64 + creativeExam1.Int64 + creativeExam2.Int64)
+            studentCount++
+        }
+
+        if studentCount == 0 {
+            utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No students found for this school"})
+            return
+        }
+
+        // Рассчитываем средний балл
+        averageRating := totalScore / float64(studentCount)
+
+        // Возвращаем результат в формате JSON
+        utils.ResponseJSON(w, map[string]interface{}{
+            "average_rating": averageRating,
+        })
+    }
+}
+func (usc *UNTScoreController) GetCombinedAverageRating(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        log.Println("GET /api/school/combined-average-rating route reached")
+
+        // Извлекаем school_id из query параметра URL
+        schoolID := r.URL.Query().Get("school_id")
+        if schoolID == "" {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "school_id is required"})
+            return
+        }
+
+        // 1. Получаем avg_total_score для первого типа
+        queryFirstType := `
+        SELECT 
+            AVG(CASE WHEN ft.first_subject_score IS NOT NULL THEN ft.first_subject_score ELSE 0 END) AS avg_first_subject_score,
+            AVG(CASE WHEN ft.second_subject_score IS NOT NULL THEN ft.second_subject_score ELSE 0 END) AS avg_second_subject_score,
+            AVG(CASE WHEN ft.history_of_kazakhstan IS NOT NULL THEN ft.history_of_kazakhstan ELSE 0 END) AS avg_history_of_kazakhstan,
+            AVG(CASE WHEN ft.mathematical_literacy IS NOT NULL THEN ft.mathematical_literacy ELSE 0 END) AS avg_mathematical_literacy,
+            AVG(CASE WHEN ft.reading_literacy IS NOT NULL THEN ft.reading_literacy ELSE 0 END) AS avg_reading_literacy,
+            AVG(CASE WHEN ft.first_subject_score IS NOT NULL AND ft.second_subject_score IS NOT NULL AND 
+                     ft.history_of_kazakhstan IS NOT NULL AND ft.mathematical_literacy IS NOT NULL AND 
+                     ft.reading_literacy IS NOT NULL 
+                     THEN (ft.first_subject_score + ft.second_subject_score + ft.history_of_kazakhstan + 
+                           ft.mathematical_literacy + ft.reading_literacy) ELSE 0 END) AS avg_total_score
+        FROM First_Type ft
+        WHERE ft.school_id = ?`
+
+        rowFirstType := db.QueryRow(queryFirstType, schoolID)
+
+        var avgFirstSubjectScore, avgSecondSubjectScore, avgHistoryOfKazakhstan, avgMathematicalLiteracy, avgReadingLiteracy, avgTotalScore float64
+        err := rowFirstType.Scan(&avgFirstSubjectScore, &avgSecondSubjectScore, &avgHistoryOfKazakhstan, &avgMathematicalLiteracy, &avgReadingLiteracy, &avgTotalScore)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get total score for first type"})
+            return
+        }
+
+        // 2. Получаем average_rating для второго типа
+        querySecondType := `
+        SELECT 
+            history_of_kazakhstan_creative,
+            reading_literacy_creative,
+            creative_exam1,
+            creative_exam2
+        FROM Second_Type
+        WHERE school_id = ?`
+
+        rowsSecondType, err := db.Query(querySecondType, schoolID)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get Second Types by School"})
+            return
+        }
+        defer rowsSecondType.Close()
+
+        var totalScoreSecondType float64
+        var studentCountSecondType int
+
+        for rowsSecondType.Next() {
+            var historyOfKazakhstanCreative, readingLiteracyCreative, creativeExam1, creativeExam2 sql.NullInt64
+
+            if err := rowsSecondType.Scan(&historyOfKazakhstanCreative, &readingLiteracyCreative, &creativeExam1, &creativeExam2); err != nil {
+                log.Println("Scan Error:", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse Second Types"})
+                return
+            }
+
+            totalScoreSecondType += float64(historyOfKazakhstanCreative.Int64 + readingLiteracyCreative.Int64 + creativeExam1.Int64 + creativeExam2.Int64)
+            studentCountSecondType++
+        }
+
+        if studentCountSecondType == 0 {
+            utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No students found for this school"})
+            return
+        }
+
+        averageRatingSecondType := totalScoreSecondType / float64(studentCountSecondType)
+
+        // 3. Рассчитываем комбинированный рейтинг
+        combinedAverageRating := (((avgTotalScore*100)/140) + ((averageRatingSecondType*100)/120)) / 2
+
+        // Возвращаем результат в формате JSON
+        utils.ResponseJSON(w, map[string]interface{}{
+            "avg_total_score_first_type": avgTotalScore,
+            "avg_total_score_second_type": averageRatingSecondType,
+            "combined_average_rating": combinedAverageRating,
+        })
+    }
+}
+
+
+
+
+
+
+
+
