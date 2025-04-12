@@ -73,6 +73,7 @@ func main() {
 	regionalOlympiadController := controllers.RegionalOlympiadController{}
 	republicanOlympiadController := controllers.RepublicanOlympiadController{}
 	TotalOlympiadRatingController := controllers.TotalOlympiadRatingController{}
+	contactController := &controllers.ContactUsController{}
 
 
 	
@@ -94,8 +95,6 @@ func main() {
 	router.HandleFunc("/api/user/upload-avatar", controller.UploadAvatar(db)).Methods("POST")
 	router.HandleFunc("/api/user/update-avatar", controller.UpdateAvatar(db)).Methods("PUT")
 	router.HandleFunc("/api/user/delete-avatar", controller.DeleteAvatar(db)).Methods("DELETE")
-	router.HandleFunc("/api/user/set-default-avatar", controller.UploadDefaultAvatar(db)).Methods("POST")
-
 
 
 	// *** Schoolsколы ***
@@ -137,7 +136,6 @@ func main() {
 	router.HandleFunc("/second_types/create", typeController.CreateSecondType(db)).Methods("POST")
 	router.HandleFunc("/api/second_types/school/{school_id}", typeController.GetSecondTypesBySchool(db)).Methods("GET")
     router.HandleFunc("/api/second_types/average-rating/{school_id}", typeController.GetAverageRatingSecondBySchool(db)).Methods("GET")
-	// В файл routes.go или в месте, где у вас описаны роуты, добавьте новый маршрут:
     router.HandleFunc("/api/combined-average-rating/{school_id}", untScoreController.GetCombinedAverageRating(db)).Methods("GET")
 
 
@@ -145,7 +143,6 @@ func main() {
 	// router.HandleFunc("/api/unt_scores/create", untScoreController.CreateUNTScore(db)).Methods("POST")
     // router.HandleFunc("/api/unt_scores", untScoreController.GetUNTScore(db)).Methods("GET")
     router.HandleFunc("/api/unt_scores/total-score-school", untScoreController.GetTotalScoreForSchool(db)).Methods("GET")
-	// Включаем новый маршрут
     router.HandleFunc("/api/average-rating/{school_id}", untScoreController.GetAverageRatingBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/school/combined-average-rating", untScoreController.GetCombinedAverageRating(db)).Methods("GET")
 
@@ -169,6 +166,9 @@ func main() {
 	router.HandleFunc("/republican_olympiad/delete", republicanOlympiadController.DeleteRepublicanOlympiad(db)).Methods("DELETE")
 	router.HandleFunc("/regional_olympiad/GetAverageRepublicanOlympiadScore", republicanOlympiadController.GetAverageRepublicanOlympiadScore(db)).Methods("GET")
 	router.HandleFunc("/olympiad/total-rating", TotalOlympiadRatingController.GetTotalOlympiadRating(db)).Methods("GET")
+
+    // Роут для обратной связи
+	router.HandleFunc("/api/contact", contactController.CreateContactRequest(db)).Methods("POST")
 
 // Включаем CORS
 handler := corsMiddleware(router)

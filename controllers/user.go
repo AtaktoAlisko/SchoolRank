@@ -35,7 +35,7 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
 
         // Устанавливаем дефолтный аватар, если не указан
         if user.AvatarURL == "" {
-            user.AvatarURL = "https://avatarschoolrank.s3.eu-north-1.amazonaws.com/avatar-1744191586.jpg" // Дефолтный аватар
+            user.AvatarURL = "https://avatarschoolrank.s3.eu-north-1.amazonaws.com/avatar-1744191586.jpg" 
         }
 
         // Проверяем, что email или телефон предоставлены
@@ -443,7 +443,6 @@ func (c Controller) UpdatePassword(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, map[string]string{"message": "Password updated successfully."})
     }
 }
-
 func (c Controller) TokenVerifyMiddleware(next http.HandlerFunc) http.HandlerFunc {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         var errorObject models.Error
@@ -1203,42 +1202,6 @@ func (c Controller) DeleteAvatar(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, map[string]string{"message": "Avatar deleted successfully"})
     }
 }
-func (c *Controller) UploadDefaultAvatar(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // Чтение файла аватара
-        file, _, err := r.FormFile("avatar")
-        if err != nil {
-            log.Println("Error reading file:", err)
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Error reading file"})
-            return
-        }
-        defer file.Close()
-
-        // Генерация уникального имени файла для аватара
-        uniqueFileName := fmt.Sprintf("avatar-%d.jpg", time.Now().Unix())
-
-        // Загружаем файл в S3 (или сохраняем в другом месте)
-        photoURL, err := utils.UploadFileToS3(file, uniqueFileName, true) // передаем true для аватарок
-        if err != nil {
-            log.Println("Error uploading file:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to upload avatar"})
-            return
-        }
-
-        // Сохранение URL аватара в базу данных (можно дополнительно добавить поле в таблицу для хранения URL)
-        query := "UPDATE users SET avatar_url = ? WHERE id = 1" // id 1 — пример, замените на актуальное условие
-        _, err = db.Exec(query, photoURL)
-        if err != nil {
-            log.Println("Error updating avatar URL:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update avatar URL"})
-            return
-        }
-
-        // Ответ с подтверждением
-        utils.ResponseJSON(w, map[string]string{"message": "Avatar uploaded successfully", "avatar_url": photoURL})
-    }
-}
-
 
 
 

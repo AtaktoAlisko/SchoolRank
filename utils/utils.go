@@ -29,12 +29,16 @@ import (
 )
 var secretKey = []byte(os.Getenv("SECRET")) 
 func RespondWithError(w http.ResponseWriter, status int, error models.Error) {
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(error)
+    w.WriteHeader(status)
+    if err := json.NewEncoder(w).Encode(error); err != nil {
+        log.Printf("Ошибка при отправке JSON ошибки: %v", err)
+    }
 }
 func ResponseJSON(w http.ResponseWriter, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+    w.Header().Set("Content-Type", "application/json")
+    if err := json.NewEncoder(w).Encode(data); err != nil {
+        http.Error(w, "Не удалось сформировать JSON", http.StatusInternalServerError)
+    }
 }
 func ComparePasswords(hashedPassword string, password []byte) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), password)
@@ -303,7 +307,6 @@ func UploadFileToS3(file multipart.File, fileName string, isAvatar bool) (string
     url := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", bucketName, region, fileName)
     return url, nil
 }
-
 func StrToInt(s string) (int, error) {
 	s = strings.TrimSpace(s)  // Убираем все пробельные символы (включая новую строку)
 	return strconv.Atoi(s)
