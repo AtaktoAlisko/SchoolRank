@@ -3,6 +3,7 @@ package controllers
 import (
 	"database/sql"
 	"log"
+	"math"
 	"net/http"
 	"ranking-school/models"
 	"ranking-school/utils"
@@ -193,7 +194,6 @@ func (c *UNTScoreController) GetAverageRatingSecondBySchool(db *sql.DB) http.Han
 }
 func (usc *UNTScoreController) GetCombinedAverageRating(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
-        log.Println("GET /api/school/combined-average-rating route reached")
 
         // Извлекаем school_id из query параметра URL
         schoolID := r.URL.Query().Get("school_id")
@@ -271,15 +271,25 @@ func (usc *UNTScoreController) GetCombinedAverageRating(db *sql.DB) http.Handler
 
         // 3. Рассчитываем комбинированный рейтинг
         combinedAverageRating := (((avgTotalScore*100)/140) + ((averageRatingSecondType*100)/120)) / 2
+        roundedCombinedRating := customRound(combinedAverageRating) // Применяем округление
+
 
         // Возвращаем результат в формате JSON
         utils.ResponseJSON(w, map[string]interface{}{
             "avg_total_score_first_type": avgTotalScore,
             "avg_total_score_second_type": averageRatingSecondType,
-            "combined_average_rating": combinedAverageRating,
+            "combined_average_rating": roundedCombinedRating,
         })
     }
 }
+// Функция округления с вашими правилами
+func customRound(value float64) float64 {
+    if value - math.Floor(value) >= 0.5 {
+        return math.Ceil(value) // Округляем в большую сторону
+    }
+    return math.Floor(value) // Оставляем без изменений
+}
+
 
 
 
