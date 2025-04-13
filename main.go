@@ -98,21 +98,21 @@ func main() {
 
 
 	// *** Schoolsколы ***
-	router.HandleFunc("/schools", schoolController.GetSchools(db)).Methods("GET")
-    router.HandleFunc("/schools/create", schoolController.CreateSchool(db)).Methods("POST")
-	router.HandleFunc("/schools/GetSchoolForDirector", schoolController.GetSchoolForDirector(db)).Methods("GET")
-    router.HandleFunc("/schools/delete", schoolController.DeleteSchool(db)).Methods("DELETE")
+	router.HandleFunc("/api/admin//schools", schoolController.GetSchools(db)).Methods("GET")
+    router.HandleFunc("/api/schooladmin/schools/create", schoolController.CreateSchool(db)).Methods("POST")
+	router.HandleFunc("/api/schooladmin/schools/GetSchoolForDirector", schoolController.GetSchoolForDirector(db)).Methods("GET")
+    router.HandleFunc("/api/schooladmin/schools/delete", schoolController.DeleteSchool(db)).Methods("DELETE")
 
 
 	// *** Reviews ***
-	router.HandleFunc("/reviews/create", reviewController.CreateReview(db)).Methods("POST")
-	router.HandleFunc("/reviews/school/{school_id}", reviewController.GetReviewsBySchool(db)).Methods("GET")
-	router.HandleFunc("/reviews/average-rating/{school_id}", reviewController.GetAverageRating(db)).Methods("GET")
+	router.HandleFunc("/api/schooladmin/reviews/create", reviewController.CreateReview(db)).Methods("POST")
+	router.HandleFunc("/api/admin/school/{school_id}", reviewController.GetReviewsBySchool(db)).Methods("GET")
+	router.HandleFunc("/api/admin/average-rating/{school_id}", reviewController.GetAverageRating(db)).Methods("GET")
 
 
 	// *** Types ***
-	router.HandleFunc("/api/unt-types/create", untTypeController.CreateUNTType(db)).Methods("POST")
-	router.HandleFunc("/api/unt_types/{school_id}", typeController.GetUNTTypesBySchool(db)).Methods("GET")
+	router.HandleFunc("/api/schooladmin/unt-types/create", untTypeController.CreateUNTType(db)).Methods("POST")
+	router.HandleFunc("/api/admin/unt_types/{school_id}", typeController.GetUNTTypesBySchool(db)).Methods("GET")
 
 	
 	// Добавьте маршруты перед запуском сервера
@@ -128,12 +128,12 @@ func main() {
 	// *** First Type ***
 	router.HandleFunc("/api/first_types/create", typeController.CreateFirstType(db)).Methods("POST")
     router.HandleFunc("/api/average-rating/{school_id}", typeController.GetAverageRatingBySchool(db)).Methods("GET")
-	router.HandleFunc("/first_types", typeController.GetFirstTypes(db)).Methods("GET")
+	router.HandleFunc("/api/first_types", typeController.GetFirstTypes(db)).Methods("GET")
 	router.HandleFunc("/api/types/first/school/{school_id}", typeController.GetFirstTypesBySchool(db)).Methods("GET")
 	
 	// *** Second Type ***
-	router.HandleFunc("/second_types", typeController.GetSecondTypes(db)).Methods("GET")
-	router.HandleFunc("/second_types/create", typeController.CreateSecondType(db)).Methods("POST")
+	router.HandleFunc("/api/second_types", typeController.GetSecondTypes(db)).Methods("GET")
+	router.HandleFunc("/api/second_types/create", typeController.CreateSecondType(db)).Methods("POST")
 	router.HandleFunc("/api/second_types/school/{school_id}", typeController.GetSecondTypesBySchool(db)).Methods("GET")
     router.HandleFunc("/api/second_types/average-rating/{school_id}", typeController.GetAverageRatingSecondBySchool(db)).Methods("GET")
     router.HandleFunc("/api/combined-average-rating/{school_id}", untScoreController.GetCombinedAverageRating(db)).Methods("GET")
@@ -149,23 +149,23 @@ func main() {
 
 
 	// Роуты для городской олимпиады
-	router.HandleFunc("/city_olympiad/create", cityOlympiadController.CreateCityOlympiad(db)).Methods("POST")
-	router.HandleFunc("/city_olympiad", cityOlympiadController.GetCityOlympiad(db)).Methods("GET")
-	router.HandleFunc("/city_olympiad/GetAverageCityOlympiadScore", cityOlympiadController.GetAverageCityOlympiadScore(db)).Methods("GET")
-    router.HandleFunc("/city_olympiad/delete", cityOlympiadController.DeleteCityOlympiad(db)).Methods("DELETE")
+	router.HandleFunc("/api/city_olympiad/create", cityOlympiadController.CreateCityOlympiad(db)).Methods("POST")
+	router.HandleFunc("/api/city_olympiad", cityOlympiadController.GetCityOlympiad(db)).Methods("GET")
+	router.HandleFunc("/api/city_olympiad/GetAverageCityOlympiadScore", cityOlympiadController.GetAverageCityOlympiadScore(db)).Methods("GET")
+    router.HandleFunc("/api/city_olympiad/delete", cityOlympiadController.DeleteCityOlympiad(db)).Methods("DELETE")
 
 	// Роуты для областной олимпиады
-	router.HandleFunc("/regional_olympiad/create", regionalOlympiadController.CreateRegionalOlympiad(db)).Methods("POST")
-	router.HandleFunc("/regional_olympiad", regionalOlympiadController.GetRegionalOlympiad(db)).Methods("GET")
-	router.HandleFunc("/regional_olympiad/GetAverageRegionalOlympiadScore", regionalOlympiadController.GetAverageRegionalOlympiadScore(db)).Methods("GET")
-	router.HandleFunc("/regional_olympiad/delete", regionalOlympiadController.DeleteRegionalOlympiad(db)).Methods("DELETE")
+	router.HandleFunc("/api/regional_olympiad/create", regionalOlympiadController.CreateRegionalOlympiad(db)).Methods("POST")
+	router.HandleFunc("/api/regional_olympiad", regionalOlympiadController.GetRegionalOlympiad(db)).Methods("GET")
+	router.HandleFunc("/api/regional_olympiad/GetAverageRegionalOlympiadScore", regionalOlympiadController.GetAverageRegionalOlympiadScore(db)).Methods("GET")
+	router.HandleFunc("/api/regional_olympiad/delete", regionalOlympiadController.DeleteRegionalOlympiad(db)).Methods("DELETE")
 
     // Роуты для республиканской олимпиады
-	router.HandleFunc("/republican_olympiad/create", republicanOlympiadController.CreateRepublicanOlympiad(db)).Methods("POST")
-	router.HandleFunc("/republican_olympiad", republicanOlympiadController.GetRepublicanOlympiad(db)).Methods("GET")
-	router.HandleFunc("/republican_olympiad/delete", republicanOlympiadController.DeleteRepublicanOlympiad(db)).Methods("DELETE")
-	router.HandleFunc("/regional_olympiad/GetAverageRepublicanOlympiadScore", republicanOlympiadController.GetAverageRepublicanOlympiadScore(db)).Methods("GET")
-	router.HandleFunc("/olympiad/total-rating", TotalOlympiadRatingController.GetTotalOlympiadRating(db)).Methods("GET")
+	router.HandleFunc("/api/republican_olympiad/create", republicanOlympiadController.CreateRepublicanOlympiad(db)).Methods("POST")
+	router.HandleFunc("/api/republican_olympiad", republicanOlympiadController.GetRepublicanOlympiad(db)).Methods("GET")
+	router.HandleFunc("/api/republican_olympiad/delete", republicanOlympiadController.DeleteRepublicanOlympiad(db)).Methods("DELETE")
+	router.HandleFunc("/api/regional_olympiad/GetAverageRepublicanOlympiadScore", republicanOlympiadController.GetAverageRepublicanOlympiadScore(db)).Methods("GET")
+	router.HandleFunc("/api/olympiad/total-rating", TotalOlympiadRatingController.GetTotalOlympiadRating(db)).Methods("GET")
 
     // Роут для обратной связи
 	router.HandleFunc("/api/contact", contactController.CreateContactRequest(db)).Methods("POST")
