@@ -282,7 +282,6 @@ func (usc *UNTScoreController) GetCombinedAverageRating(db *sql.DB) http.Handler
         })
     }
 }
-// Функция округления с вашими правилами
 func customRound(value float64) float64 {
     if value - math.Floor(value) >= 0.5 {
         return math.Ceil(value) // Округляем в большую сторону

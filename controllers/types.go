@@ -528,3 +528,4 @@ func (c *TypeController) GetAverageRatingSecondBySchool(db *sql.DB) http.Handler
 
 
 
+
