@@ -98,7 +98,7 @@ func main() {
 	router.HandleFunc("/api/users/me/avatar", controller.UploadAvatar(db)).Methods("POST")
 	router.HandleFunc("/api/users/me/avatar", controller.UpdateAvatar(db)).Methods("PUT")
 	router.HandleFunc("/api/users/me/avatar", controller.DeleteAvatar(db)).Methods("DELETE")
-	router.HandleFunc("/api/users/delete-account", controller.DeleteAccount(db)).Methods("DELETE")
+	router.HandleFunc("/api/users/delete-account/{user_id}", controller.DeleteAccount(db)).Methods("DELETE")
 
 
 	// =======================

@@ -15,6 +15,7 @@ import (
 
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
+	"github.com/gorilla/mux"
 	"golang.org/x/crypto/bcrypt"
 )
 func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
@@ -269,45 +270,20 @@ func (c Controller) DeleteAccount(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var errorObject models.Error
         
-        // Get the token from the request header
-        authHeader := r.Header.Get("Authorization")
-        bearerToken := strings.Split(authHeader, " ")
+        // Извлекаем user_id из URL
+        vars := mux.Vars(r)
+        userID := vars["user_id"]
 
-        if len(bearerToken) != 2 {
-            errorObject.Message = "Authorization token is required"
-            utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
+        // Проверяем, что user_id валидный
+        if userID == "" {
+            errorObject.Message = "User ID is required"
+            utils.RespondWithError(w, http.StatusBadRequest, errorObject)
             return
         }
 
-        tokenString := bearerToken[1]
-        
-        // Parse the token to verify it
-        token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-            if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-                return nil, fmt.Errorf("Invalid signing method")
-            }
-            return []byte(os.Getenv("SECRET")), nil
-        })
-        
-        if err != nil || !token.Valid {
-            errorObject.Message = "Invalid or expired token"
-            utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
-            return
-        }
-
-        // Get the user ID from the token claims
-        claims, ok := token.Claims.(jwt.MapClaims)
-        if !ok || claims["user_id"] == nil {
-            errorObject.Message = "Invalid token claims"
-            utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
-            return
-        }
-
-        userID := claims["user_id"].(float64)
-
-        // Check if the user exists in the database
+        // Проверка, существует ли пользователь с таким ID в базе данных
         var existingUserID int
-        err = db.QueryRow("SELECT id FROM users WHERE id = ?", int(userID)).Scan(&existingUserID)
+        err := db.QueryRow("SELECT id FROM users WHERE id = ?", userID).Scan(&existingUserID)
         if err != nil {
             if err == sql.ErrNoRows {
                 errorObject.Message = "User not found"
@@ -319,17 +295,15 @@ func (c Controller) DeleteAccount(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Delete user from the database
-        _, err = db.Exec("DELETE FROM users WHERE id = ?", int(userID))
+        // Удаление пользователя из базы данных
+        _, err = db.Exec("DELETE FROM users WHERE id = ?", userID)
         if err != nil {
             errorObject.Message = "Failed to delete user"
             utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
             return
         }
 
-        // Optionally, remove any related data (such as UNT Scores, etc.)
-
-        // Respond with a success message
+        // Ответ о успешном удалении
         utils.ResponseJSON(w, map[string]string{"message": "Account deleted successfully"})
     }
 }
