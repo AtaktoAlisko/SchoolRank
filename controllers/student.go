@@ -72,7 +72,7 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 		student.Password = string(hashedPassword) // Устанавливаем хэшированный пароль
 
 		// Шаг 7: Вставить студента в базу данных
-		query := `INSERT INTO Student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, password) 
+		query := `INSERT INTO student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, password) 
 		          VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 		// Выполнить запрос
