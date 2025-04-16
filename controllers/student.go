@@ -58,18 +58,20 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Step 6: Hash the student's password
+		// Step 6: Hash the student's password before saving it
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(student.Password), bcrypt.DefaultCost)
 		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to hash password"})
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error hashing password"})
 			return
 		}
 
-		// Step 7: Insert the student into the database (with hashed password)
+		// Set the hashed password in the student object
+		student.Password = string(hashedPassword)
+
+		// Step 7: Insert the student into the database
 		query := `INSERT INTO Student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, password) 
 		          VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-
-		result, err := db.Exec(query, student.FirstName, student.LastName, student.Patronymic, student.IIN, student.SchoolID, student.DateOfBirth, student.Grade, student.Letter, student.Gender, student.Phone, student.Email, string(hashedPassword))
+		result, err := db.Exec(query, student.FirstName, student.LastName, student.Patronymic, student.IIN, student.SchoolID, student.DateOfBirth, student.Grade, student.Letter, student.Gender, student.Phone, student.Email, student.Password)
 		if err != nil {
 			log.Println("Error inserting student:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create student"})
@@ -87,8 +89,7 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 		// Set the ID of the student object
 		student.ID = int(studentID)
 
-		// Step 9: Respond with the newly created student (excluding password)
-		student.Password = "" // Don't return the password in the response
+		// Step 9: Respond with the newly created student
 		utils.ResponseJSON(w, student)
 	}
 }

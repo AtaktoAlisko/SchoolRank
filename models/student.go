@@ -13,5 +13,5 @@ type Student struct {
 	Gender      string `json:"gender"`
 	Phone       string `json:"phone"`
 	Email       string `json:"email"`
-	 Password    string `json:"password"`
+	Password    string `json:"password"`
 }
