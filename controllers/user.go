@@ -169,6 +169,7 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
         var phone sql.NullString
         var role string
         var isVerified bool
+        var isStudent bool // Флаг для проверки, является ли пользователь студентом
 
         // Проверяем, что email или телефон предоставлены для входа
         if user.Email != "" {
@@ -192,6 +193,11 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
             query = "SELECT student_id, email, phone, password, first_name, last_name, grade, school_id FROM student WHERE email = ?"
             row = db.QueryRow(query, identifier)
             err = row.Scan(&user.ID, &email, &phone, &hashedPassword, &user.FirstName, &user.LastName, &user.Age, &user.SchoolID)
+
+            // Проверка на наличие записи в students
+            if err == nil {
+                isStudent = true // Если пользователь найден в students, ставим флаг
+            }
         }
 
         // Если ошибка не связана с отсутствием пользователя
@@ -233,13 +239,14 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
             return
         }
 
+        // Отправляем токены в ответ
         utils.ResponseJSON(w, map[string]string{
             "token":         accessToken,
             "refresh_token": refreshToken,
+            "is_student":    fmt.Sprintf("%v", isStudent), // Возвращаем флаг, является ли пользователь студентом
         })
     }
 }
-
 func (c Controller) Logout(w http.ResponseWriter, r *http.Request) {
     // Get token from Authorization header
     authHeader := r.Header.Get("Authorization")
