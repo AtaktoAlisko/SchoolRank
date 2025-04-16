@@ -16,82 +16,70 @@ import (
 type StudentController struct{}
 
 func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Step 1: Verify the user's token and get userID
-		userID, err := utils.VerifyToken(r)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
-			return
-		}
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Step 1: Verify the user's token and get userID
+        userID, err := utils.VerifyToken(r)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+            return
+        }
 
-		// Step 2: Get user role and school ID
-		var userRole string
-		var userSchoolID sql.NullInt64 // Using sql.NullInt64 to handle NULL values
-		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
-		if err != nil {
-			log.Println("Error fetching user role and school ID:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
-			return
-		}
+        // Step 2: Get user role and school ID
+        var userRole string
+        var userSchoolID sql.NullInt64
+        err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+        if err != nil {
+            log.Println("Error fetching user role and school ID:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+            return
+        }
 
-		// Step 3: Ensure the user is a director and has a school assigned
-		if userRole != "schooladmin" {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create a student"})
-			return
-		}
+        // Step 3: Ensure the user is a director and has a school assigned
+        if userRole != "schooladmin" {
+            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create a student"})
+            return
+        }
 
-		if !userSchoolID.Valid {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Director does not have an assigned school"})
-			return
-		}
+        if !userSchoolID.Valid {
+            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Director does not have an assigned school"})
+            return
+        }
 
-		// Step 4: Decode the student data from the request
-		var student models.Student
-		if err := json.NewDecoder(r.Body).Decode(&student); err != nil {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
-			return
-		}
+        // Step 4: Decode the student data from the request
+        var student models.Student
+        if err := json.NewDecoder(r.Body).Decode(&student); err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
+            return
+        }
 
-		// Step 5: Ensure the student's school ID matches the director's school ID
-		if student.SchoolID != int(userSchoolID.Int64) {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only create students for your school"})
-			return
-		}
+        // Step 5: Ensure the student's school ID matches the director's school ID
+        if student.SchoolID != int(userSchoolID.Int64) {
+            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only create students for your school"})
+            return
+        }
 
-		// Step 6: Hash the student's password before saving it
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(student.Password), bcrypt.DefaultCost)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error hashing password"})
-			return
-		}
+        // Step 6: Hash the password before saving it
+        hashedPassword, err := bcrypt.GenerateFromPassword([]byte(student.Password), bcrypt.DefaultCost)
+        if err != nil {
+            log.Println("Error hashing password:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to hash password"})
+            return
+        }
 
-		// Set the hashed password in the student object
-		student.Password = string(hashedPassword)
+        // Step 7: Insert the student into the database, including the hashed password
+        query := `INSERT INTO Student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, password) 
+                  VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
-		// Step 7: Insert the student into the database
-		query := `INSERT INTO Student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, password) 
-		          VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-		result, err := db.Exec(query, student.FirstName, student.LastName, student.Patronymic, student.IIN, student.SchoolID, student.DateOfBirth, student.Grade, student.Letter, student.Gender, student.Phone, student.Email, student.Password)
-		if err != nil {
-			log.Println("Error inserting student:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create student"})
-			return
-		}
+        _, err = db.Exec(query, student.FirstName, student.LastName, student.Patronymic, student.IIN, student.SchoolID, student.DateOfBirth, student.Grade, student.Letter, student.Gender, student.Phone, student.Email, string(hashedPassword))
+        if err != nil {
+            log.Println("Error inserting student:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create student"})
+            return
+        }
 
-		// Step 8: Retrieve the student's ID from the result of the insert query
-		studentID, err := result.LastInsertId()
-		if err != nil {
-			log.Println("Error retrieving student ID:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve student ID"})
-			return
-		}
-
-		// Set the ID of the student object
-		student.ID = int(studentID)
-
-		// Step 9: Respond with the newly created student
-		utils.ResponseJSON(w, student)
-	}
+        // Step 8: Respond with the newly created student
+        utils.ResponseJSON(w, student)
+    }
 }
 func (sc StudentController) GetStudents(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
