@@ -171,15 +171,18 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
         var isVerified bool
         var isStudent bool // Флаг для проверки, является ли пользователь студентом
 
-        // Проверяем, что email или телефон предоставлены для входа
+        // Проверяем, что email, phone или login предоставлены для входа
         if user.Email != "" {
             query = "SELECT id, email, phone, password, first_name, last_name, age, role, is_verified FROM users WHERE email = ?"
             identifier = user.Email
         } else if user.Phone != "" {
             query = "SELECT id, email, phone, password, first_name, last_name, age, role, is_verified FROM users WHERE phone = ?"
             identifier = user.Phone
+        } else if user.Login != "" {  // Если передан login
+            query = "SELECT id, email, phone, password, first_name, last_name, age, role, is_verified FROM users WHERE login = ?"
+            identifier = user.Login
         } else {
-            error.Message = "Email or phone is required."
+            error.Message = "Email, phone, or login is required."
             utils.RespondWithError(w, http.StatusBadRequest, error)
             return
         }
@@ -190,8 +193,8 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
 
         // Если пользователь не найден в таблице users, пробуем найти в таблице students
         if err == sql.ErrNoRows {
-            query = "SELECT student_id, email, phone, password, first_name, last_name, grade, school_id FROM student WHERE email = ?"
-            row = db.QueryRow(query, identifier)
+            query = "SELECT student_id, email, phone, password, first_name, last_name, grade, school_id FROM student WHERE email = ? OR login = ?"
+            row = db.QueryRow(query, identifier, identifier)
             err = row.Scan(&user.ID, &email, &phone, &hashedPassword, &user.FirstName, &user.LastName, &user.Age, &user.SchoolID)
 
             // Если найден студент
@@ -256,6 +259,7 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
         })
     }
 }
+
 func (c Controller) Logout(w http.ResponseWriter, r *http.Request) {
     // Get token from Authorization header
     authHeader := r.Header.Get("Authorization")
