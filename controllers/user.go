@@ -193,12 +193,12 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Check email verification status
-        if !isVerified {
-            error.Message = "Please verify your email before logging in."
-            utils.RespondWithError(w, http.StatusForbidden, error)
-            return
-        }
+        // Skip email verification check (remove this block)
+        // if !isVerified {
+        //     error.Message = "Please verify your email before logging in."
+        //     utils.RespondWithError(w, http.StatusForbidden, error)
+        //     return
+        // }
 
         // Compare the entered password with the hashed password
         err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(user.Password))

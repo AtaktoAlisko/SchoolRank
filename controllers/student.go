@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type StudentController struct{}
@@ -57,19 +58,25 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Step 6: Insert the student into the database
-		query := `INSERT INTO Student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email) 
-		          VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		// Step 6: Hash the student's password
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(student.Password), bcrypt.DefaultCost)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to hash password"})
+			return
+		}
 
-		// Execute the query
-		result, err := db.Exec(query, student.FirstName, student.LastName, student.Patronymic, student.IIN, student.SchoolID, student.DateOfBirth, student.Grade, student.Letter, student.Gender, student.Phone, student.Email)
+		// Step 7: Insert the student into the database (with hashed password)
+		query := `INSERT INTO Student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, password) 
+		          VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+		result, err := db.Exec(query, student.FirstName, student.LastName, student.Patronymic, student.IIN, student.SchoolID, student.DateOfBirth, student.Grade, student.Letter, student.Gender, student.Phone, student.Email, string(hashedPassword))
 		if err != nil {
 			log.Println("Error inserting student:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create student"})
 			return
 		}
 
-		// Step 7: Retrieve the student's ID from the result of the insert query
+		// Step 8: Retrieve the student's ID from the result of the insert query
 		studentID, err := result.LastInsertId()
 		if err != nil {
 			log.Println("Error retrieving student ID:", err)
@@ -80,11 +87,11 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 		// Set the ID of the student object
 		student.ID = int(studentID)
 
-		// Step 8: Respond with the newly created student
+		// Step 9: Respond with the newly created student (excluding password)
+		student.Password = "" // Don't return the password in the response
 		utils.ResponseJSON(w, student)
 	}
 }
-
 func (sc StudentController) GetStudents(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Step 1: Query the database for student details
