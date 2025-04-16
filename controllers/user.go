@@ -259,7 +259,6 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
         })
     }
 }
-
 func (c Controller) Logout(w http.ResponseWriter, r *http.Request) {
     // Get token from Authorization header
     authHeader := r.Header.Get("Authorization")
