@@ -58,12 +58,12 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Шаг 6: Генерация фиктивного email и пароля для студента
-		student.Email = student.FirstName + student.LastName + "school" + "@example.com" // фиктивный email
-		password := "password" // фиктивный пароль, который может быть заменен при входе
+		// Шаг 6: Задать фиксированный email и пароль
+		student.Email = student.FirstName + student.LastName + "school" // Фиксированный email
+		student.Password = "password123" // Фиксированный пароль
 
 		// Хэшируем пароль перед сохранением
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(student.Password), bcrypt.DefaultCost)
 		if err != nil {
 			log.Println("Ошибка при хэшировании пароля:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Ошибка при хэшировании пароля"})
