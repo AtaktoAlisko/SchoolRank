@@ -189,7 +189,7 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
 
         // Если пользователь не найден в таблице users, пробуем найти в таблице students
         if err == sql.ErrNoRows {
-            query = "SELECT id, email, phone, password, first_name, last_name, grade, school_id FROM student WHERE email = ?"
+            query = "SELECT student_id, email, phone, password, first_name, last_name, grade, school_id FROM student WHERE email = ?"
             row = db.QueryRow(query, identifier)
             err = row.Scan(&user.ID, &email, &phone, &hashedPassword, &user.FirstName, &user.LastName, &user.Age, &user.SchoolID)
         }
