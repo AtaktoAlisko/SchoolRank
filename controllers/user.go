@@ -154,7 +154,7 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
         var user models.User
         var error models.Error
 
-        // Decode the request body into the user model
+        // Декодируем тело запроса в модель пользователя
         err := json.NewDecoder(r.Body).Decode(&user)
         if err != nil {
             error.Message = "Invalid request body."
@@ -170,17 +170,31 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
         var role string
         var isVerified bool
 
-        // Check if email or phone is provided for login
+        // Проверяем, что email или телефон предоставлены для входа
         if user.Email != "" {
             query = "SELECT id, email, phone, password, first_name, last_name, age, role, is_verified FROM users WHERE email = ?"
             identifier = user.Email
-        } else {
+        } else if user.Phone != "" {
             query = "SELECT id, email, phone, password, first_name, last_name, age, role, is_verified FROM users WHERE phone = ?"
             identifier = user.Phone
+        } else {
+            error.Message = "Email or phone is required."
+            utils.RespondWithError(w, http.StatusBadRequest, error)
+            return
         }
 
+        // Попытка найти пользователя в таблице users
         row := db.QueryRow(query, identifier)
         err = row.Scan(&user.ID, &email, &phone, &hashedPassword, &user.FirstName, &user.LastName, &user.Age, &role, &isVerified)
+
+        // Если пользователь не найден в таблице users, пробуем найти в таблице students
+        if err == sql.ErrNoRows {
+            query = "SELECT id, email, phone, password, first_name, last_name, grade, school_id FROM student WHERE email = ?"
+            row = db.QueryRow(query, identifier)
+            err = row.Scan(&user.ID, &email, &phone, &hashedPassword, &user.FirstName, &user.LastName, &user.Age, &user.SchoolID)
+        }
+
+        // Если ошибка не связана с отсутствием пользователя
         if err != nil {
             if err == sql.ErrNoRows {
                 error.Message = "User not found."
@@ -193,14 +207,7 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Skip email verification check (remove this block)
-        // if !isVerified {
-        //     error.Message = "Please verify your email before logging in."
-        //     utils.RespondWithError(w, http.StatusForbidden, error)
-        //     return
-        // }
-
-        // Compare the entered password with the hashed password
+        // Сравниваем введенный пароль с захэшированным
         err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(user.Password))
         if err != nil {
             error.Message = "Invalid password."
@@ -208,7 +215,7 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Generate access token
+        // Генерация access token
         accessToken, err := utils.GenerateToken(user)
         if err != nil {
             log.Printf("Error generating token: %v", err)
@@ -217,7 +224,7 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Generate refresh token
+        // Генерация refresh token
         refreshToken, err := utils.GenerateRefreshToken(user)
         if err != nil {
             log.Printf("Error generating refresh token: %v", err)
@@ -232,6 +239,7 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
         })
     }
 }
+
 func (c Controller) Logout(w http.ResponseWriter, r *http.Request) {
     // Get token from Authorization header
     authHeader := r.Header.Get("Authorization")
