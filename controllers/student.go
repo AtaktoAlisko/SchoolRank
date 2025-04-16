@@ -67,7 +67,7 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
         }
 
         // Step 7: Insert the student into the database, including the hashed password
-        query := `INSERT INTO Student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, password) 
+        query := `INSERT INTO student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, password) 
                   VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
         _, err = db.Exec(query, student.FirstName, student.LastName, student.Patronymic, student.IIN, student.SchoolID, student.DateOfBirth, student.Grade, student.Letter, student.Gender, student.Phone, student.Email, string(hashedPassword))
