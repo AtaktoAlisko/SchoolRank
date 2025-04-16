@@ -66,7 +66,7 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 		student.Password = fmt.Sprintf("%s%s%s", student.FirstName, randomString) // Пароль: имя + случайные символы
 
 		// Step 7: Insert the student into the database
-		query := `INSERT INTO Student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, login, password) 
+		query := `INSERT INTO student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, login, password) 
 		          VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 		// Execute the query
