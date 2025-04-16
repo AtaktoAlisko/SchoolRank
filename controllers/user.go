@@ -194,9 +194,16 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
             row = db.QueryRow(query, identifier)
             err = row.Scan(&user.ID, &email, &phone, &hashedPassword, &user.FirstName, &user.LastName, &user.Age, &user.SchoolID)
 
-            // Проверка на наличие записи в students
+            // Если найден студент
             if err == nil {
                 isStudent = true // Если пользователь найден в students, ставим флаг
+                // Проверяем пароль (для студентов это будет имя + фамилия)
+                expectedPassword := fmt.Sprintf("%s%s", user.FirstName, user.LastName)
+                if expectedPassword != user.Password {
+                    error.Message = "Invalid password."
+                    utils.RespondWithError(w, http.StatusUnauthorized, error)
+                    return
+                }
             }
         }
 
@@ -213,12 +220,14 @@ func (c Controller) Login(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Сравниваем введенный пароль с захэшированным
-        err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(user.Password))
-        if err != nil {
-            error.Message = "Invalid password."
-            utils.RespondWithError(w, http.StatusUnauthorized, error)
-            return
+        // Для пользователей, хранящихся в таблице users, проверяем захэшированный пароль
+        if !isStudent {
+            err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(user.Password))
+            if err != nil {
+                error.Message = "Invalid password."
+                utils.RespondWithError(w, http.StatusUnauthorized, error)
+                return
+            }
         }
 
         // Генерация access token

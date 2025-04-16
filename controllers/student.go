@@ -61,9 +61,12 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Step 6: Create login and password for the student
+		// Логин: имя + фамилия + случайные символы для уникальности
 		randomString := generateRandomString(8) // Генерация случайной строки
 		student.Login = fmt.Sprintf("%s%s%s", student.FirstName, student.LastName, randomString) // Логин: имя + фамилия + случайные символы
-		student.Password = fmt.Sprintf("%s%s%s", student.FirstName, randomString) // Пароль: имя + случайные символы
+
+		// Пароль: имя + фамилия (без случайных символов)
+		student.Password = fmt.Sprintf("%s%s", student.FirstName, student.LastName) // Пароль: имя + фамилия
 
 		// Step 7: Insert the student into the database
 		query := `INSERT INTO student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, login, password) 
@@ -94,10 +97,17 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 }
 func generateRandomString(n int) string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+// generateRandomString generates a random string of length n
 	result := make([]byte, n)
+	// The string of characters to use for the random string
 	for i := range result {
+
+	// Create a byte array of length n
 		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(letters))))
+
+	// Fill the byte array with random characters
 		if err != nil {
+		// Generate a random number between 0 and the length of letters
 			log.Fatal(err)
 		}
 		result[i] = letters[num.Int64()]
