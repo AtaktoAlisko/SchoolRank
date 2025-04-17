@@ -39,9 +39,6 @@ func ConnectDB() *sql.DB {
 		return db
 	}
 
-
-
-
 // package driver
 
 // import (

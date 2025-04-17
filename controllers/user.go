@@ -684,54 +684,6 @@ func (c Controller) ResetPassword(db *sql.DB) http.HandlerFunc {
         json.NewEncoder(w).Encode(map[string]string{"message": "Password reset and email verified successfully"})
     }
 }
-func (c Controller) ResetPasswordConfirm(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        var requestData struct {
-            Email    string `json:"email"`
-            OTPCode  string `json:"otp_code"`
-            Password string `json:"password"`
-        }
-        var error models.Error
-
-        err := json.NewDecoder(r.Body).Decode(&requestData)
-        if err != nil || requestData.Email == "" || requestData.OTPCode == "" || requestData.Password == "" {
-            error.Message = "Invalid request body."
-            utils.RespondWithError(w, http.StatusBadRequest, error)
-            return
-        }
-
-        // Проверяем код OTP
-        var storedOTP string
-        err = db.QueryRow("SELECT otp_code FROM password_resets WHERE email = ? ORDER BY created_at DESC LIMIT 1", requestData.Email).Scan(&storedOTP)
-        if err != nil || storedOTP != requestData.OTPCode {
-            error.Message = "Invalid or expired OTP."
-            utils.RespondWithError(w, http.StatusUnauthorized, error)
-            return
-        }
-
-        // Хешируем новый пароль
-        hashedPassword, err := bcrypt.GenerateFromPassword([]byte(requestData.Password), bcrypt.DefaultCost)
-        if err != nil {
-            error.Message = "Failed to hash password."
-            utils.RespondWithError(w, http.StatusInternalServerError, error)
-            return
-        }
-
-        // Обновляем пароль в БД
-        _, err = db.Exec("UPDATE users SET password = ? WHERE email = ?", hashedPassword, requestData.Email)
-        if err != nil {
-            error.Message = "Failed to update password."
-            utils.RespondWithError(w, http.StatusInternalServerError, error)
-            return
-        }
-
-        // Удаляем OTP после успешного сброса
-        db.Exec("DELETE FROM password_resets WHERE email = ?", requestData.Email)
-
-        w.WriteHeader(http.StatusOK)
-        json.NewEncoder(w).Encode(map[string]string{"message": "Password reset successfully"})
-    }
-}
 func ChangeAdminPassword(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req models.ChangePasswordRequest
@@ -843,8 +795,8 @@ func (c Controller) ForgotPassword(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Генерируем 6-значный код OTP
-        otpCode := fmt.Sprintf("%06d", rand.Intn(1000000))
+        
+        otpCode := fmt.Sprintf("%04d", rand.Intn(10000))
 
         // Генерируем уникальный токен
         token := utils.GenerateResetToken(requestData.Email)
@@ -1203,6 +1155,53 @@ func (c Controller) DeleteAvatar(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, map[string]string{"message": "Avatar deleted successfully"})
     }
 }
+func (c Controller) ResetPasswordConfirm(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        var requestData struct {
+            Email    string `json:"email"`
+            OTPCode  string `json:"otp_code"`
+            Password string `json:"password"`
+        }
+        var error models.Error
 
+        err := json.NewDecoder(r.Body).Decode(&requestData)
+        if err != nil || requestData.Email == "" || requestData.OTPCode == "" || requestData.Password == "" {
+            error.Message = "Invalid request body."
+            utils.RespondWithError(w, http.StatusBadRequest, error)
+            return
+        }
+
+        // Проверяем код OTP
+        var storedOTP string
+        err = db.QueryRow("SELECT otp_code FROM password_resets WHERE email = ? ORDER BY created_at DESC LIMIT 1", requestData.Email).Scan(&storedOTP)
+        if err != nil || storedOTP != requestData.OTPCode {
+            error.Message = "Invalid or expired OTP."
+            utils.RespondWithError(w, http.StatusUnauthorized, error)
+            return
+        }
+
+        // Хешируем новый пароль
+        hashedPassword, err := bcrypt.GenerateFromPassword([]byte(requestData.Password), bcrypt.DefaultCost)
+        if err != nil {
+            error.Message = "Failed to hash password."
+            utils.RespondWithError(w, http.StatusInternalServerError, error)
+            return
+        }
+
+        // Обновляем пароль в БД
+        _, err = db.Exec("UPDATE users SET password = ? WHERE email = ?", hashedPassword, requestData.Email)
+        if err != nil {
+            error.Message = "Failed to update password."
+            utils.RespondWithError(w, http.StatusInternalServerError, error)
+            return
+        }
+
+        // Удаляем OTP после успешного сброса
+        db.Exec("DELETE FROM password_resets WHERE email = ?", requestData.Email)
+
+        w.WriteHeader(http.StatusOK)
+        json.NewEncoder(w).Encode(map[string]string{"message": "Password reset successfully"})
+    }
+}
 
 
