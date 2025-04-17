@@ -27,7 +27,7 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 
 		// Step 2: Get user role and school ID
 		var userRole string
-		var userSchoolID sql.NullInt64 // Using sql.NullInt64 to handle NULL values
+		var userSchoolID sql.NullInt64
 		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
 		if err != nil {
 			log.Println("Error fetching user role and school ID:", err)
@@ -59,21 +59,23 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Step 6: Create a fake email for the student
-		student.Email = student.FirstName + "." + student.LastName + "@school.com"
+		// Step 6: Generate login and email for the student
+		randomString := generateRandomString(4) // Генерация случайной строки длиной 4
+		student.Login = student.FirstName + student.LastName + randomString
+		student.Email = student.Login + "@school.com" // Login будет записываться в Email
 
-		// Step 7: Create a fake password for the student
-		student.Password = "defaultpassword" // Можно заменить на реальную генерацию пароля, если необходимо
+		// Step 7: Generate the student's password automatically
+		student.Password = student.FirstName + student.LastName // Пароль будет FirstName + LastName
 
-		// Step 8: Set the student's role as 'student' (or similar)
-		student.Role = "student"
+		// Step 8: Set the student's role to "student"
+		student.Role = "student" // Make sure Role is set to "student"
 
 		// Step 9: Insert the student into the database
-		query := `INSERT INTO Student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, password, role) 
-		          VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		query := `INSERT INTO Student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, password, role, login) 
+		          VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 		// Execute the query
-		result, err := db.Exec(query, student.FirstName, student.LastName, student.Patronymic, student.IIN, student.SchoolID, student.DateOfBirth, student.Grade, student.Letter, student.Gender, student.Phone, student.Email, student.Password, student.Role)
+		result, err := db.Exec(query, student.FirstName, student.LastName, student.Patronymic, student.IIN, student.SchoolID, student.DateOfBirth, student.Grade, student.Letter, student.Gender, student.Phone, student.Email, student.Password, student.Role, student.Login)
 		if err != nil {
 			log.Println("Error inserting student:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create student"})
@@ -95,20 +97,16 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, student)
 	}
 }
-
 func generateRandomString(n int) string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-// generateRandomString generates a random string of length n
+	// generateRandomString generates a random string of length n
 	result := make([]byte, n)
 	// The string of characters to use for the random string
 	for i := range result {
-
-	// Create a byte array of length n
 		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(letters))))
 
-	// Fill the byte array with random characters
+		// Create a byte array of length n
 		if err != nil {
-		// Generate a random number between 0 and the length of letters
 			log.Fatal(err)
 		}
 		result[i] = letters[num.Int64()]
@@ -117,8 +115,8 @@ func generateRandomString(n int) string {
 }
 func (sc StudentController) GetStudents(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Step 1: Query the database for student details
-		rows, err := db.Query("SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email FROM Student")
+		// Step 1: Query the database for student details, including the email, login, and password
+		rows, err := db.Query("SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, login, password, role FROM Student")
 		if err != nil {
 			log.Println("SQL Error:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get students"})
@@ -131,13 +129,13 @@ func (sc StudentController) GetStudents(db *sql.DB) http.HandlerFunc {
 			var student models.Student
 
 			// Step 2: Handle the possibility of NULL values using sql.Null types
-			var firstName, lastName, patronymic, iin, letter, gender, phone, email sql.NullString
+			var firstName, lastName, patronymic, iin, letter, gender, phone, email, login, password, role sql.NullString
 			var schoolID sql.NullInt64
 			var dateOfBirth sql.NullString
 			var grade sql.NullInt64
 
 			// Step 3: Scan the row into the student object
-			if err := rows.Scan(&student.ID, &firstName, &lastName, &patronymic, &iin, &schoolID, &dateOfBirth, &grade, &letter, &gender, &phone, &email); err != nil {
+			if err := rows.Scan(&student.ID, &firstName, &lastName, &patronymic, &iin, &schoolID, &dateOfBirth, &grade, &letter, &gender, &phone, &email, &login, &password, &role); err != nil {
 				log.Println("Scan Error:", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse students"})
 				return
@@ -176,6 +174,15 @@ func (sc StudentController) GetStudents(db *sql.DB) http.HandlerFunc {
 			}
 			if email.Valid {
 				student.Email = email.String
+			}
+			if login.Valid {
+				student.Login = login.String
+			}
+			if password.Valid {
+				student.Password = password.String // Adding password
+			}
+			if role.Valid {
+				student.Role = role.String
 			}
 
 			// Step 5: Append the student to the students slice
