@@ -87,6 +87,7 @@ func main() {
 	router.HandleFunc("/api/auth/logout", controller.Logout).Methods("POST")
 	router.HandleFunc("/api/auth/password/forgot", controller.ForgotPassword(db)).Methods("POST")
 	router.HandleFunc("/api/auth/password/reset", controller.ResetPassword(db)).Methods("POST")
+	router.HandleFunc("/api/auth/code/resend", controller.ResendCode(db)).Methods("POST")
 	router.HandleFunc("/api/auth/password/update", controller.TokenVerifyMiddleware(controller.UpdatePassword(db))).Methods("PUT")
 	router.HandleFunc("/api/auth/email/verify", controller.VerifyEmail(db)).Methods("POST")
 

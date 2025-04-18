@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"ranking-school/models"
 	"ranking-school/utils"
+	"strconv"
 	"time"
 )
 
@@ -19,12 +20,11 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
         // 1. Проверяем токен и получаем userID
         userID, err := utils.VerifyToken(r)
         if err != nil {
-            // Если токен неверный/просрочен — 401 Unauthorized
             utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
             return
         }
 
-        // 2. Проверяем роль пользователя (director или superadmin)
+        // 2. Проверяем роль пользователя
         var userRole string
         err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
         if err != nil {
@@ -46,11 +46,11 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
         }
         defer file.Close()
 
-        // 4. Генерируем уникальное имя файла, чтобы фото не перезаписывались
+        // 4. Генерируем уникальное имя файла
         uniqueFileName := fmt.Sprintf("school-%d-%d.jpg", userID, time.Now().Unix())
 
         // 5. Загружаем файл в S3
-        photoURL, err := utils.UploadFileToS3(file, uniqueFileName, false) // Передаем false для школьных фото
+        photoURL, err := utils.UploadFileToS3(file, uniqueFileName, false)
         if err != nil {
             log.Println("Error uploading file:", err)
             utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to upload file"})
@@ -64,12 +64,28 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
         school.Title = r.FormValue("title")
         school.Description = r.FormValue("description")
         school.Contacts = r.FormValue("contacts")
-        school.PhotoURL = photoURL // URL к файлу в S3
+        school.PhotoURL = photoURL
+        
+        // Преобразуем email и phone в sql.NullString
+        email := r.FormValue("email")
+        phone := r.FormValue("phone")
+        
+        if email == "" {
+            school.Email = sql.NullString{String: "", Valid: false} // NULL значение
+        } else {
+            school.Email = sql.NullString{String: email, Valid: true} // Валидный email
+        }
 
-        // 7. Сохраняем данные школы в таблицу `schools`
+        if phone == "" {
+            school.Phone = sql.NullString{String: "", Valid: false} // NULL значение
+        } else {
+            school.Phone = sql.NullString{String: phone, Valid: true} // Валидный phone
+        }
+
+        // 7. Сохраняем данные школы в таблицу
         query := `
-            INSERT INTO schools (name, address, title, description, contacts, photo_url, user_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO Schools (name, address, title, description, contacts, photo_url, email, phone, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `
         result, err := db.Exec(query,
             school.Name,
@@ -78,7 +94,9 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
             school.Description,
             school.Contacts,
             school.PhotoURL,
-            userID,  // Add the userID here to link the school with the user
+            school.Email,
+            school.Phone,
+            userID,
         )
         if err != nil {
             log.Println("SQL Insert Error:", err)
@@ -108,28 +126,42 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
     }
 }
 func (sc SchoolController) GetSchools(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		rows, err := db.Query("SELECT school_id, name, address, title, description, contacts, photo_url FROM schools")
-		if err != nil {
-			log.Println("SQL Select Error:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get schools"})
-			return
-		}
-		defer rows.Close()
+    return func(w http.ResponseWriter, r *http.Request) {
+        rows, err := db.Query("SELECT school_id, name, address, title, description, contacts, photo_url, email, phone FROM Schools")
+        if err != nil {
+            log.Println("SQL Select Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get schools"})
+            return
+        }
+        defer rows.Close()
 
-		var schools []models.School
-		for rows.Next() {
-			var school models.School
-			if err := rows.Scan(&school.SchoolID, &school.Name, &school.Address, &school.Title, &school.Description, &school.Contacts, &school.PhotoURL); err != nil {
-				log.Println("SQL Scan Error:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse schools"})
-				return
-			}
-			schools = append(schools, school)
-		}
+        var schools []models.School
+        for rows.Next() {
+            var school models.School
+            if err := rows.Scan(&school.SchoolID, &school.Name, &school.Address, &school.Title, &school.Description, &school.Contacts, &school.PhotoURL, &school.Email, &school.Phone); err != nil {
+                log.Println("SQL Scan Error:", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse schools"})
+                return
+            }
 
-		utils.ResponseJSON(w, schools)
-	}
+            // Преобразуем sql.NullString в строку (если значение NULL, то пустая строка)
+            if school.Email.Valid {
+                school.Email.String = school.Email.String
+            } else {
+                school.Email.String = ""
+            }
+
+            if school.Phone.Valid {
+                school.Phone.String = school.Phone.String
+            } else {
+                school.Phone.String = ""
+            }
+
+            schools = append(schools, school)
+        }
+
+        utils.ResponseJSON(w, schools)
+    }
 }
 // GetSchoolForDirector - получение школы для директора
 func (sc SchoolController) GetSchoolForDirector(db *sql.DB) http.HandlerFunc {
@@ -206,40 +238,57 @@ func (sc SchoolController) CalculateScore(db *sql.DB) http.HandlerFunc {
 }
 // Deleting school only if it is not linked to a user
 func (sc SchoolController) DeleteSchool(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Get school_id from request parameters
-		schoolID := r.URL.Query().Get("school_id")
-		if schoolID == "" {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School ID is required"})
-			return
-		}
+    return func(w http.ResponseWriter, r *http.Request) {
+        // 1. Получаем school_id из URL параметра
+        schoolID := r.URL.Query().Get("school_id")
+        if schoolID == "" {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School ID is required"})
+            return
+        }
 
-		// First, check if there are any users linked to this school
-		var userCount int
-		err := db.QueryRow("SELECT COUNT(*) FROM users WHERE school_id = ?", schoolID).Scan(&userCount)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to check users"})
-			return
-		}
+        // 2. Преобразуем school_id в целое число
+        id, err := strconv.Atoi(schoolID)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID format"})
+            return
+        }
 
-		// If there are users assigned to this school, prevent deletion
-		if userCount > 0 {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "This school is assigned to a user and cannot be deleted"})
-			return
-		}
+        // 3. Проверяем, есть ли пользователи, привязанные к этой школе
+        var userCount int
+        err = db.QueryRow("SELECT COUNT(*) FROM users WHERE school_id = ?", id).Scan(&userCount)
+        if err != nil {
+            log.Println("Error checking users:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to check users"})
+            return
+        }
 
-		// Now delete the school
-		query := "DELETE FROM schools WHERE school_id = ?"
-		_, err = db.Exec(query, schoolID)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete school"})
-			return
-		}
+        // 4. Если есть пользователи, не разрешаем удаление
+        if userCount > 0 {
+            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "This school is assigned to a user and cannot be deleted"})
+            return
+        }
 
-		// Return success message
-		utils.ResponseJSON(w, map[string]string{"message": "School deleted successfully"})
-	}
+        // 5. Теперь удаляем школу
+        query := "DELETE FROM Schools WHERE school_id = ?"
+        result, err := db.Exec(query, id)
+        if err != nil {
+            log.Println("Error deleting school:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete school"})
+            return
+        }
+
+        // 6. Проверяем, сколько строк было затронуто
+        rowsAffected, err := result.RowsAffected()
+        if err != nil || rowsAffected == 0 {
+            utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "School not found"})
+            return
+        }
+
+        // 7. Успешное удаление
+        utils.ResponseJSON(w, map[string]string{"message": "School deleted successfully"})
+    }
 }
+
 func (sc SchoolController) CalculateAverageRating(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         // 1. Get the school ID from query parameters

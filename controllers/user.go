@@ -636,7 +636,7 @@ func (c Controller) ResetPassword(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Проверяем, существует ли email
+        // Проверяем, существует ли email в базе данных
         var storedOTP string
         err = db.QueryRow("SELECT otp_code FROM password_resets WHERE email = ? ORDER BY created_at DESC LIMIT 1", requestData.Email).Scan(&storedOTP)
         if err != nil {
@@ -660,7 +660,7 @@ func (c Controller) ResetPassword(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Обновляем пароль в БД
+        // Обновляем пароль в базе данных
         _, err = db.Exec("UPDATE users SET password = ? WHERE email = ?", hashedPassword, requestData.Email)
         if err != nil {
             error.Message = "Failed to update password."
@@ -676,12 +676,57 @@ func (c Controller) ResetPassword(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Удаляем OTP после успешного сброса
-        db.Exec("DELETE FROM password_resets WHERE email = ?", requestData.Email)
+        // Удаляем OTP после успешного сброса пароля
+        _, err = db.Exec("DELETE FROM password_resets WHERE email = ?", requestData.Email)
+        if err != nil {
+            log.Printf("Error deleting reset token: %v", err)
+        }
 
         // Ответ успешный
         w.WriteHeader(http.StatusOK)
         json.NewEncoder(w).Encode(map[string]string{"message": "Password reset and email verified successfully"})
+    }
+}
+func (c Controller) ResendCode(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        var requestData struct {
+            Email string `json:"email"`
+            Type  string `json:"type"` // "reset" or "verify"
+        }
+        var error models.Error
+
+        err := json.NewDecoder(r.Body).Decode(&requestData)
+        if err != nil || requestData.Email == "" || (requestData.Type != "reset" && requestData.Type != "verify") {
+            error.Message = "Invalid request body."
+            utils.RespondWithError(w, http.StatusBadRequest, error)
+            return
+        }
+
+        // Удаляем старые записи OTP для данного email
+        _, err = db.Exec("DELETE FROM password_resets WHERE email = ?", requestData.Email)
+        if err != nil {
+            error.Message = "Failed to clear old OTP."
+            utils.RespondWithError(w, http.StatusInternalServerError, error)
+            return
+        }
+
+        // Повторно генерируем OTP
+        otpCode := fmt.Sprintf("%04d", rand.Intn(10000))
+
+        // Добавляем новую запись с OTP в базу данных
+        _, err = db.Exec("INSERT INTO password_resets (email, otp_code, created_at) VALUES (?, ?, ?)", requestData.Email, otpCode, time.Now())
+        if err != nil {
+            error.Message = "Failed to insert new OTP."
+            utils.RespondWithError(w, http.StatusInternalServerError, error)
+            return
+        }
+
+        // Отправляем новый OTP по email
+        utils.SendEmail(requestData.Email, "OTP Code", fmt.Sprintf("Your new OTP is: %s", otpCode))
+
+        // Успешный ответ
+        w.WriteHeader(http.StatusOK)
+        json.NewEncoder(w).Encode(map[string]string{"message": "OTP resent successfully"})
     }
 }
 func ChangeAdminPassword(db *sql.DB) http.HandlerFunc {
@@ -780,7 +825,7 @@ func (c Controller) ForgotPassword(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Проверяем, существует ли email
+        // Проверяем, существует ли email в базе данных
         var userID int
         err = db.QueryRow("SELECT id FROM users WHERE email = ?", requestData.Email).Scan(&userID)
         if err != nil {
@@ -795,13 +840,13 @@ func (c Controller) ForgotPassword(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        
+        // Генерируем случайный OTP код
         otpCode := fmt.Sprintf("%04d", rand.Intn(10000))
 
-        // Генерируем уникальный токен
+        // Генерируем уникальный токен для сброса пароля
         token := utils.GenerateResetToken(requestData.Email)
 
-        // Сохраняем OTP и токен в базе
+        // Сохраняем OTP и токен в базе данных
         _, err = db.Exec("INSERT INTO password_resets (email, otp_code, reset_token) VALUES (?, ?, ?)", requestData.Email, otpCode, token)
         if err != nil {
             log.Printf("Error saving reset token: %v", err)
@@ -810,14 +855,16 @@ func (c Controller) ForgotPassword(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Отправляем email с кодом и ссылкой
+        // Отправляем email с кодом и ссылкой на сброс пароля
         resetLink := fmt.Sprintf("http://localhost:8000/reset-password?token=%s", token)
         utils.SendEmail(requestData.Email, "Reset your password", fmt.Sprintf("Your OTP: %s\nReset link: %s", otpCode, resetLink))
 
+        // Успешный ответ
         w.WriteHeader(http.StatusOK)
         json.NewEncoder(w).Encode(map[string]string{"message": "Reset email sent"})
     }
 }
+
 func (c *Controller) GetMe(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         // Проверяем токен и получаем userID
