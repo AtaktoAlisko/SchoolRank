@@ -724,9 +724,14 @@ func (c Controller) ResendCode(db *sql.DB) http.HandlerFunc {
         // Отправляем новый OTP по email
         utils.SendEmail(requestData.Email, "OTP Code", fmt.Sprintf("Your new OTP is: %s", otpCode))
 
-        // Успешный ответ
+        // Возвращаем OTP код в ответе
+        response := map[string]interface{}{
+            "message":  "OTP resent successfully",
+            "otp_code": otpCode, // Добавляем отправленный OTP код в ответ
+        }
+
         w.WriteHeader(http.StatusOK)
-        json.NewEncoder(w).Encode(map[string]string{"message": "OTP resent successfully"})
+        json.NewEncoder(w).Encode(response)
     }
 }
 func ChangeAdminPassword(db *sql.DB) http.HandlerFunc {
@@ -870,8 +875,6 @@ func (c Controller) ForgotPassword(db *sql.DB) http.HandlerFunc {
         json.NewEncoder(w).Encode(response)
     }
 }
-
-
 func (c *Controller) GetMe(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         // Проверяем токен и получаем userID
