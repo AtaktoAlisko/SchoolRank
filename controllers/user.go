@@ -818,6 +818,7 @@ func (c Controller) ForgotPassword(db *sql.DB) http.HandlerFunc {
         }
         var error models.Error
 
+        // Декодируем запрос
         err := json.NewDecoder(r.Body).Decode(&requestData)
         if err != nil || requestData.Email == "" {
             error.Message = "Invalid request body or missing email."
@@ -855,15 +856,21 @@ func (c Controller) ForgotPassword(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Отправляем email с кодом и ссылкой на сброс пароля
+        // Отправляем email с кодом OTP и ссылкой для сброса пароля
         resetLink := fmt.Sprintf("http://localhost:8000/reset-password?token=%s", token)
         utils.SendEmail(requestData.Email, "Reset your password", fmt.Sprintf("Your OTP: %s\nReset link: %s", otpCode, resetLink))
 
-        // Успешный ответ
+        // Возвращаем ответ с OTP для проверки на фронтенде
+        response := map[string]interface{}{
+            "message": "Reset email sent",
+            "otp_code": otpCode,  // Отправляем OTP в ответе
+        }
+
         w.WriteHeader(http.StatusOK)
-        json.NewEncoder(w).Encode(map[string]string{"message": "Reset email sent"})
+        json.NewEncoder(w).Encode(response)
     }
 }
+
 
 func (c *Controller) GetMe(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
