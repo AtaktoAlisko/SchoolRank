@@ -724,6 +724,9 @@ func (c Controller) ResendCode(db *sql.DB) http.HandlerFunc {
         // Отправляем новый OTP по email
         utils.SendEmail(requestData.Email, "OTP Code", fmt.Sprintf("Your new OTP is: %s", otpCode))
 
+        // Устанавливаем заголовок ответа, чтобы указать, что это JSON
+        w.Header().Set("Content-Type", "application/json")
+
         // Возвращаем OTP код в ответе
         response := map[string]interface{}{
             "message":  "OTP resent successfully",
@@ -734,6 +737,7 @@ func (c Controller) ResendCode(db *sql.DB) http.HandlerFunc {
         json.NewEncoder(w).Encode(response)
     }
 }
+
 func ChangeAdminPassword(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req models.ChangePasswordRequest
@@ -865,12 +869,16 @@ func (c Controller) ForgotPassword(db *sql.DB) http.HandlerFunc {
         resetLink := fmt.Sprintf("http://localhost:8000/reset-password?token=%s", token)
         utils.SendEmail(requestData.Email, "Reset your password", fmt.Sprintf("Your OTP: %s\nReset link: %s", otpCode, resetLink))
 
+        // Устанавливаем заголовок ответа, чтобы указать, что это JSON
+        w.Header().Set("Content-Type", "application/json")
+
         // Возвращаем ответ с OTP для проверки на фронтенде
         response := map[string]interface{}{
             "message": "Reset email sent",
             "otp_code": otpCode,  // Отправляем OTP в ответе
         }
 
+        // Отправляем JSON в ответ
         w.WriteHeader(http.StatusOK)
         json.NewEncoder(w).Encode(response)
     }
