@@ -83,7 +83,6 @@ func main() {
     // =======================
     router.HandleFunc("/api/auth/signup", controller.Signup(db)).Methods("POST")
 	router.HandleFunc("/api/auth/login", controller.Login(db)).Methods("POST")
-	router.HandleFunc("/api/auth/me", controller.GetMe(db)).Methods("GET")
 	router.HandleFunc("/api/auth/logout", controller.Logout).Methods("POST")
 	router.HandleFunc("/api/auth/password/forgot", controller.ForgotPassword(db)).Methods("POST")
 	router.HandleFunc("/api/auth/password/reset", controller.ResetPassword(db)).Methods("POST")
@@ -95,6 +94,7 @@ func main() {
 	// =======================
     // Профиль пользователя и аватар
     // =======================
+	router.HandleFunc("/api/users/me", controller.GetMe(db)).Methods("GET")
 	router.HandleFunc("/api/users/me", controller.TokenVerifyMiddleware(controller.EditProfile(db))).Methods("PUT")
 	router.HandleFunc("/api/users/me/avatar", controller.UploadAvatar(db)).Methods("POST")
 	router.HandleFunc("/api/users/me/avatar", controller.UpdateAvatar(db)).Methods("PUT")
