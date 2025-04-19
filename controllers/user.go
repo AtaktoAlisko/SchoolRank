@@ -740,70 +740,72 @@ func (c *Controller) ResendCode(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var requestData struct {
             Email string `json:"email"`
+            Type  string `json:"type"` // "reset" или "verify"
         }
         var error models.Error
 
         err := json.NewDecoder(r.Body).Decode(&requestData)
-        if err != nil || requestData.Email == "" {
-            error.Message = "Invalid request body or email missing"
+        if err != nil || requestData.Email == "" || (requestData.Type != "reset" && requestData.Type != "verify") {
+            error.Message = "Invalid request body."
             utils.RespondWithError(w, http.StatusBadRequest, error)
             return
         }
 
-        // Проверяем существование пользователя
-        var userID int
-        var isAlreadyVerified bool
-        err = db.QueryRow("SELECT id, verified FROM users WHERE email = ?", requestData.Email).Scan(&userID, &isAlreadyVerified)
-        if err != nil {
-            if err == sql.ErrNoRows {
-                error.Message = "User not found"
-                utils.RespondWithError(w, http.StatusNotFound, error)
-            } else {
-                log.Printf("Database error: %v", err)
-                error.Message = "Server error"
+        // Генерация нового OTP
+        otpCode := fmt.Sprintf("%04d", rand.Intn(10000))
+
+        // Если тип запроса "reset" – сбрасываем пароль
+        if requestData.Type == "reset" {
+            // Удаляем старые записи OTP для сброса пароля
+            _, err = db.Exec("DELETE FROM password_resets WHERE email = ?", requestData.Email)
+            if err != nil {
+                error.Message = "Failed to clear old OTP."
                 utils.RespondWithError(w, http.StatusInternalServerError, error)
+                return
             }
-            return
+
+            // Вставляем новый OTP в таблицу password_resets с временной меткой
+            _, err = db.Exec("INSERT INTO password_resets (email, otp_code, created_at) VALUES (?, ?, ?)", requestData.Email, otpCode, time.Now())
+            if err != nil {
+                error.Message = "Failed to insert new OTP."
+                utils.RespondWithError(w, http.StatusInternalServerError, error)
+                return
+            }
+
+            // Отправляем OTP для сброса пароля
+            utils.SendVerificationEmail(requestData.Email, "", otpCode)
         }
 
-        // Генерируем новый OTP код
-        otpCode, err := utils.GenerateOTP()
-        if err != nil {
-            log.Printf("Error generating OTP: %v", err)
-            error.Message = "Failed to generate OTP"
-            utils.RespondWithError(w, http.StatusInternalServerError, error)
-            return
+        // Если тип запроса "verify" – верифицируем email
+        if requestData.Type == "verify" {
+            // Проверка, что OTP уже существует для этого email
+            var existingOTP string
+            var createdAt time.Time
+            err := db.QueryRow("SELECT otp_code, created_at FROM users WHERE email = ?", requestData.Email).Scan(&existingOTP, &createdAt)
+            if err != nil {
+                utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No user found with this email"})
+                return
+            }
+
+            // Проверяем, не истек ли срок действия OTP
+            if time.Since(createdAt) > time.Minute*1+time.Second*30 { // 1,5 минуты
+                utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "OTP expired"})
+                return
+            }
+
+            // Отправляем OTP для верификации email
+            utils.SendVerificationEmail(requestData.Email, "", otpCode)
         }
 
-        // Генерируем новый токен верификации
-        verificationToken, err := utils.GenerateVerificationToken(requestData.Email)
-        if err != nil {
-            log.Printf("Error generating verification token: %v", err)
-            error.Message = "Failed to generate verification token"
-            utils.RespondWithError(w, http.StatusInternalServerError, error)
-            return
-        }
-
-        // Обновляем OTP в записи пользователя и сбрасываем статус verified в false
-        _, err = db.Exec("UPDATE users SET otp_code = ?, verification_token = ?, verified = false WHERE email = ?", 
-            otpCode, verificationToken, requestData.Email)
-        if err != nil {
-            log.Printf("Error updating OTP: %v", err)
-            error.Message = "Failed to update OTP"
-            utils.RespondWithError(w, http.StatusInternalServerError, error)
-            return
-        }
-
-        // Отправляем новый OTP по email
-        utils.SendVerificationEmail(requestData.Email, verificationToken, otpCode)
-
-        // Формируем ответ в формате JSON
+        // Формируем ответ с сообщением и OTP
         response := map[string]interface{}{
             "message":  "OTP resent successfully",
-            "otp_code": otpCode, // Включаем OTP в ответ (для целей разработки)
+            "otp_code": otpCode, // Отправляем OTP в ответе
         }
 
-        utils.ResponseJSON(w, response)
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusOK)
+        json.NewEncoder(w).Encode(response)
     }
 }
 
@@ -1264,7 +1266,6 @@ func (c Controller) UpdateAvatar(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, map[string]string{"message": "Avatar updated successfully", "avatar_url": newAvatarURL})
     }
 }
-
 func (c Controller) DeleteAvatar(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         // Получаем userID из токена
