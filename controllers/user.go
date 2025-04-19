@@ -751,14 +751,15 @@ func (c *Controller) ResendCode(db *sql.DB) http.HandlerFunc {
         // Отправляем новый OTP по email
         utils.SendEmail(requestData.Email, "OTP Code", fmt.Sprintf("Your new OTP is: %s", otpCode))
 
-        // Возвращаем OTP код в ответе
+        // Формируем ответ в формате JSON
         response := map[string]interface{}{
             "message":  "OTP resent successfully",
             "otp_code": otpCode, // Отправляем OTP в ответе
         }
 
-        w.WriteHeader(http.StatusOK)
-        json.NewEncoder(w).Encode(response)
+        w.Header().Set("Content-Type", "application/json") // Устанавливаем тип контента
+        w.WriteHeader(http.StatusOK)                        // Устанавливаем статус ответа 200
+        json.NewEncoder(w).Encode(response)                 // Кодируем и отправляем JSON
     }
 }
 func ChangeAdminPassword(db *sql.DB) http.HandlerFunc {
