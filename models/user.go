@@ -1,5 +1,7 @@
 package models
 
+import "database/sql"
+
 type User struct {
 	ID        int    `json:"id"`
 	Email     string `json:"email,omitempty"`
@@ -11,6 +13,6 @@ type User struct {
 	Role      string `json:"role,omitempty"`
 	IsVerified  bool   `json:"is_verified,omitempty"`
 	SchoolID   int    `json:"school_id,omitempty"`
-	AvatarURL   string `json:"avatar_url,omitempty"`
+	AvatarURL   sql.NullString `json:"avatar_url,omitempty"`
 	Login     string `json:"login"`
 }

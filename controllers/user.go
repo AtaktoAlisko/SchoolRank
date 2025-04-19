@@ -32,11 +32,11 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
         }
 
         // Устанавливаем роль "user" по умолчанию
-        user.Role = "user"  // Роль будет всегда "user" при регистрации
+        user.Role = "user"
 
         // Устанавливаем дефолтный аватар, если не указан
-        if user.AvatarURL == "" {
-            user.AvatarURL = "https://avatarschoolrank.s3.eu-north-1.amazonaws.com/avatar-1744191586.jpg" 
+        if user.AvatarURL.Valid == false {  // Если аватар не указан, записываем NULL в базу данных
+            user.AvatarURL = sql.NullString{String: "", Valid: false}
         }
 
         // Проверяем, что email или телефон предоставлены
@@ -134,12 +134,10 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Отправка email с OTP для верификации
-        if isEmail {
-            utils.SendVerificationEmail(user.Email, verificationToken, otpCode)
-        }
+        // Отправка email с OTP
+        utils.SendVerificationEmail(user.Email, verificationToken, otpCode)
 
-        user.Password = ""  // Убираем пароль из ответа
+        user.Password = "" // Убираем пароль из ответа
 
         // Формируем сообщение для пользователя
         message := "User registered successfully."
