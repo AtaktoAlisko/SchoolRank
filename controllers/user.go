@@ -35,8 +35,8 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
         user.Role = "user"
 
         // Устанавливаем дефолтный аватар, если не указан
-        if user.AvatarURL.Valid == false {  // Если аватар не указан, записываем NULL в базу данных
-            user.AvatarURL = sql.NullString{String: "", Valid: false}
+        if !user.AvatarURL.Valid || user.AvatarURL.String == "" {
+            user.AvatarURL = sql.NullString{String: "", Valid: false}  // Если аватар не указан, записываем NULL в базе данных
         }
 
         // Проверяем, что email или телефон предоставлены
@@ -145,10 +145,16 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
             message += " Please verify your email with the OTP code."
         }
 
-        // Возвращаем ответ с OTP кодом
+        // Возвращаем ответ с OTP кодом и с информацией о NULL значении аватара
+        avatarMessage := "NULL"
+        if user.AvatarURL.Valid {
+            avatarMessage = user.AvatarURL.String
+        }
+
         utils.ResponseJSON(w, map[string]interface{}{
-            "message":  message,
-            "otp_code": otpCode,  // Отправляем OTP код в ответе
+            "message":    message,
+            "otp_code":   otpCode,  // Отправляем OTP код в ответе
+            "avatar_url": avatarMessage,  // Отправляем URL аватара или NULL
         })
     }
 }
