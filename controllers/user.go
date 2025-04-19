@@ -18,7 +18,7 @@ import (
 	"github.com/gorilla/mux"
 	"golang.org/x/crypto/bcrypt"
 )
-func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
+func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var user models.User
         var error models.Error
@@ -35,7 +35,7 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
         user.Role = "user"
 
         // Устанавливаем дефолтный аватар, если не указан
-        if !user.AvatarURL.Valid || user.AvatarURL.String == "" {
+        if user.AvatarURL.Valid == false || user.AvatarURL.String == "" {
             user.AvatarURL = sql.NullString{String: "", Valid: false}  // Если аватар не указан, записываем NULL в базе данных
         }
 
@@ -146,16 +146,17 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
         }
 
         // Возвращаем ответ с OTP кодом и с информацией о NULL значении аватара
-        avatarMessage := "NULL"
-        if user.AvatarURL.Valid {
-            avatarMessage = user.AvatarURL.String
+        response := map[string]interface{}{
+            "message":  message,
+            "otp_code": otpCode,  // Отправляем OTP код в ответе
         }
 
-        utils.ResponseJSON(w, map[string]interface{}{
-            "message":    message,
-            "otp_code":   otpCode,  // Отправляем OTP код в ответе
-            "avatar_url": avatarMessage,  // Отправляем URL аватара или NULL
-        })
+        // Добавляем avatar_url в ответ, только если оно задано
+        if user.AvatarURL.Valid && user.AvatarURL.String != "" {
+            response["avatar_url"] = user.AvatarURL.String
+        }
+
+        utils.ResponseJSON(w, response)
     }
 }
 func (c Controller) Login(db *sql.DB) http.HandlerFunc {
@@ -958,8 +959,6 @@ func (c *Controller) GetMe(db *sql.DB) http.HandlerFunc {
         json.NewEncoder(w).Encode(userMap)
     }
 }
-
-
 func (c Controller) ConfirmResetPassword(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var requestData struct {
