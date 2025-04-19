@@ -1299,9 +1299,9 @@ func (c Controller) DeleteAvatar(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Сбрасываем URL аватара на дефолтный в базе данных
-        query = "UPDATE users SET avatar_url = ? WHERE id = ?"
-        _, err = db.Exec(query, "https://your-bucket-name.s3.amazonaws.com/default-avatar.jpg", userID)
+        // Сбрасываем URL аватара на NULL в базе данных
+        query = "UPDATE users SET avatar_url = NULL WHERE id = ?"
+        _, err = db.Exec(query, userID)
         if err != nil {
             log.Println("Error resetting avatar URL:", err)
             utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to reset avatar URL"})
