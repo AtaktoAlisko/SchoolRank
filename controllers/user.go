@@ -604,7 +604,7 @@ func (c *Controller) VerifyEmail(db *sql.DB) http.HandlerFunc {
 
         // Проверка, что OTP совпадает с тем, что хранится в базе данных
         var storedOTP string
-        err = db.QueryRow("SELECT otp_code FROM users WHERE email = ?", requestData.Email).Scan(&storedOTP)
+        err = db.QueryRow("SELECT otp_code FROM password_resets WHERE email = ? ORDER BY created_at DESC LIMIT 1", requestData.Email).Scan(&storedOTP)
         if err != nil {
             utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid email or OTP"})
             return
@@ -714,11 +714,11 @@ func (c Controller) ResetPassword(db *sql.DB) http.HandlerFunc {
         json.NewEncoder(w).Encode(map[string]string{"message": "Password reset and email verified successfully"})
     }
 }
-func (c Controller) ResendCode(db *sql.DB) http.HandlerFunc {
+func (c *Controller) ResendCode(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var requestData struct {
             Email string `json:"email"`
-            Type  string `json:"type"` // "reset" or "verify"
+            Type  string `json:"type"` // "reset" или "verify"
         }
         var error models.Error
 
@@ -737,10 +737,10 @@ func (c Controller) ResendCode(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Повторно генерируем OTP
+        // Генерация нового OTP кода
         otpCode := fmt.Sprintf("%04d", rand.Intn(10000))
 
-        // Добавляем новую запись с OTP в базу данных
+        // Вставляем новый OTP в таблицу password_resets
         _, err = db.Exec("INSERT INTO password_resets (email, otp_code, created_at) VALUES (?, ?, ?)", requestData.Email, otpCode, time.Now())
         if err != nil {
             error.Message = "Failed to insert new OTP."
@@ -751,13 +751,10 @@ func (c Controller) ResendCode(db *sql.DB) http.HandlerFunc {
         // Отправляем новый OTP по email
         utils.SendEmail(requestData.Email, "OTP Code", fmt.Sprintf("Your new OTP is: %s", otpCode))
 
-        // Устанавливаем заголовок ответа, чтобы указать, что это JSON
-        w.Header().Set("Content-Type", "application/json")
-
         // Возвращаем OTP код в ответе
         response := map[string]interface{}{
             "message":  "OTP resent successfully",
-            "otp_code": otpCode, // Добавляем отправленный OTP код в ответ
+            "otp_code": otpCode, // Отправляем OTP в ответе
         }
 
         w.WriteHeader(http.StatusOK)
