@@ -637,7 +637,7 @@ func (c Controller) ResetPassword(db *sql.DB) http.HandlerFunc {
             Password string `json:"password"`
         }
         var error models.Error
-
+        
         // Декодируем JSON-запрос
         err := json.NewDecoder(r.Body).Decode(&requestData)
         if err != nil || requestData.Email == "" || requestData.OTPCode == "" || requestData.Password == "" {
@@ -645,7 +645,7 @@ func (c Controller) ResetPassword(db *sql.DB) http.HandlerFunc {
             utils.RespondWithError(w, http.StatusBadRequest, error)
             return
         }
-
+        
         // Проверяем, существует ли email в базе данных
         var storedOTP string
         err = db.QueryRow("SELECT otp_code FROM password_resets WHERE email = ? ORDER BY created_at DESC LIMIT 1", requestData.Email).Scan(&storedOTP)
@@ -654,14 +654,31 @@ func (c Controller) ResetPassword(db *sql.DB) http.HandlerFunc {
             utils.RespondWithError(w, http.StatusUnauthorized, error)
             return
         }
-
+        
         // Проверяем, совпадает ли введенный OTP
         if storedOTP != requestData.OTPCode {
             error.Message = "Invalid OTP code."
             utils.RespondWithError(w, http.StatusUnauthorized, error)
             return
         }
-
+        
+        // Получаем текущий хешированный пароль пользователя
+        var currentHashedPassword string
+        err = db.QueryRow("SELECT password FROM users WHERE email = ?", requestData.Email).Scan(&currentHashedPassword)
+        if err != nil {
+            error.Message = "Failed to retrieve current password."
+            utils.RespondWithError(w, http.StatusInternalServerError, error)
+            return
+        }
+        
+        // Проверка нового пароля с текущим хешированным
+        err = bcrypt.CompareHashAndPassword([]byte(currentHashedPassword), []byte(requestData.Password))
+        if err == nil { // если ошибки нет, значит пароли совпадают
+            error.Message = "New password cannot be the same as the current password."
+            utils.RespondWithError(w, http.StatusBadRequest, error)
+            return
+        }
+        
         // Хешируем новый пароль
         hashedPassword, err := bcrypt.GenerateFromPassword([]byte(requestData.Password), bcrypt.DefaultCost)
         if err != nil {
@@ -669,15 +686,15 @@ func (c Controller) ResetPassword(db *sql.DB) http.HandlerFunc {
             utils.RespondWithError(w, http.StatusInternalServerError, error)
             return
         }
-
+        
         // Обновляем пароль в базе данных
-        _, err = db.Exec("UPDATE users SET password = ? WHERE email = ?", hashedPassword, requestData.Email)
+        _, err = db.Exec("UPDATE users SET password = ? WHERE email = ?", string(hashedPassword), requestData.Email)
         if err != nil {
             error.Message = "Failed to update password."
             utils.RespondWithError(w, http.StatusInternalServerError, error)
             return
         }
-
+        
         // Обновляем статус верификации пользователя на true, чтобы он мог сразу войти
         _, err = db.Exec("UPDATE users SET is_verified = true WHERE email = ?", requestData.Email)
         if err != nil {
@@ -685,13 +702,13 @@ func (c Controller) ResetPassword(db *sql.DB) http.HandlerFunc {
             utils.RespondWithError(w, http.StatusInternalServerError, error)
             return
         }
-
+        
         // Удаляем OTP после успешного сброса пароля
         _, err = db.Exec("DELETE FROM password_resets WHERE email = ?", requestData.Email)
         if err != nil {
             log.Printf("Error deleting reset token: %v", err)
         }
-
+        
         // Ответ успешный
         w.WriteHeader(http.StatusOK)
         json.NewEncoder(w).Encode(map[string]string{"message": "Password reset and email verified successfully"})
@@ -747,7 +764,6 @@ func (c Controller) ResendCode(db *sql.DB) http.HandlerFunc {
         json.NewEncoder(w).Encode(response)
     }
 }
-
 func ChangeAdminPassword(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req models.ChangePasswordRequest
