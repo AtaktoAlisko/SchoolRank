@@ -903,12 +903,13 @@ func (c *Controller) GetMe(db *sql.DB) http.HandlerFunc {
 
         // Запрос к базе для получения данных пользователя
         var user models.User
-        var email sql.NullString // Используем sql.NullString для обработки NULL
-        var phone sql.NullString // Используем sql.NullString для обработки NULL
-        var role sql.NullString  // Добавляем поле для роли пользователя
+        var email sql.NullString
+        var phone sql.NullString
+        var role sql.NullString
+        var avatarURL sql.NullString
 
-        err = db.QueryRow("SELECT id, first_name, last_name, email, phone, role FROM users WHERE id = ?", id).
-            Scan(&user.ID, &user.FirstName, &user.LastName, &email, &phone, &role)
+        err = db.QueryRow("SELECT id, first_name, last_name, email, phone, role, avatar_url FROM users WHERE id = ?", id).
+            Scan(&user.ID, &user.FirstName, &user.LastName, &email, &phone, &role, &avatarURL)
 
         if err != nil {
             if err == sql.ErrNoRows {
@@ -934,9 +935,31 @@ func (c *Controller) GetMe(db *sql.DB) http.HandlerFunc {
             user.Role = role.String
         }
 
-        utils.ResponseJSON(w, user)
+        // Create a custom map for the response
+        userMap := map[string]interface{}{
+            "id":         user.ID,
+            "email":      user.Email,
+            "phone":      user.Phone,
+            "first_name": user.FirstName,
+            "last_name":  user.LastName,
+            "role":       user.Role,
+            "login":      user.Login,
+        }
+
+        // Only add avatar_url if it's valid
+        if avatarURL.Valid {
+            userMap["avatar_url"] = avatarURL.String
+        } else {
+            userMap["avatar_url"] = nil
+        }
+
+        // Return the custom response
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(userMap)
     }
 }
+
+
 func (c Controller) ConfirmResetPassword(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var requestData struct {
@@ -1131,7 +1154,7 @@ func (c Controller) UpdateAvatar(db *sql.DB) http.HandlerFunc {
         }
 
         // Получаем данные о старом аватаре
-        var currentAvatarURL string
+        var currentAvatarURL sql.NullString
         query := "SELECT avatar_url FROM users WHERE id = ?"
         err = db.QueryRow(query, userID).Scan(&currentAvatarURL)
         if err != nil {
@@ -1141,8 +1164,8 @@ func (c Controller) UpdateAvatar(db *sql.DB) http.HandlerFunc {
         }
 
         // Удаление старого аватара с S3, если он существует
-        if currentAvatarURL != "" && currentAvatarURL != "https://your-bucket-name.s3.amazonaws.com/default-avatar.jpg" {
-            err := utils.DeleteFileFromS3(currentAvatarURL)
+        if currentAvatarURL.Valid && currentAvatarURL.String != "" && currentAvatarURL.String != "https://your-bucket-name.s3.amazonaws.com/default-avatar.jpg" {
+            err := utils.DeleteFileFromS3(currentAvatarURL.String)
             if err != nil {
                 log.Println("Error deleting old avatar from S3:", err)
                 utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete old avatar"})
@@ -1183,6 +1206,7 @@ func (c Controller) UpdateAvatar(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, map[string]string{"message": "Avatar updated successfully", "avatar_url": newAvatarURL})
     }
 }
+
 func (c Controller) DeleteAvatar(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         // Получаем userID из токена
