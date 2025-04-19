@@ -141,12 +141,17 @@ func (c Controller) Signup(db *sql.DB) http.HandlerFunc {
 
         user.Password = ""  // Убираем пароль из ответа
 
+        // Формируем сообщение для пользователя
         message := "User registered successfully."
         if isEmail {
             message += " Please verify your email with the OTP code."
         }
 
-        utils.ResponseJSON(w, map[string]string{"message": message})
+        // Возвращаем ответ с OTP кодом
+        utils.ResponseJSON(w, map[string]interface{}{
+            "message":  message,
+            "otp_code": otpCode,  // Отправляем OTP код в ответе
+        })
     }
 }
 func (c Controller) Login(db *sql.DB) http.HandlerFunc {
