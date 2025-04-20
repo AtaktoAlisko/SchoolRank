@@ -603,7 +603,7 @@ func (c *Controller) VerifyEmail(db *sql.DB) http.HandlerFunc {
         }
         var error models.Error
 
-        // Декодируем тело запроса
+        // Decode request body
         err := json.NewDecoder(r.Body).Decode(&requestData)
         if err != nil || requestData.Email == "" || requestData.OTPCode == "" {
             error.Message = "Email or OTP code is missing"
@@ -611,9 +611,10 @@ func (c *Controller) VerifyEmail(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Проверяем, что OTP совпадает с тем, что хранится в базе данных
-        var storedOTP string
+        // Check that OTP matches what's stored in the database
         var userID int
+        var storedOTP sql.NullString  // Use sql.NullString to handle NULL values
+        
         err = db.QueryRow("SELECT id, otp_code FROM users WHERE email = ?", requestData.Email).Scan(&userID, &storedOTP)
         if err != nil {
             if err == sql.ErrNoRows {
@@ -627,13 +628,14 @@ func (c *Controller) VerifyEmail(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        if storedOTP != requestData.OTPCode {
+        // Check if OTP is valid and matches
+        if !storedOTP.Valid || storedOTP.String != requestData.OTPCode {
             error.Message = "Invalid OTP code"
             utils.RespondWithError(w, http.StatusUnauthorized, error)
             return
         }
 
-        // Обновляем статус верификации и очищаем OTP код
+        // Update verification status and clear OTP code
         _, err = db.Exec("UPDATE users SET verified = true, otp_code = NULL WHERE email = ?", requestData.Email)
         if err != nil {
             log.Printf("Error updating verification status: %v", err)
@@ -740,7 +742,7 @@ func (c *Controller) ResendCode(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var requestData struct {
             Email string `json:"email"`
-            Type  string `json:"type"` // "reset" или "verify"
+            Type  string `json:"type"` // "reset" or "verify"
         }
         var error models.Error
 
@@ -751,12 +753,12 @@ func (c *Controller) ResendCode(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Генерация нового OTP
+        // Generate new OTP
         otpCode := fmt.Sprintf("%04d", rand.Intn(10000))
 
-        // Если тип запроса "reset" – сбрасываем пароль
+        // If request type is "reset" - reset password
         if requestData.Type == "reset" {
-            // Удаляем старые записи OTP для сброса пароля
+            // Delete old OTP entries for password reset
             _, err = db.Exec("DELETE FROM password_resets WHERE email = ?", requestData.Email)
             if err != nil {
                 error.Message = "Failed to clear old OTP."
@@ -764,7 +766,7 @@ func (c *Controller) ResendCode(db *sql.DB) http.HandlerFunc {
                 return
             }
 
-            // Вставляем новый OTP в таблицу password_resets с временной меткой
+            // Insert new OTP into password_resets table with timestamp
             _, err = db.Exec("INSERT INTO password_resets (email, otp_code, created_at) VALUES (?, ?, ?)", requestData.Email, otpCode, time.Now())
             if err != nil {
                 error.Message = "Failed to insert new OTP."
@@ -772,35 +774,43 @@ func (c *Controller) ResendCode(db *sql.DB) http.HandlerFunc {
                 return
             }
 
-            // Отправляем OTP для сброса пароля
+            // Send OTP for password reset
             utils.SendVerificationEmail(requestData.Email, "", otpCode)
         }
 
-        // Если тип запроса "verify" – верифицируем email
+        // If request type is "verify" - verify email
         if requestData.Type == "verify" {
-            // Проверка, что OTP уже существует для этого email
-            var existingOTP string
-            var createdAt time.Time
-            err := db.QueryRow("SELECT otp_code, created_at FROM users WHERE email = ?", requestData.Email).Scan(&existingOTP, &createdAt)
+            // Check if user exists with this email
+            var exists bool
+            err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE email = ?)", requestData.Email).Scan(&exists)
             if err != nil {
+                error.Message = "Database error."
+                utils.RespondWithError(w, http.StatusInternalServerError, error)
+                return
+            }
+            
+            if !exists {
                 utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No user found with this email"})
                 return
             }
 
-            // Проверяем, не истек ли срок действия OTP
-            if time.Since(createdAt) > time.Minute*1+time.Second*30 { // 1,5 минуты
-                utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "OTP expired"})
+            // Update the OTP and timestamp in the database
+            _, err = db.Exec("UPDATE users SET otp_code = ?, created_at = ? WHERE email = ?", 
+                            otpCode, time.Now(), requestData.Email)
+            if err != nil {
+                error.Message = "Failed to update OTP."
+                utils.RespondWithError(w, http.StatusInternalServerError, error)
                 return
             }
 
-            // Отправляем OTP для верификации email
+            // Send OTP for email verification
             utils.SendVerificationEmail(requestData.Email, "", otpCode)
         }
 
-        // Формируем ответ с сообщением и OTP
+        // Form response with message and OTP
         response := map[string]interface{}{
             "message":  "OTP resent successfully",
-            "otp_code": otpCode, // Отправляем OTP в ответе
+            "otp_code": otpCode, // Send OTP in response
         }
 
         w.Header().Set("Content-Type", "application/json")
@@ -808,7 +818,6 @@ func (c *Controller) ResendCode(db *sql.DB) http.HandlerFunc {
         json.NewEncoder(w).Encode(response)
     }
 }
-
 func ChangeAdminPassword(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req models.ChangePasswordRequest
