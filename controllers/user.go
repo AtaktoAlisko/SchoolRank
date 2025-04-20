@@ -23,7 +23,7 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
         var user models.User
         var error models.Error
 
-        // Декодируем запрос
+        // Decode request
         err := json.NewDecoder(r.Body).Decode(&user)
         if err != nil {
             error.Message = "Invalid request body."
@@ -31,22 +31,22 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Устанавливаем роль "user" по умолчанию
+        // Set default role to "user"
         user.Role = "user"
 
-        // Устанавливаем дефолтный аватар, если не указан
+        // Set default avatar if not provided
         if user.AvatarURL.Valid == false || user.AvatarURL.String == "" {
-            user.AvatarURL = sql.NullString{String: "", Valid: false}  // Если аватар не указан, записываем NULL в базе данных
+            user.AvatarURL = sql.NullString{String: "", Valid: false}
         }
 
-        // Проверяем, что email или телефон предоставлены
+        // Check if email or phone is provided
         if user.Email == "" && user.Phone == "" {
             error.Message = "Email or phone is required."
             utils.RespondWithError(w, http.StatusBadRequest, error)
             return
         }
 
-        // Проверяем, что формат email или телефона правильный
+        // Validate email or phone format
         var isEmail bool
         if user.Email != "" && strings.Contains(user.Email, "@") {
             isEmail = true
@@ -58,14 +58,14 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Проверяем, что пароль не пустой
+        // Check if password is provided
         if user.Password == "" {
             error.Message = "Password is required."
             utils.RespondWithError(w, http.StatusBadRequest, error)
             return
         }
 
-        // Проверяем, существует ли уже email или телефон в базе
+        // Check if email or phone already exists
         var existingID int
         var query string
         var identifier string
@@ -90,7 +90,7 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Хэшируем пароль
+        // Hash password
         hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
         if err != nil {
             log.Printf("Error hashing password: %v", err)
@@ -100,7 +100,7 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
         }
         user.Password = string(hash)
 
-        // Генерация OTP кода для верификации
+        // Generate OTP code for verification
         otpCode, err := utils.GenerateOTP()
         if err != nil {
             log.Printf("Error generating OTP: %v", err)
@@ -109,7 +109,7 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Генерация токена для верификации
+        // Generate verification token
         verificationToken, err := utils.GenerateVerificationToken(user.Email)
         if err != nil {
             log.Printf("Error generating verification token: %v", err)
@@ -118,7 +118,7 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Вставка данных в базу
+        // Insert data into database
         if isEmail {
             query = "INSERT INTO users (email, password, first_name, last_name, age, role, avatar_url, verified, otp_code, verification_token) VALUES (?, ?, ?, ?, ?, ?, ?, false, ?, ?)"
             _, err = db.Exec(query, user.Email, user.Password, user.FirstName, user.LastName, user.Age, user.Role, user.AvatarURL, otpCode, verificationToken)
@@ -134,24 +134,26 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Отправка email с OTP
-        utils.SendVerificationEmail(user.Email, verificationToken, otpCode)
+        // Send email with OTP
+        if isEmail {
+            utils.SendVerificationEmail(user.Email, verificationToken, otpCode)
+        }
 
-        user.Password = "" // Убираем пароль из ответа
+        user.Password = "" // Remove password from response
 
-        // Формируем сообщение для пользователя
+        // Create response message
         message := "User registered successfully."
         if isEmail {
             message += " Please verify your email with the OTP code."
         }
 
-        // Возвращаем ответ с OTP кодом и с информацией о NULL значении аватара
+        // Return response with OTP code
         response := map[string]interface{}{
             "message":  message,
-            "otp_code": otpCode,  // Отправляем OTP код в ответе
+            "otp_code": otpCode,
         }
 
-        // Добавляем avatar_url в ответ, только если оно задано
+        // Add avatar_url to response only if it's set
         if user.AvatarURL.Valid && user.AvatarURL.String != "" {
             response["avatar_url"] = user.AvatarURL.String
         }
@@ -598,7 +600,7 @@ func (c Controller) VerifyResetToken(w http.ResponseWriter, r *http.Request) {
 func (c *Controller) VerifyEmail(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var requestData struct {
-            Email string `json:"email"`
+            Email   string `json:"email"`
             OTPCode string `json:"otp_code"`
         }
         var error models.Error
@@ -611,10 +613,41 @@ func (c *Controller) VerifyEmail(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Check that OTP matches what's stored in the database
-        var userID int
-        var storedOTP sql.NullString  // Use sql.NullString to handle NULL values
+        log.Printf("Received verification request")
+        log.Printf("Verifying email: %s with OTP: %s", requestData.Email, requestData.OTPCode)
+
+        var storedOTP sql.NullString
         
+        // First check if this is a password reset verification
+        err = db.QueryRow("SELECT otp_code FROM password_resets WHERE email = ?", requestData.Email).Scan(&storedOTP)
+        if err == nil && storedOTP.Valid {
+            // Password reset OTP found
+            log.Printf("Found OTP in password_resets table: %s", storedOTP.String)
+            
+            if storedOTP.String != requestData.OTPCode {
+                error.Message = "Invalid OTP code"
+                utils.RespondWithError(w, http.StatusUnauthorized, error)
+                return
+            }
+            
+            // OTP is valid for password reset
+            // Clear the password reset OTP
+            _, err = db.Exec("DELETE FROM password_resets WHERE email = ?", requestData.Email)
+            if err != nil {
+                log.Printf("Error deleting verified password reset: %v", err)
+                error.Message = "Error processing password reset"
+                utils.RespondWithError(w, http.StatusInternalServerError, error)
+                return
+            }
+            
+            utils.ResponseJSON(w, map[string]string{
+                "message": "Password reset code verified successfully",
+            })
+            return
+        }
+        
+        // If not found in password_resets, check in users table (email verification)
+        var userID int
         err = db.QueryRow("SELECT id, otp_code FROM users WHERE email = ?", requestData.Email).Scan(&userID, &storedOTP)
         if err != nil {
             if err == sql.ErrNoRows {
@@ -629,7 +662,15 @@ func (c *Controller) VerifyEmail(db *sql.DB) http.HandlerFunc {
         }
 
         // Check if OTP is valid and matches
-        if !storedOTP.Valid || storedOTP.String != requestData.OTPCode {
+        if !storedOTP.Valid {
+            log.Printf("Stored OTP is NULL for user %s", requestData.Email)
+            error.Message = "Invalid OTP code"
+            utils.RespondWithError(w, http.StatusUnauthorized, error)
+            return
+        }
+        
+        log.Printf("Comparing OTPs: User provided: %s, Stored: %s", requestData.OTPCode, storedOTP.String)
+        if storedOTP.String != requestData.OTPCode {
             error.Message = "Invalid OTP code"
             utils.RespondWithError(w, http.StatusUnauthorized, error)
             return
@@ -649,6 +690,7 @@ func (c *Controller) VerifyEmail(db *sql.DB) http.HandlerFunc {
         })
     }
 }
+
 func sendVerificationEmail(email, verificationLink string) {
 	fmt.Println("Verification email sent to", email)
 	fmt.Println("Verification Link:", verificationLink)
@@ -753,26 +795,35 @@ func (c *Controller) ResendCode(db *sql.DB) http.HandlerFunc {
             return
         }
 
+        log.Printf("Received resend code request")
+        log.Printf("Resending code for email: %s, type: %s", requestData.Email, requestData.Type)
+
         // Generate new OTP
         otpCode := fmt.Sprintf("%04d", rand.Intn(10000))
+        log.Printf("Generated OTP: %s", otpCode)
 
         // If request type is "reset" - reset password
         if requestData.Type == "reset" {
             // Delete old OTP entries for password reset
-            _, err = db.Exec("DELETE FROM password_resets WHERE email = ?", requestData.Email)
+            res, err := db.Exec("DELETE FROM password_resets WHERE email = ?", requestData.Email)
             if err != nil {
                 error.Message = "Failed to clear old OTP."
                 utils.RespondWithError(w, http.StatusInternalServerError, error)
                 return
             }
+            affected, _ := res.RowsAffected()
+            log.Printf("Deleted %d old password reset entries", affected)
 
             // Insert new OTP into password_resets table with timestamp
-            _, err = db.Exec("INSERT INTO password_resets (email, otp_code, created_at) VALUES (?, ?, ?)", requestData.Email, otpCode, time.Now())
+            res, err = db.Exec("INSERT INTO password_resets (email, otp_code, created_at) VALUES (?, ?, ?)", 
+                              requestData.Email, otpCode, time.Now())
             if err != nil {
                 error.Message = "Failed to insert new OTP."
                 utils.RespondWithError(w, http.StatusInternalServerError, error)
                 return
             }
+            affected, _ = res.RowsAffected()
+            log.Printf("Inserted %d password reset entries", affected)
 
             // Send OTP for password reset
             utils.SendVerificationEmail(requestData.Email, "", otpCode)
@@ -780,7 +831,7 @@ func (c *Controller) ResendCode(db *sql.DB) http.HandlerFunc {
 
         // If request type is "verify" - verify email
         if requestData.Type == "verify" {
-            // Check if user exists with this email
+            // Check if user exists
             var exists bool
             err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE email = ?)", requestData.Email).Scan(&exists)
             if err != nil {
@@ -794,14 +845,16 @@ func (c *Controller) ResendCode(db *sql.DB) http.HandlerFunc {
                 return
             }
 
-            // Update the OTP and timestamp in the database
-            _, err = db.Exec("UPDATE users SET otp_code = ?, created_at = ? WHERE email = ?", 
-                            otpCode, time.Now(), requestData.Email)
+            // Update OTP in users table
+            res, err := db.Exec("UPDATE users SET otp_code = ?, created_at = ? WHERE email = ?", 
+                              otpCode, time.Now(), requestData.Email)
             if err != nil {
                 error.Message = "Failed to update OTP."
                 utils.RespondWithError(w, http.StatusInternalServerError, error)
                 return
             }
+            affected, _ := res.RowsAffected()
+            log.Printf("Updated %d user records with new OTP", affected)
 
             // Send OTP for email verification
             utils.SendVerificationEmail(requestData.Email, "", otpCode)
@@ -1367,6 +1420,62 @@ func (c Controller) ResetPasswordConfirm(db *sql.DB) http.HandlerFunc {
 
         w.WriteHeader(http.StatusOK)
         json.NewEncoder(w).Encode(map[string]string{"message": "Password reset successfully"})
+    }
+}
+func (c *Controller) VerifyResetCode(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        var requestData struct {
+            Email   string `json:"email"`
+            OTPCode string `json:"otp_code"`
+        }
+        var error models.Error
+        
+        // Decode request body
+        err := json.NewDecoder(r.Body).Decode(&requestData)
+        if err != nil || requestData.Email == "" || requestData.OTPCode == "" {
+            error.Message = "Email or OTP code is missing"
+            utils.RespondWithError(w, http.StatusBadRequest, error)
+            return
+        }
+        
+        log.Printf("Verifying reset code for email: %s with OTP: %s", requestData.Email, requestData.OTPCode)
+        
+        // Check that OTP matches what's stored in the password_resets table
+        var storedOTP string
+        var createdAt time.Time
+        err = db.QueryRow("SELECT otp_code, created_at FROM password_resets WHERE email = ?", 
+                        requestData.Email).Scan(&storedOTP, &createdAt)
+        if err != nil {
+            if err == sql.ErrNoRows {
+                log.Printf("Reset code not found for email: %s", requestData.Email)
+                error.Message = "Invalid or expired reset code"
+                utils.RespondWithError(w, http.StatusNotFound, error)
+            } else {
+                log.Printf("Database error: %v", err)
+                error.Message = "Server error"
+                utils.RespondWithError(w, http.StatusInternalServerError, error)
+            }
+            return
+        }
+        
+        // Check if OTP has expired (15 minutes)
+        if time.Now().Sub(createdAt).Minutes() > 15 {
+            error.Message = "OTP has expired. Please request a new one."
+            utils.RespondWithError(w, http.StatusUnauthorized, error)
+            return
+        }
+        
+        // Compare OTP codes
+        if storedOTP != requestData.OTPCode {
+            log.Printf("Reset code mismatch. Stored: %s, Received: %s", storedOTP, requestData.OTPCode)
+            error.Message = "Invalid reset code"
+            utils.RespondWithError(w, http.StatusUnauthorized, error)
+            return
+        }
+        
+        utils.ResponseJSON(w, map[string]string{
+            "message": "Reset code verified successfully",
+        })
     }
 }
 
