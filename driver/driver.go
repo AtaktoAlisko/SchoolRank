@@ -37,7 +37,7 @@ func ConnectDB() *sql.DB {
 
 		log.Println("Подключение к базе данных успешно!")
 		return db
-}
+// }
 
 // package driver
 
