@@ -353,7 +353,15 @@ func DeleteFileFromS3(fileURL string) error {
 
     return nil
 }
-
+func GenerateRandomPassword(length int) string {
+	randomBytes := make([]byte, length)
+	_, err := rand.Read(randomBytes)
+	if err != nil {
+		fmt.Println("Error generating random bytes:", err)
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(randomBytes)[:length]
+}
 
 
 

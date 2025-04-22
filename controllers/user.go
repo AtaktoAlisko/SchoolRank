@@ -31,8 +31,265 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
             return
         }
 
+        // Проверка аутентификации суперадмина
+        isCreatedBySuperAdmin := false
+        
+        // Извлекаем токен авторизации
+        authHeader := r.Header.Get("Authorization")
+        if strings.HasPrefix(authHeader, "Bearer ") {
+            tokenString := strings.Split(authHeader, " ")[1]
+            token, err := utils.ParseToken(tokenString)
+            
+            if err == nil && token.Valid {
+                if claims, ok := token.Claims.(jwt.MapClaims); ok {
+                    // Проверяем роль пользователя в токене
+                    if role, exists := claims["role"].(string); exists && role == "superadmin" {
+                        isCreatedBySuperAdmin = true
+                        
+                        // Дополнительная проверка ID суперадмина в базе
+                        if userID, exists := claims["user_id"].(float64); exists {
+                            var exists bool
+                            err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ? AND role = 'superadmin')", int(userID)).Scan(&exists)
+                            if err != nil || !exists {
+                                isCreatedBySuperAdmin = false
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Если пользователь создается суперадмином и указан тип schooladmin
+        if isCreatedBySuperAdmin && user.Role == "schooladmin" {
+            
+            // Проверяем наличие email, так как для админа школы обязателен email
+            if user.Email == "" {
+                error.Message = "Email is required for school administrator accounts."
+                utils.RespondWithError(w, http.StatusBadRequest, error)
+                return
+            }
+            
+            // Проверяем формат email
+            if !strings.Contains(user.Email, "@") {
+                error.Message = "Invalid email format."
+                utils.RespondWithError(w, http.StatusBadRequest, error)
+                return
+            }
+            
+            // Проверяем, существует ли уже email в базе
+            var existingID int
+            err = db.QueryRow("SELECT id FROM users WHERE email = ?", user.Email).Scan(&existingID)
+            if err == nil {
+                error.Message = "Email already exists."
+                utils.RespondWithError(w, http.StatusConflict, error)
+                return
+            } else if err != sql.ErrNoRows {
+                log.Printf("Error checking existing user: %v", err)
+                error.Message = "Server error."
+                utils.RespondWithError(w, http.StatusInternalServerError, error)
+                return
+            }
+            
+            // Если пароль не указан, генерируем случайный пароль
+            var plainPassword string
+            if user.Password == "" {
+                // Генерируем случайный пароль для школьного администратора (12 символов)
+                randomBytes := make([]byte, 9) // 9 байтов дадут 12 символов в base64
+                _, err := rand.Read(randomBytes)
+                if err != nil {
+                    log.Printf("Error generating random bytes: %v", err)
+                    error.Message = "Failed to generate password."
+                    utils.RespondWithError(w, http.StatusInternalServerError, error)
+                    return
+                }
+                
+                // Используем функцию для генерации пароля из случайных байтов
+                plainPassword = generateRandomPassword(12)
+            } else {
+                plainPassword = user.Password
+            }
+            
+            // Хешируем пароль для сохранения в базе
+            hash, err := bcrypt.GenerateFromPassword([]byte(plainPassword), bcrypt.DefaultCost)
+            if err != nil {
+                log.Printf("Error hashing password: %v", err)
+                error.Message = "Server error."
+                utils.RespondWithError(w, http.StatusInternalServerError, error)
+                return
+            }
+            user.Password = string(hash)
+            
+            // Устанавливаем дефолтный аватар, если не указан
+            if !user.AvatarURL.Valid || user.AvatarURL.String == "" {
+                user.AvatarURL = sql.NullString{String: "", Valid: false}
+            }
+            
+            // Генерируем токен для верификации (для совместимости со схемой БД)
+            verificationToken, err := utils.GenerateVerificationToken(user.Email)
+            if err != nil {
+                log.Printf("Error generating verification token: %v", err)
+                error.Message = "Failed to generate verification token."
+                utils.RespondWithError(w, http.StatusInternalServerError, error)
+                return
+            }
+            
+            // ВАЖНО: Устанавливаем verified = true для schooladmin
+            // Вставка данных в базу (учетная запись школьного администратора создается уже верифицированной)
+            query := "INSERT INTO users (email, password, first_name, last_name, age, role, avatar_url, verified, verification_token) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)"
+            result, err := db.Exec(query, user.Email, user.Password, user.FirstName, user.LastName, user.Age, user.Role, user.AvatarURL, verificationToken)
+            if err != nil {
+                log.Printf("Error inserting user: %v", err)
+                error.Message = "Server error."
+                utils.RespondWithError(w, http.StatusInternalServerError, error)
+                return
+            }
+            
+            // Получаем ID созданного пользователя
+            userID, _ := result.LastInsertId()
+            
+            // Проверяем, что пользователь действительно создан и установлен verified = true
+            var verified int
+            err = db.QueryRow("SELECT verified FROM users WHERE id = ?", userID).Scan(&verified)
+            if err != nil || verified != 1 {
+                log.Printf("Failed to verify user creation or verification status: %v", err)
+                // Если не удалось проверить или verified = false, исправляем это
+                _, updateErr := db.Exec("UPDATE users SET verified = 1 WHERE id = ?", userID)
+                if updateErr != nil {
+                    log.Printf("Failed to update verification status: %v", updateErr)
+                }
+            }
+            
+            // Отправляем email администратору школы с данными для входа
+            if plainPassword != user.Password {
+                subject := "Ваши учетные данные для входа в систему"
+                body := fmt.Sprintf(
+                    "Уважаемый %s %s,\n\n"+
+                    "Для вас был создан аккаунт школьного администратора.\n\n"+
+                    "Логин: %s\n"+
+                    "Пароль: %s\n\n"+
+                    "Рекомендуем сменить пароль после первого входа в систему.\n\n"+
+                    "С уважением,\n"+
+                    "Администрация системы",
+                    user.FirstName, user.LastName, user.Email, plainPassword,
+                )
+                
+                utils.SendEmail(user.Email, subject, body)
+            }
+            
+            // Формируем ответ суперадмину
+            response := map[string]interface{}{
+                "message": "School administrator account created successfully. Login credentials sent to email.",
+                "email": user.Email,
+            }
+            
+            utils.ResponseJSON(w, response)
+            return
+        }
+
+        // Проверяем, если регистрируется суперадмин
+        if user.Role == "superadmin" {
+            // Проверяем наличие email для суперадмина
+            if user.Email == "" {
+                error.Message = "Email is required for superadmin accounts."
+                utils.RespondWithError(w, http.StatusBadRequest, error)
+                return
+            }
+            
+            // Проверяем формат email
+            if !strings.Contains(user.Email, "@") {
+                error.Message = "Invalid email format."
+                utils.RespondWithError(w, http.StatusBadRequest, error)
+                return
+            }
+            
+            // Проверяем, существует ли уже email в базе
+            var existingID int
+            err = db.QueryRow("SELECT id FROM users WHERE email = ?", user.Email).Scan(&existingID)
+            if err == nil {
+                error.Message = "Email already exists."
+                utils.RespondWithError(w, http.StatusConflict, error)
+                return
+            } else if err != sql.ErrNoRows {
+                log.Printf("Error checking existing user: %v", err)
+                error.Message = "Server error."
+                utils.RespondWithError(w, http.StatusInternalServerError, error)
+                return
+            }
+            
+            // Проверяем наличие пароля
+            if user.Password == "" {
+                error.Message = "Password is required for superadmin accounts."
+                utils.RespondWithError(w, http.StatusBadRequest, error)
+                return
+            }
+            
+            // Хешируем пароль
+            hash, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+            if err != nil {
+                log.Printf("Error hashing password: %v", err)
+                error.Message = "Server error."
+                utils.RespondWithError(w, http.StatusInternalServerError, error)
+                return
+            }
+            user.Password = string(hash)
+            
+            // Устанавливаем дефолтный аватар, если не указан
+            if !user.AvatarURL.Valid || user.AvatarURL.String == "" {
+                user.AvatarURL = sql.NullString{String: "", Valid: false}
+            }
+            
+            // Генерируем токен для верификации (для совместимости со схемой БД)
+            verificationToken, err := utils.GenerateVerificationToken(user.Email)
+            if err != nil {
+                log.Printf("Error generating verification token: %v", err)
+                error.Message = "Failed to generate verification token."
+                utils.RespondWithError(w, http.StatusInternalServerError, error)
+                return
+            }
+            
+            // ВАЖНО: Устанавливаем verified = 1 для superadmin
+            // MySQL/SQL использует 1 для true и 0 для false в булевых полях
+            query := "INSERT INTO users (email, password, first_name, last_name, age, role, avatar_url, verified, verification_token) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)"
+            result, err := db.Exec(query, user.Email, user.Password, user.FirstName, user.LastName, user.Age, user.Role, user.AvatarURL, verificationToken)
+            if err != nil {
+                log.Printf("Error inserting superadmin user: %v", err)
+                error.Message = "Server error."
+                utils.RespondWithError(w, http.StatusInternalServerError, error)
+                return
+            }
+            
+            // Получаем ID созданного пользователя
+            userID, _ := result.LastInsertId()
+            
+            // Дополнительная проверка и принудительное обновление статуса verified если нужно
+            var actualVerified int
+            err = db.QueryRow("SELECT verified FROM users WHERE id = ?", userID).Scan(&actualVerified)
+            if err == nil && actualVerified != 1 {
+                // Если по какой-то причине verified не установлен в 1, исправляем это
+                _, updateErr := db.Exec("UPDATE users SET verified = 1 WHERE id = ?", userID)
+                if updateErr != nil {
+                    log.Printf("Failed to update verification status for superadmin: %v", updateErr)
+                } else {
+                    log.Printf("Fixed verification status for superadmin: %s", user.Email)
+                }
+            }
+            
+            // Формируем ответ для создания суперадмина
+            response := map[string]interface{}{
+                "message": "Superadmin account created successfully. Account is already verified.",
+                "email": user.Email,
+            }
+            
+            utils.ResponseJSON(w, response)
+            return
+        }
+        
         // Устанавливаем роль "user" по умолчанию
-        user.Role = "user"
+        // Устанавливаем роль по умолчанию, если не задана
+        if user.Role == "" {
+	    user.Role = "user"
+        }
+
 
         // Устанавливаем дефолтный аватар, если не указан
         if !user.AvatarURL.Valid || user.AvatarURL.String == "" {
@@ -135,20 +392,28 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
         }
 
         // Отправка email с OTP
-        utils.SendVerificationEmail(user.Email, verificationToken, otpCode)
+        if isEmail {
+            utils.SendVerificationEmail(user.Email, verificationToken, otpCode)
+        }
 
         user.Password = "" // Убираем пароль из ответа
 
-        // Формируем сообщение для пользователя
-        message := "User registered successfully."
+        // Формируем сообщение для пользователя в зависимости от типа регистрации
+        var message string
         if isEmail {
-            message += " Please verify your email with the OTP code."
+            message = "User registered successfully. Please verify your email with the OTP code."
+        } else {
+            message = "User registered successfully."
         }
 
-        // Возвращаем ответ с OTP кодом и с информацией о NULL значении аватара
+        // Создаем ответ с учетом типа пользователя
         response := map[string]interface{}{
-            "message":  message,
-            "otp_code": otpCode,  // Отправляем OTP код в ответе
+            "message": message,
+        }
+
+        // Добавляем OTP код только для пользователей с email, которым нужна верификация
+        if isEmail {
+            response["otp_code"] = otpCode
         }
 
         // Добавляем avatar_url в ответ, только если оно задано
@@ -159,7 +424,6 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, response)
     }
 }
-
 func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var user models.User
@@ -209,11 +473,13 @@ func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
         }
 
         // Check if the user is verified
-        if !verified {
-            error.Message = "Email not verified. Please verify your email before logging in."
-            utils.RespondWithError(w, http.StatusForbidden, error)
-            return
-        }
+      // Check if the user is verified (но только если это обычный пользователь)
+if !verified && role == "user" {
+    error.Message = "Email not verified. Please verify your email before logging in."
+    utils.RespondWithError(w, http.StatusForbidden, error)
+    return
+}
+
 
         // Check password for non-students
         err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(user.Password))
@@ -1433,5 +1699,15 @@ func (c *Controller) VerifyResetCode(db *sql.DB) http.HandlerFunc {
         })
     }
 }
-
+func generateRandomPassword(length int) string {
+    const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+"
+    rand.Seed(time.Now().UnixNano())
+    
+    password := make([]byte, length)
+    for i := range password {
+        password[i] = charset[rand.Intn(len(charset))]
+    }
+    
+    return string(password)
+}
 
