@@ -35,7 +35,7 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Step 3: Ensure the user is a director and has a school assigned
+		// Step 3: Ensure the user is a schooladmin and has a school assigned
 		if userRole != "schooladmin" {
 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create a student"})
 			return
@@ -53,28 +53,24 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Step 5: Ensure the student's school ID matches the director's school ID
-		if student.SchoolID != int(userSchoolID.Int64) {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only create students for your school"})
-			return
-		}
+		// Step 5: Set the school ID based on director's user
+		student.SchoolID = int(userSchoolID.Int64)
 
 		// Step 6: Generate login and email for the student
-		randomString := generateRandomString(4) // Генерация случайной строки длиной 4
+		randomString := generateRandomString(4)
 		student.Login = student.FirstName + student.LastName + randomString
-		student.Email = student.Login + "@school.com" // Login будет записываться в Email
+		student.Email = student.Login + "@school.com"
 
-		// Step 7: Generate the student's password automatically
-		student.Password = student.FirstName + student.LastName // Пароль будет FirstName + LastName
+		// Step 7: Generate the student's password
+		student.Password = student.FirstName + student.LastName
 
-		// Step 8: Set the student's role to "student"
-		student.Role = "student" // Make sure Role is set to "student"
+		// Step 8: Set role to student
+		student.Role = "student"
 
 		// Step 9: Insert the student into the database
 		query := `INSERT INTO Student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, password, role, login) 
-		          VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
-		// Execute the query
 		result, err := db.Exec(query, student.FirstName, student.LastName, student.Patronymic, student.IIN, student.SchoolID, student.DateOfBirth, student.Grade, student.Letter, student.Gender, student.Phone, student.Email, student.Password, student.Role, student.Login)
 		if err != nil {
 			log.Println("Error inserting student:", err)
@@ -82,7 +78,6 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Step 10: Retrieve the student's ID from the result of the insert query
 		studentID, err := result.LastInsertId()
 		if err != nil {
 			log.Println("Error retrieving student ID:", err)
@@ -90,13 +85,12 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Set the ID of the student object
 		student.ID = int(studentID)
 
-		// Step 11: Respond with the newly created student
 		utils.ResponseJSON(w, student)
 	}
 }
+
 func generateRandomString(n int) string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	// generateRandomString generates a random string of length n

@@ -18,27 +18,29 @@ type SchoolController struct{}
 
 func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
-        userID, err := utils.VerifyToken(r)
+        // Шаг 1: Проверка токена
+        requesterID, err := utils.VerifyToken(r)
         if err != nil {
             utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
             return
         }
 
-        var userRole string
-        err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+        // Шаг 2: Получение роли пользователя
+        var requesterRole string
+        err = db.QueryRow("SELECT role FROM users WHERE id = ?", requesterID).Scan(&requesterRole)
         if err != nil {
             log.Println("Error fetching user role:", err)
             utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch user role"})
             return
         }
 
-        if userRole != "superadmin" {
+        if requesterRole != "superadmin" {
             utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only superadmins can create schools"})
             return
         }
 
-        // Получаем form-data
-        err = r.ParseMultipartForm(10 << 20) // 10MB limit
+        // Шаг 3: Разбор формы
+        err = r.ParseMultipartForm(10 << 20) // 10MB
         if err != nil {
             utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Failed to parse form"})
             return
@@ -54,11 +56,20 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Фото (необязательно)
+        // Шаг 4: Получение user_id директора по email
+        var schoolAdminID int
+        err = db.QueryRow("SELECT id FROM users WHERE email = ?", school.SchoolAdminLogin).Scan(&schoolAdminID)
+        if err != nil {
+            log.Println("Admin not found:", err)
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School admin not found by provided email"})
+            return
+        }
+
+        // Шаг 5: Загрузка фото, если есть
         file, _, err := r.FormFile("photo")
         if err == nil {
             defer file.Close()
-            uniqueFileName := fmt.Sprintf("school-%d-%d.jpg", userID, time.Now().Unix())
+            uniqueFileName := fmt.Sprintf("school-%d-%d.jpg", requesterID, time.Now().Unix())
             photoURL, err := utils.UploadFileToS3(file, uniqueFileName, false)
             if err != nil {
                 log.Println("S3 upload failed:", err)
@@ -68,12 +79,12 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
             school.PhotoURL = photoURL
         }
 
-        // Вставка в базу
+        // Шаг 6: Вставка в таблицу Schools
         query := `
-           INSERT INTO Schools (school_name, city, school_admin_login, photo_url, created_at, updated_at)
-           VALUES (?, ?, ?, ?, NOW(), NOW())
+           INSERT INTO Schools (school_name, city, school_admin_login, photo_url, created_at, updated_at, user_id)
+           VALUES (?, ?, ?, ?, NOW(), NOW(), ?)
         `
-        result, err := db.Exec(query, school.SchoolName, school.City, school.SchoolAdminLogin, school.PhotoURL)
+        result, err := db.Exec(query, school.SchoolName, school.City, school.SchoolAdminLogin, school.PhotoURL, schoolAdminID)
         if err != nil {
             log.Println("Insert error:", err)
             utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create school"})

@@ -3,6 +3,7 @@ package models
 // School представляет школу.
 type School struct {
     SchoolID      int            `json:"school_id"`           // ID школы
+    UserID          int       `json:"user_id"`             // ID пользователя (директора) связанного с этой школой
     SchoolName    string         `json:"school_name"`         // Название школы
     SchoolAddress string `json:"school_address"`      // Адрес школы (может быть NULL)
     City          string         `json:"city"`                // Город
