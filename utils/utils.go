@@ -103,12 +103,12 @@ func GenerateVerificationToken(email string) (string, error) {
 	return token.SignedString([]byte(secret))
 }
 func ParseToken(tokenStr string) (*jwt.Token, error) {
-	return jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method")
-		}
-		return []byte(os.Getenv("SECRET")), nil
-	})
+    return jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+        if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+            return nil, fmt.Errorf("unexpected signing method")
+        }
+        return []byte(os.Getenv("SECRET")), nil
+    })
 }
 func VerifyToken(r *http.Request) (int, error) {
 	authHeader := r.Header.Get("Authorization")
@@ -362,6 +362,12 @@ func GenerateRandomPassword(length int) string {
 	}
 	return base64.StdEncoding.EncodeToString(randomBytes)[:length]
 }
+// HashPassword хеширует пароль с использованием bcrypt
+func HashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return string(bytes), err
+}
+
 
 
 

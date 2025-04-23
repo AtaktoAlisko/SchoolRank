@@ -10,6 +10,7 @@ import (
 	"os"
 	"ranking-school/models"
 	"ranking-school/utils"
+	"strconv"
 	"strings"
 	"time"
 
@@ -722,6 +723,173 @@ func (c *Controller) GetAllUsers(db *sql.DB) http.HandlerFunc {
         // Отправляем список пользователей в формате JSON
         utils.ResponseJSON(w, users)
     }
+}
+func (c *Controller) UpdateUser(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var requestData struct {
+			FirstName   string `json:"first_name"`
+			LastName    string `json:"last_name"`
+			DateOfBirth string `json:"date_of_birth"`
+			Email       string `json:"email"`
+			Password    string `json:"password"` // можно не передавать
+			Role        string `json:"role"`
+		}
+
+		// Проверка токена
+		adminID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+			return
+		}
+
+		// Проверка роли суперадмина
+		var adminRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", adminID).Scan(&adminRole)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching role"})
+			return
+		}
+		if adminRole != "superadmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only superadmin can update users"})
+			return
+		}
+
+		// Читаем тело запроса
+		err = json.NewDecoder(r.Body).Decode(&requestData)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
+			return
+		}
+
+		// Валидация роли
+		if requestData.Role != "user" && requestData.Role != "schooladmin" && requestData.Role != "superadmin" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid role"})
+			return
+		}
+
+		// Получение ID из URL
+		vars := mux.Vars(r)
+		userIDStr := vars["id"]
+		userID, err := strconv.Atoi(userIDStr)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid user ID"})
+			return
+		}
+
+		// Проверяем, существует ли пользователь
+		var existingID int
+		err = db.QueryRow("SELECT id FROM users WHERE id = ?", userID).Scan(&existingID)
+		if err != nil || existingID == 0 {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "User not found"})
+			return
+		}
+
+		// Если передан пароль, хешируем
+		var query string
+		var args []interface{}
+		if requestData.Password != "" {
+			hashedPassword, err := utils.HashPassword(requestData.Password)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Password hashing failed"})
+				return
+			}
+
+			query = `UPDATE users SET first_name = ?, last_name = ?, date_of_birth = ?, email = ?, password = ?, role = ? WHERE id = ?`
+			args = []interface{}{
+				requestData.FirstName, requestData.LastName, requestData.DateOfBirth,
+				requestData.Email, hashedPassword, requestData.Role, userID,
+			}
+		} else {
+			query = `UPDATE users SET first_name = ?, last_name = ?, date_of_birth = ?, email = ?, role = ? WHERE id = ?`
+			args = []interface{}{
+				requestData.FirstName, requestData.LastName, requestData.DateOfBirth,
+				requestData.Email, requestData.Role, userID,
+			}
+		}
+
+		// Обновляем
+		_, err = db.Exec(query, args...)
+		if err != nil {
+			log.Printf("SQL Exec error: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update user"})
+			return
+		}
+
+		utils.ResponseJSON(w, map[string]string{"message": "User updated successfully"})
+	}
+}
+func (c *Controller) CreateUser(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var requestData struct {
+			FirstName   string `json:"first_name"`
+			LastName    string `json:"last_name"`
+			DateOfBirth string `json:"date_of_birth"`
+			Email       string `json:"email"`
+			Password    string `json:"password"`
+			Role        string `json:"role"`
+		}
+
+		// Проверка токена
+		adminID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+			return
+		}
+
+		// Проверка роли суперадмина
+		var adminRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", adminID).Scan(&adminRole)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching role"})
+			return
+		}
+
+		if adminRole != "superadmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only superadmin can create users"})
+			return
+		}
+
+		// Читаем тело запроса
+		err = json.NewDecoder(r.Body).Decode(&requestData)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
+			return
+		}
+
+		// Валидация роли
+		if requestData.Role != "user" && requestData.Role != "schooladmin" && requestData.Role != "superadmin" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid role"})
+			return
+		}
+
+		// Хешируем пароль
+		hashedPassword, err := utils.HashPassword(requestData.Password)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Password hashing failed"})
+			return
+		}
+
+		// Проверка на существование email
+		var existingID int
+		err = db.QueryRow("SELECT id FROM users WHERE email = ?", requestData.Email).Scan(&existingID)
+		if err == nil && existingID > 0 {
+			utils.RespondWithError(w, http.StatusConflict, models.Error{Message: "Email already exists"})
+			return
+		}
+
+		// Вставляем нового пользователя в базу
+		query := `INSERT INTO users (first_name, last_name, date_of_birth, email, password, role) 
+		          VALUES (?, ?, ?, ?, ?, ?)`
+
+		_, err = db.Exec(query, requestData.FirstName, requestData.LastName, requestData.DateOfBirth,
+			requestData.Email, hashedPassword, requestData.Role)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create user"})
+			return
+		}
+
+		utils.ResponseJSON(w, map[string]string{"message": "User created successfully"})
+	}
 }
 func (c Controller) Logout(w http.ResponseWriter, r *http.Request) {
     // Get token from Authorization header
@@ -1446,8 +1614,6 @@ func (c Controller) ForgotPassword(db *sql.DB) http.HandlerFunc {
         json.NewEncoder(w).Encode(response)
     }
 }
-
-
 func (c Controller) ConfirmResetPassword(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var requestData struct {
