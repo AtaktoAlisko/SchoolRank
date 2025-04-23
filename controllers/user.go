@@ -665,45 +665,61 @@ if !verified && role == "user" {
 }
 func (c *Controller) GetAllUsers(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
-        // 1. Выполняем запрос для получения всех пользователей
-        query := "SELECT id, email, first_name, last_name, role, is_verified, avatar_url FROM users"
-        rows, err := db.Query(query)
+        // Запрос для получения всех пользователей из базы
+        rows, err := db.Query("SELECT id, email, first_name, last_name, date_of_birth, role, password FROM users")
         if err != nil {
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve users"})
+            log.Printf("Error fetching users: %v", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Server error"})
             return
         }
         defer rows.Close()
 
-        // 2. Создаем срез для хранения данных о пользователях
-        var users []models.User
+        var users []map[string]interface{}
 
-        // 3. Проходим по результатам запроса и заполняем срез пользователей
+        // Проходим по всем строкам в результатах запроса
         for rows.Next() {
             var user models.User
-            err := rows.Scan(
-                &user.ID,
-                &user.Email,
-                &user.FirstName,
-                &user.LastName,
-                &user.Role,
-                &user.IsVerified,
-                &user.AvatarURL,
-            )
+            var password string
+            var dateOfBirth sql.NullString // Используем sql.NullString для работы с NULL значениями
+
+            // Извлекаем данные пользователя
+            err := rows.Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &dateOfBirth, &user.Role, &password)
             if err != nil {
-                log.Printf("Error scanning user data: %v", err) // Добавим подробный вывод ошибки
+                log.Printf("Error scanning user: %v", err)
                 utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error scanning user data"})
                 return
             }
-            users = append(users, user)
+
+            // Преобразуем date_of_birth в строку, если оно не NULL
+            var dateOfBirthStr string
+            if dateOfBirth.Valid {
+                dateOfBirthStr = dateOfBirth.String
+            } else {
+                dateOfBirthStr = "" // Если дата рождения NULL, то оставляем пустую строку
+            }
+
+            // Создаем карту для каждого пользователя, которую будем добавлять в ответ
+            userMap := map[string]interface{}{
+                "id":            user.ID,
+                "email":         user.Email,
+                "first_name":    user.FirstName,
+                "last_name":     user.LastName,
+                "date_of_birth": dateOfBirthStr,
+                "role":          user.Role,
+                "password":      password, // Возможно, вы хотите хранить хеш пароля или не включать его в ответ
+            }
+
+            users = append(users, userMap)
         }
 
-        // 4. Проверяем на ошибки после завершения перебора строк
+        // Проверяем на ошибки после итерации
         if err = rows.Err(); err != nil {
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error during iteration"})
+            log.Printf("Error iterating over users: %v", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing users"})
             return
         }
 
-        // 5. Возвращаем список всех пользователей в формате JSON
+        // Отправляем список пользователей в формате JSON
         utils.ResponseJSON(w, users)
     }
 }
