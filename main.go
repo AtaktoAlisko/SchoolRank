@@ -95,6 +95,7 @@ func main() {
     // Профиль пользователя и аватар
     // =======================
 	router.HandleFunc("/api/users/me", controller.GetMe(db)).Methods("GET")
+	router.HandleFunc("/api/users", controller.GetAllUsers(db)).Methods("GET")
 	router.HandleFunc("/api/users/me", controller.TokenVerifyMiddleware(controller.EditProfile(db))).Methods("PUT")
 	router.HandleFunc("/api/users/me/avatar", controller.UploadAvatar(db)).Methods("POST")
 	router.HandleFunc("/api/users/me/avatar", controller.UpdateAvatar(db)).Methods("PUT")
@@ -121,8 +122,11 @@ func main() {
 	//superadmin
 	router.HandleFunc("/api/schools", schoolController.CreateSchool(db)).Methods("POST")
 	// router.HandleFunc("/api/schools/{id}", schoolController.GetSchool(db)).Methods("GET")
-	// router.HandleFunc("/api/schools/{id}", schoolController.UpdateSchool(db)).Methods("PUT")
+	router.HandleFunc("/api/schools/{id}", schoolController.UpdateSchool(db)).Methods("PUT")
 	router.HandleFunc("/api/schools/{id}", schoolController.DeleteSchool(db)).Methods("DELETE")
+	router.HandleFunc("/api/schools", schoolController.GetAllSchools(db)).Methods("GET")
+	
+
 
     //scholadmin
 	router.HandleFunc("/api/school/update", schoolController.UpdateMySchool(db)).Methods("PUT")

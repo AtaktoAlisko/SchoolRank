@@ -512,6 +512,51 @@ if !verified && role == "user" {
         })
     }
 }
+func (c *Controller) GetAllUsers(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // 1. Выполняем запрос для получения всех пользователей
+        query := "SELECT id, email, first_name, last_name, role, is_verified, avatar_url FROM users"
+        rows, err := db.Query(query)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve users"})
+            return
+        }
+        defer rows.Close()
+
+        // 2. Создаем срез для хранения данных о пользователях
+        var users []models.User
+
+        // 3. Проходим по результатам запроса и заполняем срез пользователей
+        for rows.Next() {
+            var user models.User
+            err := rows.Scan(
+                &user.ID,
+                &user.Email,
+                &user.FirstName,
+                &user.LastName,
+                &user.Role,
+                &user.IsVerified,
+                &user.AvatarURL,
+            )
+            if err != nil {
+                log.Printf("Error scanning user data: %v", err) // Добавим подробный вывод ошибки
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error scanning user data"})
+                return
+            }
+            users = append(users, user)
+        }
+
+        // 4. Проверяем на ошибки после завершения перебора строк
+        if err = rows.Err(); err != nil {
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error during iteration"})
+            return
+        }
+
+        // 5. Возвращаем список всех пользователей в формате JSON
+        utils.ResponseJSON(w, users)
+    }
+}
+
 func (c Controller) Logout(w http.ResponseWriter, r *http.Request) {
     // Get token from Authorization header
     authHeader := r.Header.Get("Authorization")
