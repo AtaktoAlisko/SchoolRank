@@ -451,11 +451,9 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
             message = "User registered successfully."
         }
 
-        // Создаем ответ с учетом типа пользователя
+        // Создаем ответ без date_of_birth и age
         response := map[string]interface{}{
             "message": message,
-            "date_of_birth": user.DateOfBirth,
-            "age": user.Age,
         }
 
         // Добавляем OTP код только для пользователей с email, которым нужна верификация
