@@ -593,7 +593,6 @@ func (c Controller) EditProfile(db *sql.DB) http.HandlerFunc {
             FirstName string `json:"first_name"`
             LastName  string `json:"last_name"`
             Age       int    `json:"age"`
-            Email     string `json:"email"`
         }
 
         // Decode the body of the request
@@ -619,13 +618,13 @@ func (c Controller) EditProfile(db *sql.DB) http.HandlerFunc {
             return
         }
 
-        // Update the profile data in the database
+        // Update the profile data in the database, but do not allow email to be changed
         updateQuery := `
             UPDATE users 
-            SET first_name = ?, last_name = ?, age = ?, email = ? 
+            SET first_name = ?, last_name = ?, age = ? 
             WHERE id = ?
         `
-        _, err = db.Exec(updateQuery, requestData.FirstName, requestData.LastName, requestData.Age, requestData.Email, userID)
+        _, err = db.Exec(updateQuery, requestData.FirstName, requestData.LastName, requestData.Age, userID)
         if err != nil {
             utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error updating profile."})
             return
@@ -635,6 +634,7 @@ func (c Controller) EditProfile(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, map[string]string{"message": "Profile updated successfully."})
     }
 }
+
 func (c Controller) UpdatePassword(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var requestData struct {
