@@ -138,7 +138,6 @@ func (sc SchoolController) UpdateMySchool(db *sql.DB) http.HandlerFunc {
             Phone           string `json:"phone"`
             PhotoURL        string `json:"photo_url"`
             Specializations string `json:"specializations"` // Добавлено
-            Achievements    string `json:"achievements"`    // Добавлено
         }
 
         err = json.NewDecoder(r.Body).Decode(&input)
@@ -163,7 +162,6 @@ func (sc SchoolController) UpdateMySchool(db *sql.DB) http.HandlerFunc {
             school_phone = ?, 
             photo_url = ?, 
             specializations = ?, 
-            achievements = ?, 
             updated_at = NOW()
         WHERE school_id = ?
         `
@@ -180,7 +178,6 @@ func (sc SchoolController) UpdateMySchool(db *sql.DB) http.HandlerFunc {
             input.Phone,
             input.PhotoURL,
             input.Specializations, // Передаем специализации
-            input.Achievements,    // Передаем достижения
             schoolID,
         )
         if err != nil {

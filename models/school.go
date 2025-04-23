@@ -15,5 +15,4 @@ type School struct {
     CreatedAt     string         `json:"created_at"`          // Дата создания
     UpdatedAt     string         `json:"updated_at"`          // Дата обновления
     Specializations  []string       `json:"specializations"`      // Специализации школы (напр. физ-мат, гео-мат)
-    Achievements     []string       `json:"achievements"`         // Достижения школы
 }
