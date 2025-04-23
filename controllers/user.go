@@ -31,6 +31,35 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
             return
         }
 
+        // Проверяем формат даты рождения и вычисляем возраст
+        if user.DateOfBirth != "" {
+            // Проверка формата даты
+            _, err := time.Parse("2006-01-02", user.DateOfBirth)
+            if err != nil {
+                error.Message = "Invalid date format. Please use YYYY-MM-DD format."
+                utils.RespondWithError(w, http.StatusBadRequest, error)
+                return
+            }
+            
+            // Вычисляем возраст, используя метод контроллера
+            age, err := c.CalculateAge(&user)
+            if err != nil {
+                error.Message = "Error calculating age."
+                utils.RespondWithError(w, http.StatusInternalServerError, error)
+                return
+            }
+            
+            // Устанавливаем вычисленный возраст
+            user.Age = age
+            
+            // Logging for debugging
+            log.Printf("Date of birth: %s, Calculated age: %d", user.DateOfBirth, user.Age)
+        } else {
+            // If date of birth is not provided, explicitly set empty values
+            user.DateOfBirth = ""
+            user.Age = 0
+        }
+
         // Проверка аутентификации суперадмина
         isCreatedBySuperAdmin := false
         
@@ -135,8 +164,8 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
             
             // ВАЖНО: Устанавливаем verified = true для schooladmin
             // Вставка данных в базу (учетная запись школьного администратора создается уже верифицированной)
-            query := "INSERT INTO users (email, password, first_name, last_name, age, role, avatar_url, verified, verification_token) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)"
-            result, err := db.Exec(query, user.Email, user.Password, user.FirstName, user.LastName, user.Age, user.Role, user.AvatarURL, verificationToken)
+            query := "INSERT INTO users (email, password, first_name, last_name, date_of_birth, age, role, avatar_url, verified, verification_token) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)"
+            result, err := db.Exec(query, user.Email, user.Password, user.FirstName, user.LastName, user.DateOfBirth, user.Age, user.Role, user.AvatarURL, verificationToken)
             if err != nil {
                 log.Printf("Error inserting user: %v", err)
                 error.Message = "Server error."
@@ -249,8 +278,8 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
             
             // ВАЖНО: Устанавливаем verified = 1 для superadmin
             // MySQL/SQL использует 1 для true и 0 для false в булевых полях
-            query := "INSERT INTO users (email, password, first_name, last_name, age, role, avatar_url, verified, verification_token) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)"
-            result, err := db.Exec(query, user.Email, user.Password, user.FirstName, user.LastName, user.Age, user.Role, user.AvatarURL, verificationToken)
+            query := "INSERT INTO users (email, password, first_name, last_name, date_of_birth, age, role, avatar_url, verified, verification_token) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)"
+            result, err := db.Exec(query, user.Email, user.Password, user.FirstName, user.LastName, user.DateOfBirth, user.Age, user.Role, user.AvatarURL, verificationToken)
             if err != nil {
                 log.Printf("Error inserting superadmin user: %v", err)
                 error.Message = "Server error."
@@ -285,11 +314,9 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
         }
         
         // Устанавливаем роль "user" по умолчанию
-        // Устанавливаем роль по умолчанию, если не задана
         if user.Role == "" {
-	    user.Role = "user"
+            user.Role = "user"
         }
-
 
         // Устанавливаем дефолтный аватар, если не указан
         if !user.AvatarURL.Valid || user.AvatarURL.String == "" {
@@ -375,13 +402,16 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
             return
         }
 
+        // Logging before insert
+        log.Printf("Inserting user with date_of_birth: %s, age: %d", user.DateOfBirth, user.Age)
+
         // Вставка данных в базу
         if isEmail {
-            query = "INSERT INTO users (email, password, first_name, last_name, age, role, avatar_url, verified, otp_code, verification_token) VALUES (?, ?, ?, ?, ?, ?, ?, false, ?, ?)"
-            _, err = db.Exec(query, user.Email, user.Password, user.FirstName, user.LastName, user.Age, user.Role, user.AvatarURL, otpCode, verificationToken)
+            query = "INSERT INTO users (email, password, first_name, last_name, date_of_birth, age, role, avatar_url, verified, otp_code, verification_token) VALUES (?, ?, ?, ?, ?, ?, ?, ?, false, ?, ?)"
+            _, err = db.Exec(query, user.Email, user.Password, user.FirstName, user.LastName, user.DateOfBirth, user.Age, user.Role, user.AvatarURL, otpCode, verificationToken)
         } else {
-            query = "INSERT INTO users (phone, password, first_name, last_name, age, role, avatar_url, verified, otp_code, verification_token) VALUES (?, ?, ?, ?, ?, ?, ?, true, NULL, ?)"
-            _, err = db.Exec(query, user.Phone, user.Password, user.FirstName, user.LastName, user.Age, user.Role, user.AvatarURL, verificationToken)
+            query = "INSERT INTO users (phone, password, first_name, last_name, date_of_birth, age, role, avatar_url, verified, otp_code, verification_token) VALUES (?, ?, ?, ?, ?, ?, ?, ?, true, NULL, ?)"
+            _, err = db.Exec(query, user.Phone, user.Password, user.FirstName, user.LastName, user.DateOfBirth, user.Age, user.Role, user.AvatarURL, verificationToken)
         }
 
         if err != nil {
@@ -389,6 +419,20 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
             error.Message = "Server error."
             utils.RespondWithError(w, http.StatusInternalServerError, error)
             return
+        }
+
+        // Verify the data was inserted correctly - grab the user ID and check the inserted values
+        if isEmail {
+            var insertedID int
+            var insertedDOB string
+            var insertedAge int
+            errVerify := db.QueryRow("SELECT id, date_of_birth, age FROM users WHERE email = ?", user.Email).
+                Scan(&insertedID, &insertedDOB, &insertedAge)
+            if errVerify == nil {
+                log.Printf("Verified user insertion: ID=%d, DOB=%s, Age=%d", insertedID, insertedDOB, insertedAge)
+            } else {
+                log.Printf("Could not verify user insertion: %v", errVerify)
+            }
         }
 
         // Отправка email с OTP
@@ -409,6 +453,8 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
         // Создаем ответ с учетом типа пользователя
         response := map[string]interface{}{
             "message": message,
+            "date_of_birth": user.DateOfBirth,
+            "age": user.Age,
         }
 
         // Добавляем OTP код только для пользователей с email, которым нужна верификация
@@ -422,6 +468,111 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
         }
 
         utils.ResponseJSON(w, response)
+    }
+}
+func (c *Controller) GetMe(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Проверяем токен и получаем userID
+        id, err := utils.VerifyToken(r)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+            return
+        }
+
+        // Запрос к базе для получения данных пользователя, включая date_of_birth и age
+        var user models.User
+        var email sql.NullString
+        var role sql.NullString
+        var avatarURL sql.NullString
+        var dateOfBirth sql.NullString
+        var age sql.NullInt64 // Use nullable int for age
+        var passwordHash sql.NullString // Хэш пароля (но мы не будем его возвращать)
+
+        err = db.QueryRow("SELECT id, first_name, last_name, email, role, avatar_url, date_of_birth, age, password FROM users WHERE id = ?", id).
+            Scan(&user.ID, &user.FirstName, &user.LastName, &email, &role, &avatarURL, &dateOfBirth, &age, &passwordHash)
+
+        if err != nil {
+            if err == sql.ErrNoRows {
+                utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "User not found"})
+            } else {
+                log.Printf("Error fetching user data: %v", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: err.Error()})
+            }
+            return
+        }
+
+        // Log the fetched values for debugging
+        log.Printf("GetMe: Fetched user ID=%d with DOB=%v, Age=%v", id, dateOfBirth, age)
+
+        // Если email не NULL, присваиваем его
+        if email.Valid {
+            user.Email = email.String
+        }
+
+        // Если роль не NULL, присваиваем роль
+        if role.Valid {
+            user.Role = role.String
+        }
+
+        // Если дата рождения или возраст равны NULL, используем корректные значения
+        var dateOfBirthStr string
+        var ageValue int
+        
+        if dateOfBirth.Valid {
+            dateOfBirthStr = dateOfBirth.String
+        } else {
+            dateOfBirthStr = "" // Ensure empty string is returned rather than null
+        }
+        
+        if age.Valid {
+            ageValue = int(age.Int64)
+        } else {
+            ageValue = 0
+            
+            // Если есть дата рождения, но нет возраста, вычисляем его
+            if dateOfBirth.Valid && dateOfBirth.String != "" {
+                dob, err := time.Parse("2006-01-02", dateOfBirth.String)
+                if err == nil {
+                    now := time.Now()
+                    ageValue = now.Year() - dob.Year()
+                    
+                    // Корректируем возраст, если день рождения еще не был в этом году
+                    if now.Month() < dob.Month() || (now.Month() == dob.Month() && now.Day() < dob.Day()) {
+                        ageValue--
+                    }
+                    
+                    // Обновляем возраст в базе данных, если его пришлось вычислить
+                    _, updateErr := db.Exec("UPDATE users SET age = ? WHERE id = ?", ageValue, id)
+                    if updateErr != nil {
+                        log.Printf("Failed to update age in database: %v", updateErr)
+                    } else {
+                        log.Printf("Updated missing age value to %d for user ID %d", ageValue, id)
+                    }
+                }
+            }
+        }
+
+        // Создаем кастомную карту для ответа
+        userMap := map[string]interface{}{
+            "id":           user.ID,
+            "email":        user.Email,
+            "first_name":   user.FirstName,
+            "last_name":    user.LastName,
+            "role":         user.Role,
+            "age":          ageValue,
+            "date_of_birth": dateOfBirthStr, // Always include date_of_birth, even if empty
+        }
+
+        // Только если avatar_url существует, добавляем его
+        if avatarURL.Valid {
+            userMap["avatar_url"] = avatarURL.String
+        } else {
+            userMap["avatar_url"] = nil
+        }
+
+        // Возвращаем кастомный ответ
+        w.Header().Set("Content-Type", "application/json")
+        json.NewEncoder(w).Encode(userMap)
     }
 }
 func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
@@ -556,7 +707,6 @@ func (c *Controller) GetAllUsers(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, users)
     }
 }
-
 func (c Controller) Logout(w http.ResponseWriter, r *http.Request) {
     // Get token from Authorization header
     authHeader := r.Header.Get("Authorization")
@@ -679,7 +829,6 @@ func (c Controller) EditProfile(db *sql.DB) http.HandlerFunc {
         utils.ResponseJSON(w, map[string]string{"message": "Profile updated successfully."})
     }
 }
-
 func (c Controller) UpdatePassword(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var requestData struct {
@@ -957,7 +1106,6 @@ func (c *Controller) VerifyEmail(db *sql.DB) http.HandlerFunc {
         })
     }
 }
-
 func sendVerificationEmail(email, verificationLink string) {
 	fmt.Println("Verification email sent to", email)
 	fmt.Println("Verification Link:", verificationLink)
@@ -1282,72 +1430,8 @@ func (c Controller) ForgotPassword(db *sql.DB) http.HandlerFunc {
         json.NewEncoder(w).Encode(response)
     }
 }
-func (c *Controller) GetMe(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // Проверяем токен и получаем userID
-        id, err := utils.VerifyToken(r)
-        if err != nil {
-            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
-            return
-        }
 
-        // Запрос к базе для получения данных пользователя
-        var user models.User
-        var email sql.NullString
-        var phone sql.NullString
-        var role sql.NullString
-        var avatarURL sql.NullString
 
-        err = db.QueryRow("SELECT id, first_name, last_name, email, phone, role, avatar_url FROM users WHERE id = ?", id).
-            Scan(&user.ID, &user.FirstName, &user.LastName, &email, &phone, &role, &avatarURL)
-
-        if err != nil {
-            if err == sql.ErrNoRows {
-                utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "User not found"})
-            } else {
-                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: err.Error()})
-            }
-            return
-        }
-
-        // Если email не NULL, присваиваем его
-        if email.Valid {
-            user.Email = email.String
-        }
-
-        // Если phone не NULL, присваиваем его
-        if phone.Valid {
-            user.Phone = phone.String
-        }
-
-        // Если роль не NULL, присваиваем роль
-        if role.Valid {
-            user.Role = role.String
-        }
-
-        // Create a custom map for the response
-        userMap := map[string]interface{}{
-            "id":         user.ID,
-            "email":      user.Email,
-            "phone":      user.Phone,
-            "first_name": user.FirstName,
-            "last_name":  user.LastName,
-            "role":       user.Role,
-            "login":      user.Login,
-        }
-
-        // Only add avatar_url if it's valid
-        if avatarURL.Valid {
-            userMap["avatar_url"] = avatarURL.String
-        } else {
-            userMap["avatar_url"] = nil
-        }
-
-        // Return the custom response
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(userMap)
-    }
-}
 func (c Controller) ConfirmResetPassword(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         var requestData struct {
@@ -1754,5 +1838,21 @@ func generateRandomPassword(length int) string {
     }
     
     return string(password)
+}
+func (c *Controller) CalculateAge(user *models.User) (int, error) {
+    dob, err := time.Parse("2006-01-02", user.DateOfBirth)
+    if err != nil {
+        return 0, err
+    }
+    
+    now := time.Now()
+    age := now.Year() - dob.Year()
+    
+    // Adjust age if birthday hasn't occurred yet this year
+    if now.Month() < dob.Month() || (now.Month() == dob.Month() && now.Day() < dob.Day()) {
+        age--
+    }
+    
+    return age, nil
 }
 
