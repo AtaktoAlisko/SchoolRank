@@ -35,8 +35,8 @@ func ConnectDB() *sql.DB {
 		log.Fatal("Не удалось подключиться к базе данных:", err)
 	}
 
-		log.Println("Подключение к базе данных успешно!")
-		return db
+	log.Println("Подключение к базе данных успешно!")
+	return db
 }
 
 // package driver

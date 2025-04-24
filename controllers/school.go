@@ -15,145 +15,176 @@ import (
 
 type SchoolController struct{}
 
-
 func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // Шаг 1: Проверка токена
-        requesterID, err := utils.VerifyToken(r)
-        if err != nil {
-            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
-            return
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Шаг 1: Проверка токена
+		requesterID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
 
-        // Шаг 2: Получение роли пользователя
-        var requesterRole string
-        err = db.QueryRow("SELECT role FROM users WHERE id = ?", requesterID).Scan(&requesterRole)
-        if err != nil {
-            log.Println("Error fetching user role:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch user role"})
-            return
-        }
+		// Шаг 2: Получение роли пользователя
+		var requesterRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", requesterID).Scan(&requesterRole)
+		if err != nil {
+			log.Println("Error fetching user role:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch user role"})
+			return
+		}
 
-        if requesterRole != "superadmin" {
-            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only superadmins can create schools"})
-            return
-        }
+		if requesterRole != "superadmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only superadmins can create schools"})
+			return
+		}
 
-        // Шаг 3: Разбор формы
-        err = r.ParseMultipartForm(10 << 20) // 10MB
-        if err != nil {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Failed to parse form"})
-            return
-        }
+		// Шаг 3: Разбор формы
+		err = r.ParseMultipartForm(10 << 20) // 10MB
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Failed to parse form"})
+			return
+		}
 
-        var school models.School
-        school.SchoolName = r.FormValue("school_name")
-        school.City = r.FormValue("city")
-        school.SchoolAdminLogin = r.FormValue("school_admin_login")
+		var school models.School
+		school.SchoolName = r.FormValue("school_name")
+		school.City = r.FormValue("city")
+		school.SchoolAdminLogin = r.FormValue("school_admin_login")
 
-        if school.SchoolName == "" || school.City == "" || school.SchoolAdminLogin == "" {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Required fields: school_name, city, school_admin_login"})
-            return
-        }
+		if school.SchoolName == "" || school.City == "" || school.SchoolAdminLogin == "" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Required fields: school_name, city, school_admin_login"})
+			return
+		}
 
-        // Шаг 4: Получение user_id директора по email
-        var schoolAdminID int
-        err = db.QueryRow("SELECT id FROM users WHERE email = ?", school.SchoolAdminLogin).Scan(&schoolAdminID)
-        if err != nil {
-            log.Println("Admin not found:", err)
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School admin not found by provided email"})
-            return
-        }
+		// Шаг 4: Проверка, существует ли уже schooladmin с таким email
+		var schoolAdminID int
+		err = db.QueryRow("SELECT id FROM users WHERE email = ? AND role = 'schooladmin'", school.SchoolAdminLogin).Scan(&schoolAdminID)
+		if err != nil {
+			log.Println("School admin not found:", err)
 
-        // Шаг 5: Загрузка фото, если есть
-        file, _, err := r.FormFile("photo")
-        if err == nil {
-            defer file.Close()
-            uniqueFileName := fmt.Sprintf("school-%d-%d.jpg", requesterID, time.Now().Unix())
-            photoURL, err := utils.UploadFileToS3(file, uniqueFileName, false)
-            if err != nil {
-                log.Println("S3 upload failed:", err)
-                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Photo upload failed"})
-                return
-            }
-            school.PhotoURL = photoURL
-        }
+			// Получение списка всех пользователей с ролью schooladmin
+			rows, err := db.Query("SELECT id, email FROM users WHERE role = 'schooladmin'")
+			if err != nil {
+				log.Println("Error fetching schooladmin users:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch schooladmins"})
+				return
+			}
+			defer rows.Close()
 
-        // Шаг 6: Вставка в таблицу Schools
-        query := `
+			// Формируем список пользователей с ролью "schooladmin"
+			var admins []string
+			for rows.Next() {
+				var adminEmail string
+				if err := rows.Scan(&schoolAdminID, &adminEmail); err != nil {
+					log.Println("Error scanning schooladmin user:", err)
+					utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error scanning schooladmin users"})
+					return
+				}
+				admins = append(admins, adminEmail)
+			}
+
+			// Если список пустой, значит нет schooladmin
+			if len(admins) == 0 {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "No schooladmins found, please create a user with 'schooladmin' role"})
+				return
+			}
+
+			// Вернуть список всех пользователей с ролью schooladmin в формате JSON
+			utils.ResponseJSON(w, map[string]interface{}{
+				"message":               "School admin not found by provided email.",
+				"existing_schooladmins": admins,
+			})
+			return
+		}
+
+		// Шаг 5: Загрузка фото, если есть
+		file, _, err := r.FormFile("photo")
+		if err == nil {
+			defer file.Close()
+			uniqueFileName := fmt.Sprintf("school-%d-%d.jpg", requesterID, time.Now().Unix())
+			photoURL, err := utils.UploadFileToS3(file, uniqueFileName, false)
+			if err != nil {
+				log.Println("S3 upload failed:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Photo upload failed"})
+				return
+			}
+			school.PhotoURL = photoURL
+		}
+
+		// Шаг 6: Вставка в таблицу Schools
+		query := `
            INSERT INTO Schools (school_name, city, school_admin_login, photo_url, created_at, updated_at, user_id)
            VALUES (?, ?, ?, ?, NOW(), NOW(), ?)
         `
-        result, err := db.Exec(query, school.SchoolName, school.City, school.SchoolAdminLogin, school.PhotoURL, schoolAdminID)
-        if err != nil {
-            log.Println("Insert error:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create school"})
-            return
-        }
+		result, err := db.Exec(query, school.SchoolName, school.City, school.SchoolAdminLogin, school.PhotoURL, schoolAdminID)
+		if err != nil {
+			log.Println("Insert error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create school"})
+			return
+		}
 
-        schoolID, _ := result.LastInsertId()
-        school.SchoolID = int(schoolID)
+		schoolID, _ := result.LastInsertId()
+		school.SchoolID = int(schoolID)
 
-        utils.ResponseJSON(w, school)
-    }
+		utils.ResponseJSON(w, school)
+	}
 }
 func (sc SchoolController) UpdateMySchool(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // 1. Проверка токена
-        userID, err := utils.VerifyToken(r)
-        if err != nil {
-            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
-            return
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		// 1. Проверка токена
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
 
-        // 2. Получение роли и email пользователя
-        var role, userEmail string
-        err = db.QueryRow("SELECT role, email FROM users WHERE id = ?", userID).Scan(&role, &userEmail)
-        if err != nil {
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get user info"})
-            return
-        }
+		// 2. Получение роли и email пользователя
+		var role, userEmail string
+		err = db.QueryRow("SELECT role, email FROM users WHERE id = ?", userID).Scan(&role, &userEmail)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get user info"})
+			return
+		}
 
-        // 3. Разрешить только schooladmin для изменения названия школы и города
-        if role != "schooladmin" {
-            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only schooladmin can update school name or city"})
-            return
-        }
+		// 3. Разрешить только schooladmin для изменения названия школы и города
+		if role != "schooladmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only schooladmin can update school name or city"})
+			return
+		}
 
-        // 4. Найти school_id, где school_admin_login совпадает с email пользователя
-        var schoolID int
-        err = db.QueryRow("SELECT school_id FROM Schools WHERE school_admin_login = ?", userEmail).Scan(&schoolID)
-        if err != nil || schoolID == 0 {
-            utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No school assigned to your email"})
-            return
-        }
+		// 4. Найти school_id, где school_admin_login совпадает с email пользователя
+		var schoolID int
+		err = db.QueryRow("SELECT school_id FROM Schools WHERE school_admin_login = ?", userEmail).Scan(&schoolID)
+		if err != nil || schoolID == 0 {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No school assigned to your email"})
+			return
+		}
 
-        // 5. Прочитать JSON из запроса
-        var input struct {
-            SchoolName      string `json:"school_name"`
-            SchoolAddress   string `json:"school_address"`
-            City            string `json:"city"`
-            AboutSchool     string `json:"about_school"`
-            SchoolEmail     string `json:"school_email"`
-            Phone           string `json:"phone"`
-            PhotoURL        string `json:"photo_url"`
-            Specializations string `json:"specializations"` // Добавлено
-        }
+		// 5. Прочитать JSON из запроса
+		var input struct {
+			SchoolName      string `json:"school_name"`
+			SchoolAddress   string `json:"school_address"`
+			City            string `json:"city"`
+			AboutSchool     string `json:"about_school"`
+			SchoolEmail     string `json:"school_email"`
+			Phone           string `json:"phone"`
+			PhotoURL        string `json:"photo_url"`
+			Specializations string `json:"specializations"` // Добавлено
+		}
 
-        err = json.NewDecoder(r.Body).Decode(&input)
-        if err != nil {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid JSON format"})
-            return
-        }
+		err = json.NewDecoder(r.Body).Decode(&input)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid JSON format"})
+			return
+		}
 
-        // Проверка, если роль не schooladmin, то не разрешаем менять school_name или city
-        if role != "schooladmin" {
-            input.SchoolName = "" // Не разрешаем менять название
-            input.City = ""       // Не разрешаем менять город
-        }
+		// Проверка, если роль не schooladmin, то не разрешаем менять school_name или city
+		if role != "schooladmin" {
+			input.SchoolName = "" // Не разрешаем менять название
+			input.City = ""       // Не разрешаем менять город
+		}
 
-        // 6. Обновить школу
-        query := `
+		// 6. Обновить школу
+		query := `
         UPDATE Schools
         SET 
             school_address = ?, 
@@ -165,128 +196,127 @@ func (sc SchoolController) UpdateMySchool(db *sql.DB) http.HandlerFunc {
             updated_at = NOW()
         WHERE school_id = ?
         `
-        
-        
-        // Добавим отладочную информацию
-        fmt.Printf("Executing query: %s\n", query)
-        fmt.Printf("Input values: %v\n", input)
 
-        _, err = db.Exec(query,
-            input.SchoolAddress,
-            input.AboutSchool,
-            input.SchoolEmail,
-            input.Phone,
-            input.PhotoURL,
-            input.Specializations, // Передаем специализации
-            schoolID,
-        )
-        if err != nil {
-            fmt.Printf("Error executing query: %v\n", err) // Дополнительный вывод ошибки
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update school"})
-            return
-        }
+		// Добавим отладочную информацию
+		fmt.Printf("Executing query: %s\n", query)
+		fmt.Printf("Input values: %v\n", input)
 
-        // 7. Успешный ответ
-        utils.ResponseJSON(w, map[string]interface{}{
-            "message":    "School updated successfully",
-            "school_id":  schoolID,
-            "updated_by": userEmail,
-        })
-    }
+		_, err = db.Exec(query,
+			input.SchoolAddress,
+			input.AboutSchool,
+			input.SchoolEmail,
+			input.Phone,
+			input.PhotoURL,
+			input.Specializations, // Передаем специализации
+			schoolID,
+		)
+		if err != nil {
+			fmt.Printf("Error executing query: %v\n", err) // Дополнительный вывод ошибки
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update school"})
+			return
+		}
+
+		// 7. Успешный ответ
+		utils.ResponseJSON(w, map[string]interface{}{
+			"message":    "School updated successfully",
+			"school_id":  schoolID,
+			"updated_by": userEmail,
+		})
+	}
 }
 func (sc SchoolController) DeleteSchool(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // 1. Проверка токена и роли
-        userID, err := utils.VerifyToken(r)
-        if err != nil {
-            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
-            return
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		// 1. Проверка токена и роли
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
 
-        var userRole string
-        err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
-        if err != nil {
-            log.Println("Error fetching user role:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user role"})
-            return
-        }
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil {
+			log.Println("Error fetching user role:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user role"})
+			return
+		}
 
-        if userRole != "superadmin" {
-            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only superadmin can delete a school"})
-            return
-        }
+		if userRole != "superadmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only superadmin can delete a school"})
+			return
+		}
 
-        // ✅ 2. Получаем school_id из path-параметра
-        vars := mux.Vars(r)
-        schoolID := vars["id"]
-        if schoolID == "" {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School ID is required"})
-            return
-        }
+		// ✅ 2. Получаем school_id из path-параметра
+		vars := mux.Vars(r)
+		schoolID := vars["id"]
+		if schoolID == "" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School ID is required"})
+			return
+		}
 
-        // 3. Удаляем школу
-        result, err := db.Exec("DELETE FROM Schools WHERE school_id = ?", schoolID)
-        if err != nil {
-            log.Println("SQL Delete Error:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete school"})
-            return
-        }
+		// 3. Удаляем школу
+		result, err := db.Exec("DELETE FROM Schools WHERE school_id = ?", schoolID)
+		if err != nil {
+			log.Println("SQL Delete Error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete school"})
+			return
+		}
 
-        // 4. Проверка затронутых строк
-        rowsAffected, _ := result.RowsAffected()
-        if rowsAffected == 0 {
-            utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "School not found"})
-            return
-        }
+		// 4. Проверка затронутых строк
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected == 0 {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "School not found"})
+			return
+		}
 
-        // 5. Успешный ответ
-        utils.ResponseJSON(w, map[string]interface{}{
-            "message":    "School deleted successfully",
-            "school_id":  schoolID,
-            "deleted_by": userID,
-        })
-    }
+		// 5. Успешный ответ
+		utils.ResponseJSON(w, map[string]interface{}{
+			"message":    "School deleted successfully",
+			"school_id":  schoolID,
+			"deleted_by": userID,
+		})
+	}
 }
 func (sc SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // 1. Проверяем токен
-        userID, err := utils.VerifyToken(r)
-        if err != nil {
-            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
-            return
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		// 1. Проверяем токен
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
 
-        // 2. Проверка роли
-        var userRole string
-        err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
-        if err != nil {
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user role"})
-            return
-        }
+		// 2. Проверка роли
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user role"})
+			return
+		}
 
-        if userRole != "superadmin" {
-            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only superadmin can update schools"})
-            return
-        }
+		if userRole != "superadmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only superadmin can update schools"})
+			return
+		}
 
-        // ✅ 3. Получаем school_id из path-параметра
-        vars := mux.Vars(r)
-        schoolID := vars["id"]
-        if schoolID == "" {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School ID is required"})
-            return
-        }
+		// ✅ 3. Получаем school_id из path-параметра
+		vars := mux.Vars(r)
+		schoolID := vars["id"]
+		if schoolID == "" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School ID is required"})
+			return
+		}
 
-        // 4. Декодируем JSON из тела запроса в структуру School
-        var school models.School
-        err = json.NewDecoder(r.Body).Decode(&school)
-        if err != nil {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid JSON data"})
-            return
-        }
+		// 4. Декодируем JSON из тела запроса в структуру School
+		var school models.School
+		err = json.NewDecoder(r.Body).Decode(&school)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid JSON data"})
+			return
+		}
 
-        // 5. Обновляем данные о школе в базе данных
-        query := `
+		// 5. Обновляем данные о школе в базе данных
+		query := `
             UPDATE Schools
             SET 
                 school_name = ?, school_address = ?, city = ?, about_school = ?, 
@@ -294,89 +324,81 @@ func (sc SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
                 updated_at = NOW()
             WHERE school_id = ?
         `
-        // Выполнение запроса на обновление
-        _, err = db.Exec(query,
-            school.SchoolName,
-            school.SchoolAddress,
-            school.City,
-            school.AboutSchool,
-            school.PhotoURL,
-            school.SchoolEmail,
-            school.SchoolPhone,
-            school.SchoolAdminLogin,
-            schoolID,
-        )
-        if err != nil {
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update school"})
-            return
-        }
+		// Выполнение запроса на обновление
+		_, err = db.Exec(query,
+			school.SchoolName,
+			school.SchoolAddress,
+			school.City,
+			school.AboutSchool,
+			school.PhotoURL,
+			school.SchoolEmail,
+			school.SchoolPhone,
+			school.SchoolAdminLogin,
+			schoolID,
+		)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update school"})
+			return
+		}
 
-        // Успешный ответ
-        utils.ResponseJSON(w, map[string]interface{}{
-            "message":    "School updated successfully",
-            "school_id":  schoolID,
-            "updated_by": userID,
-        })
-    }
+		// Успешный ответ
+		utils.ResponseJSON(w, map[string]interface{}{
+			"message":    "School updated successfully",
+			"school_id":  schoolID,
+			"updated_by": userID,
+		})
+	}
 }
-
 func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // 1. Выполняем запрос для получения всех школ
-        query := "SELECT school_id, school_name, school_address, city, about_school, photo_url, school_email, school_phone, school_admin_login, created_at, updated_at FROM Schools"
-        rows, err := db.Query(query)
-        if err != nil {
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve schools"})
-            return
-        }
-        defer rows.Close()
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Шаг 1: Выполнение запроса для получения всех школ
+		query := "SELECT school_id, school_name, school_address, city, about_school, photo_url, school_email, school_phone, school_admin_login, created_at, updated_at FROM Schools"
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println("Error fetching schools:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve schools"})
+			return
+		}
+		defer rows.Close()
 
-        // 2. Создаем срез для хранения данных о школах
-        var schools []models.School
+		// Шаг 2: Создание среза для хранения данных о школах
+		var schools []models.School
 
-        // 3. Проходим по результатам запроса и заполняем срез школ
-        for rows.Next() {
-            var school models.School
-            err := rows.Scan(
-                &school.SchoolID,
-                &school.SchoolName,
-                &school.SchoolAddress,
-                &school.City,
-                &school.AboutSchool,
-                &school.PhotoURL,
-                &school.SchoolEmail,
-                &school.SchoolPhone,
-                &school.SchoolAdminLogin,
-                &school.CreatedAt,
-                &school.UpdatedAt,
-            )
-            if err != nil {
-                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error scanning school data"})
-                return
-            }
-            schools = append(schools, school)
-        }
+		// Шаг 3: Прохождение по результатам запроса и заполнение среза
+		for rows.Next() {
+			var school models.School
+			err := rows.Scan(
+				&school.SchoolID,
+				&school.SchoolName,
+				&school.SchoolAddress,
+				&school.City,
+				&school.AboutSchool,
+				&school.PhotoURL,
+				&school.SchoolEmail,
+				&school.SchoolPhone,
+				&school.SchoolAdminLogin,
+				&school.CreatedAt,
+				&school.UpdatedAt,
+			)
+			if err != nil {
+				log.Println("Error scanning school data:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error scanning school data"})
+				return
+			}
+			schools = append(schools, school)
+		}
 
-        // 4. Проверяем на ошибки после завершения перебора строк
-        if err = rows.Err(); err != nil {
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error during iteration"})
-            return
-        }
+		// Шаг 4: Проверка ошибок после завершения итерации
+		if err = rows.Err(); err != nil {
+			log.Println("Error during iteration:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error during iteration"})
+			return
+		}
 
-        // 5. Возвращаем список всех школ в формате JSON
-        utils.ResponseJSON(w, schools)
-    }
+		// Шаг 5: Возвращаем список всех школ в формате JSON
+		utils.ResponseJSON(w, schools)
+	}
 }
-
-
-
-
-
-
-
-
-
-
 
 // func (sc SchoolController) GetSchool(db *sql.DB) http.HandlerFunc {
 //     return func(w http.ResponseWriter, r *http.Request) {
@@ -426,17 +448,6 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 //         utils.ResponseJSON(w, school)
 //     }
 // }
-
-
-
-
-
-
-
-
-
-
-
 
 // func (sc SchoolController) GetSchools(db *sql.DB) http.HandlerFunc {
 //     return func(w http.ResponseWriter, r *http.Request) {
@@ -549,7 +560,7 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 // 		totalScore := score.FirstSubjectScore + score.SecondSubjectScore + score.HistoryKazakhstan + score.MathematicalLiteracy + score.ReadingLiteracy
 // 		score.TotalScore = totalScore
 
-// 		query := `INSERT INTO UNT_Score (year, unt_type_id, student_id, first_subject_score, second_subject_score, history_of_kazakhstan, mathematical_literacy, reading_literacy, score) 
+// 		query := `INSERT INTO UNT_Score (year, unt_type_id, student_id, first_subject_score, second_subject_score, history_of_kazakhstan, mathematical_literacy, reading_literacy, score)
 // 				VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`
 // 		_, err := db.Exec(query, score.Year, score.UNTTypeID, score.StudentID, score.FirstSubjectScore, score.SecondSubjectScore, score.HistoryKazakhstan, score.MathematicalLiteracy, score.ReadingLiteracy, score.TotalScore)
 // 		if err != nil {
@@ -659,8 +670,8 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 //         // 3. Get reviews score (e.g., average of reviews from a `reviews` table)
 //         var averageReviewScore float64
 //         err = db.QueryRow(`
-//             SELECT AVG(review_score) 
-//             FROM reviews 
+//             SELECT AVG(review_score)
+//             FROM reviews
 //             WHERE school_id = ?
 //         `, schoolID).Scan(&averageReviewScore)
 //         if err != nil {
@@ -672,7 +683,7 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 //         // 4. Get olympiad participation score
 //         var olympiadScore int
 //         err = db.QueryRow(`
-//             SELECT SUM(olympiad_points) 
+//             SELECT SUM(olympiad_points)
 //             FROM olympiad_results
 //             WHERE school_id = ?
 //         `, schoolID).Scan(&olympiadScore)
@@ -695,15 +706,3 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 //         })
 //     }
 // }
-
-
-
-
-
-
-
-
-
-
-
-
