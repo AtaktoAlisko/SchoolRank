@@ -55,7 +55,7 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Шаг 4: Проверка, существует ли уже schooladmin с таким email
+		// Шаг 4: Проверка, существует ли уже школа для этого admin
 		var schoolAdminID int
 		err = db.QueryRow("SELECT id FROM users WHERE email = ? AND role = 'schooladmin'", school.SchoolAdminLogin).Scan(&schoolAdminID)
 		if err != nil {
@@ -93,6 +93,20 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 				"message":               "School admin not found by provided email.",
 				"existing_schooladmins": admins,
 			})
+			return
+		}
+
+		// Проверяем, есть ли уже школа для этого admin
+		var existingSchoolID int
+		err = db.QueryRow("SELECT school_id FROM Schools WHERE school_admin_login = ?", school.SchoolAdminLogin).Scan(&existingSchoolID)
+		if err == nil {
+			// Если уже есть школа, не добавляем новую
+			log.Println("Admin already has a school, not adding a new one.")
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Admin already has a school."})
+			return
+		} else if err != sql.ErrNoRows {
+			log.Println("Error checking for existing school:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking for existing school"})
 			return
 		}
 
@@ -321,7 +335,7 @@ func (sc SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
             SET 
                 school_name = ?, school_address = ?, city = ?, about_school = ?, 
                 photo_url = ?, school_email = ?, school_phone = ?, school_admin_login = ?, 
-                updated_at = NOW()
+                specializations = ?, updated_at = NOW()
             WHERE school_id = ?
         `
 		// Выполнение запроса на обновление
@@ -334,6 +348,7 @@ func (sc SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 			school.SchoolEmail,
 			school.SchoolPhone,
 			school.SchoolAdminLogin,
+			school.Specializations, // Передаем specializations как строку
 			schoolID,
 		)
 		if err != nil {
@@ -349,10 +364,11 @@ func (sc SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 		})
 	}
 }
+
 func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Шаг 1: Выполнение запроса для получения всех школ
-		query := "SELECT school_id, school_name, school_address, city, about_school, photo_url, school_email, school_phone, school_admin_login, created_at, updated_at FROM Schools"
+		query := "SELECT school_id, school_name, school_address, city, about_school, school_email, school_phone FROM Schools"
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Println("Error fetching schools:", err)
@@ -367,24 +383,59 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 		// Шаг 3: Прохождение по результатам запроса и заполнение среза
 		for rows.Next() {
 			var school models.School
+			var city sql.NullString          // Используем sql.NullString для обработки возможного NULL в поле city
+			var schoolAddress sql.NullString // Для адреса
+			var aboutSchool sql.NullString   // Для описания школы
+			var schoolEmail sql.NullString   // Для email
+			var schoolPhone sql.NullString   // Для телефона
+
 			err := rows.Scan(
 				&school.SchoolID,
 				&school.SchoolName,
-				&school.SchoolAddress,
-				&school.City,
-				&school.AboutSchool,
-				&school.PhotoURL,
-				&school.SchoolEmail,
-				&school.SchoolPhone,
-				&school.SchoolAdminLogin,
-				&school.CreatedAt,
-				&school.UpdatedAt,
+				&schoolAddress, // sql.NullString
+				&city,          // sql.NullString
+				&aboutSchool,   // sql.NullString
+				&schoolEmail,   // sql.NullString
+				&schoolPhone,   // sql.NullString
 			)
 			if err != nil {
 				log.Println("Error scanning school data:", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error scanning school data"})
 				return
 			}
+
+			// Присваиваем значения из sql.NullString в обычные строки, если значение существует
+			if city.Valid {
+				school.City = city.String
+			} else {
+				school.City = "" // Если NULL, присваиваем пустую строку
+			}
+
+			if schoolAddress.Valid {
+				school.SchoolAddress = schoolAddress.String
+			} else {
+				school.SchoolAddress = "" // Если NULL, присваиваем пустую строку
+			}
+
+			if aboutSchool.Valid {
+				school.AboutSchool = aboutSchool.String
+			} else {
+				school.AboutSchool = "" // Если NULL, присваиваем пустую строку
+			}
+
+			if schoolEmail.Valid {
+				school.SchoolEmail = schoolEmail.String
+			} else {
+				school.SchoolEmail = "" // Если NULL, присваиваем пустую строку
+			}
+
+			if schoolPhone.Valid {
+				school.SchoolPhone = schoolPhone.String
+			} else {
+				school.SchoolPhone = "" // Если NULL, присваиваем пустую строку
+			}
+
+			// Добавляем школу в срез
 			schools = append(schools, school)
 		}
 
