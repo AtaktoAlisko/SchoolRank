@@ -367,8 +367,8 @@ func (sc SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 
 func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Шаг 1: Выполнение запроса для получения всех школ
-		query := "SELECT school_id, school_name, school_address, city, about_school, school_email, school_phone FROM Schools"
+		// Шаг 1: Выполнение запроса для получения всех школ, включая поле school_admin_login
+		query := "SELECT school_id, school_name, school_address, city, about_school, school_email, school_phone, school_admin_login FROM Schools"
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Println("Error fetching schools:", err)
@@ -383,20 +383,22 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 		// Шаг 3: Прохождение по результатам запроса и заполнение среза
 		for rows.Next() {
 			var school models.School
-			var city sql.NullString          // Используем sql.NullString для обработки возможного NULL в поле city
-			var schoolAddress sql.NullString // Для адреса
-			var aboutSchool sql.NullString   // Для описания школы
-			var schoolEmail sql.NullString   // Для email
-			var schoolPhone sql.NullString   // Для телефона
+			var city sql.NullString             // Используем sql.NullString для обработки возможного NULL в поле city
+			var schoolAddress sql.NullString    // Для адреса
+			var aboutSchool sql.NullString      // Для описания школы
+			var schoolEmail sql.NullString      // Для email
+			var schoolPhone sql.NullString      // Для телефона
+			var schoolAdminLogin sql.NullString // Для логина администратора
 
 			err := rows.Scan(
 				&school.SchoolID,
 				&school.SchoolName,
-				&schoolAddress, // sql.NullString
-				&city,          // sql.NullString
-				&aboutSchool,   // sql.NullString
-				&schoolEmail,   // sql.NullString
-				&schoolPhone,   // sql.NullString
+				&schoolAddress,    // sql.NullString
+				&city,             // sql.NullString
+				&aboutSchool,      // sql.NullString
+				&schoolEmail,      // sql.NullString
+				&schoolPhone,      // sql.NullString
+				&schoolAdminLogin, // sql.NullString
 			)
 			if err != nil {
 				log.Println("Error scanning school data:", err)
@@ -433,6 +435,12 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 				school.SchoolPhone = schoolPhone.String
 			} else {
 				school.SchoolPhone = "" // Если NULL, присваиваем пустую строку
+			}
+
+			if schoolAdminLogin.Valid {
+				school.SchoolAdminLogin = schoolAdminLogin.String
+			} else {
+				school.SchoolAdminLogin = "" // Если NULL, присваиваем пустую строку
 			}
 
 			// Добавляем школу в срез
