@@ -50,6 +50,13 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 		school.City = r.FormValue("city")
 		school.SchoolAdminLogin = r.FormValue("school_admin_login")
 
+		// Заполняем остальные поля по умолчанию, если они не переданы
+		school.SchoolAddress = r.FormValue("school_address")
+		school.AboutSchool = r.FormValue("about_school")
+		school.SchoolEmail = r.FormValue("school_email")
+		school.SchoolPhone = r.FormValue("school_phone")
+		school.Specializations = r.FormValue("specializations")
+
 		if school.SchoolName == "" || school.City == "" || school.SchoolAdminLogin == "" {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Required fields: school_name, city, school_admin_login"})
 			return
@@ -126,10 +133,10 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 
 		// Шаг 6: Вставка в таблицу Schools
 		query := `
-           INSERT INTO Schools (school_name, city, school_admin_login, photo_url, created_at, updated_at, user_id)
-           VALUES (?, ?, ?, ?, NOW(), NOW(), ?)
+           INSERT INTO Schools (school_name, school_address, city, about_school, photo_url, school_email, school_phone, school_admin_login, specializations, created_at, updated_at, user_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?)
         `
-		result, err := db.Exec(query, school.SchoolName, school.City, school.SchoolAdminLogin, school.PhotoURL, schoolAdminID)
+		result, err := db.Exec(query, school.SchoolName, school.SchoolAddress, school.City, school.AboutSchool, school.PhotoURL, school.SchoolEmail, school.SchoolPhone, school.SchoolAdminLogin, school.Specializations, schoolAdminID)
 		if err != nil {
 			log.Println("Insert error:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create school"})
@@ -142,6 +149,7 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, school)
 	}
 }
+
 func (sc SchoolController) UpdateMySchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// 1. Проверка токена
