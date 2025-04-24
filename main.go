@@ -22,9 +22,9 @@ var db *sql.DB
 func main() {
 	// Загрузка переменных из .env
 	err := godotenv.Load()
-    if err != nil {
-        log.Fatal("Ошибка загрузки .env файла")
-    }
+	if err != nil {
+		log.Fatal("Ошибка загрузки .env файла")
+	}
 	db := driver.ConnectDB()
 	defer db.Close()
 	// Получаем переменные из окружения
@@ -60,7 +60,6 @@ func main() {
 	db = driver.ConnectDB()
 	defer db.Close()
 
-
 	controller := controllers.Controller{}
 	schoolController := controllers.SchoolController{}
 	untScoreController := controllers.UNTScoreController{}
@@ -74,14 +73,12 @@ func main() {
 	TotalOlympiadRatingController := controllers.TotalOlympiadRatingController{}
 	contactController := &controllers.ContactUsController{}
 
-
 	router := mux.NewRouter()
 
-
 	// =======================
-    // Аутентификация и авторизация
-    // =======================
-    router.HandleFunc("/api/auth/signup", controller.Signup(db)).Methods("POST")
+	// Аутентификация и авторизация
+	// =======================
+	router.HandleFunc("/api/auth/signup", controller.Signup(db)).Methods("POST")
 	router.HandleFunc("/api/auth/login", controller.Login(db)).Methods("POST")
 	router.HandleFunc("/api/auth/logout", controller.Logout).Methods("POST")
 	router.HandleFunc("/api/auth/password/forgot", controller.ForgotPassword(db)).Methods("POST")
@@ -90,10 +87,9 @@ func main() {
 	router.HandleFunc("/api/auth/password/update", controller.TokenVerifyMiddleware(controller.UpdatePassword(db))).Methods("PUT")
 	router.HandleFunc("/api/auth/email/verify", controller.VerifyEmail(db)).Methods("POST")
 
-
 	// =======================
-    // Профиль пользователя и аватар
-    // =======================
+	// Профиль пользователя и аватар
+	// =======================
 	router.HandleFunc("/api/users/me", controller.GetMe(db)).Methods("GET")
 	router.HandleFunc("/api/users", controller.GetAllUsers(db)).Methods("GET")
 	router.HandleFunc("/api/users", controller.CreateUser(db)).Methods("POST")
@@ -104,22 +100,23 @@ func main() {
 	router.HandleFunc("/api/users/me/avatar", controller.DeleteAvatar(db)).Methods("DELETE")
 	router.HandleFunc("/api/users/delete-account/{user_id}", controller.DeleteAccount(db)).Methods("DELETE")
 
+	router.HandleFunc("/api/users/schooladmins", controller.GetAllSchoolAdmins(db)).Methods("GET")
+	router.HandleFunc("/api/users/superadmins", controller.GetAllSuperAdmins(db)).Methods("GET")
+	router.HandleFunc("/api/users/schooladmins/no-school", controller.GetSchoolAdminsWithoutSchools(db)).Methods("GET")
 
 	// =======================
-    // Административные операции
-    // =======================
+	// Административные операции
+	// =======================
 	router.HandleFunc("/api/admin/change-role", controller.ChangeUserRole(db)).Methods("POST")
 
-
 	// =======================
-    // Проверка токена
-    // =======================
+	// Проверка токена
+	// =======================
 	router.HandleFunc("/api/protected", controller.TokenVerifyMiddleware(controller.ProtectedEndpoint())).Methods("GET")
 
-
 	// =======================
-    // Работа со школами
-    // =======================
+	// Работа со школами
+	// =======================
 
 	//superadmin
 	router.HandleFunc("/api/schools", schoolController.CreateSchool(db)).Methods("POST")
@@ -127,85 +124,71 @@ func main() {
 	router.HandleFunc("/api/schools/{id}", schoolController.UpdateSchool(db)).Methods("PUT")
 	router.HandleFunc("/api/schools/{id}", schoolController.DeleteSchool(db)).Methods("DELETE")
 	router.HandleFunc("/api/schools", schoolController.GetAllSchools(db)).Methods("GET")
-	
 
-
-    //scholadmin
+	//scholadmin
 	router.HandleFunc("/api/school/update", schoolController.UpdateMySchool(db)).Methods("PUT")
-
-
-	
-				
 
 	// router.HandleFunc("/api/schools", schoolController.GetSchools(db)).Methods("GET")
 	// router.HandleFunc("/api/schools/{school_id}/director", schoolController.GetSchoolForDirector(db)).Methods("GET")
 	// router.HandleFunc("/api/schools/{school_id}", schoolController.DeleteSchool(db)).Methods("DELETE")
 
-
 	// =======================
-    // Работа с отзывами (Reviews)
-    // =======================
+	// Работа с отзывами (Reviews)
+	// =======================
 	router.HandleFunc("/api/reviews", reviewController.CreateReview(db)).Methods("POST")
 	router.HandleFunc("/api/schools/{school_id}/reviews", reviewController.GetReviewsBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/reviews/average-rating", reviewController.GetAverageRating(db)).Methods("GET")
 
-
 	// =======================
-    // Работа с UNT Scores (оценками)
-    // =======================
+	// Работа с UNT Scores (оценками)
+	// =======================
 	router.HandleFunc("/api/unt_scores/total-score-school", untScoreController.GetTotalScoreForSchool(db)).Methods("GET")
-    router.HandleFunc("/api/average-rating/{school_id}", untScoreController.GetAverageRatingBySchool(db)).Methods("GET")
+	router.HandleFunc("/api/average-rating/{school_id}", untScoreController.GetAverageRatingBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/school/combined-average-rating", untScoreController.GetCombinedAverageRating(db)).Methods("GET")
 
-
 	// =======================
-    // Работа с типами UNT (например, для классификации)
-    // =======================
+	// Работа с типами UNT (например, для классификации)
+	// =======================
 	router.HandleFunc("/api/unt-types", untTypeController.CreateUNTType(db)).Methods("POST")
 	router.HandleFunc("/api/schools/{school_id}/unt-types", typeController.GetUNTTypesBySchool(db)).Methods("GET")
 
-
 	// =======================
-    // Работа со студентами
-    // =======================
-    router.HandleFunc("/api/students", studentController.CreateStudent(db)).Methods("POST")
-    router.HandleFunc("/api/students", studentController.GetStudents(db)).Methods("GET")
-	router.HandleFunc("/api/students/{student_id}", studentController.UpdateStudent(db)).Methods("PUT") //Нужно испроавить id гылп
+	// Работа со студентами
+	// =======================
+	router.HandleFunc("/api/students", studentController.CreateStudent(db)).Methods("POST")
+	router.HandleFunc("/api/students", studentController.GetStudents(db)).Methods("GET")
+	router.HandleFunc("/api/students/{student_id}", studentController.UpdateStudent(db)).Methods("PUT")    //Нужно испроавить id гылп
 	router.HandleFunc("/api/students/{student_id}", studentController.DeleteStudent(db)).Methods("DELETE") //Тоже нужно исправить
 	router.HandleFunc("/api/schools/{school_id}/students", studentController.GetStudentsBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/students/{grade}", studentController.GetStudentsBySchoolAndGrade(db)).Methods("GET")
 	router.HandleFunc("/api/students/grade/{grade}/letter/{letter}", studentController.GetStudentsByGradeAndLetter(db)).Methods("GET")
 	// Роут для получения данных о студенте
-    router.HandleFunc("/api/schools/{school_id}/students/{student_id}", studentController.GetStudentData(db)).Methods("GET")
-
-
+	router.HandleFunc("/api/schools/{school_id}/students/{student_id}", studentController.GetStudentData(db)).Methods("GET")
 
 	// =======================
-    // Работа с First Types
-    // =======================
+	// Работа с First Types
+	// =======================
 	router.HandleFunc("/api/first-types", typeController.CreateFirstType(db)).Methods("POST")
 	router.HandleFunc("/api/first_types", typeController.GetFirstTypes(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/first-types", typeController.GetFirstTypesBySchool(db)).Methods("GET")
-    router.HandleFunc("/api/schools/{school_id}/first-types/average-rating", typeController.GetAverageRatingBySchool(db)).Methods("GET")
-	
+	router.HandleFunc("/api/schools/{school_id}/first-types/average-rating", typeController.GetAverageRatingBySchool(db)).Methods("GET")
 
 	// =======================
-    // Работа с Second Types
-    // =======================
+	// Работа с Second Types
+	// =======================
 	router.HandleFunc("/api/second-types", typeController.GetSecondTypes(db)).Methods("GET")
 	router.HandleFunc("/api/second-types", typeController.CreateSecondType(db)).Methods("POST")
 	router.HandleFunc("/api/schools/{school_id}/second-types", typeController.GetSecondTypesBySchool(db)).Methods("GET")
-    router.HandleFunc("/api/schools/{school_id}/second-types/average-rating", typeController.GetAverageRatingSecondBySchool(db)).Methods("GET")
-    router.HandleFunc("/api/{school_id}/combined-average-rating", untScoreController.GetCombinedAverageRating(db)).Methods("GET")
-
+	router.HandleFunc("/api/schools/{school_id}/second-types/average-rating", typeController.GetAverageRatingSecondBySchool(db)).Methods("GET")
+	router.HandleFunc("/api/{school_id}/combined-average-rating", untScoreController.GetCombinedAverageRating(db)).Methods("GET")
 
 	// =======================
-    // Олимпиады: городские, областные, республиканские
-    // =======================
+	// Олимпиады: городские, областные, республиканские
+	// =======================
 	router.HandleFunc("/api/city-olympiads", cityOlympiadController.CreateCityOlympiad(db)).Methods("POST")
 	router.HandleFunc("/api/city_olympiad", cityOlympiadController.GetCityOlympiad(db)).Methods("GET")
 	router.HandleFunc("/api/city-olympiads/average-rating", cityOlympiadController.GetAverageCityOlympiadScore(db)).Methods("GET")
-    router.HandleFunc("/api/city-olympiads/{olympiad_id}", cityOlympiadController.DeleteCityOlympiad(db)).Methods("DELETE") //Нужно исправить по id
+	router.HandleFunc("/api/city-olympiads/{olympiad_id}", cityOlympiadController.DeleteCityOlympiad(db)).Methods("DELETE") //Нужно исправить по id
 
 	router.HandleFunc("/api/regional-olympiads", regionalOlympiadController.CreateRegionalOlympiad(db)).Methods("POST")
 	router.HandleFunc("/api/regional_olympiad", regionalOlympiadController.GetRegionalOlympiad(db)).Methods("GET")
@@ -217,38 +200,35 @@ func main() {
 	router.HandleFunc("/api/republican-olympiads/average-rating", republicanOlympiadController.GetAverageRepublicanOlympiadScore(db)).Methods("GET")
 	router.HandleFunc("/api/republican-olympiads/{olympiad_id}", republicanOlympiadController.DeleteRepublicanOlympiad(db)).Methods("DELETE") //Нужно исправить по id
 
-
-    // =======================
+	// =======================
 	// Итоговый рейтинг по олимппиадам
 	// =======================
 	router.HandleFunc("/api/olympiads/total-rating", TotalOlympiadRatingController.GetTotalOlympiadRating(db)).Methods("GET")
-	
 
-    // =======================
-    // Контактная информация
-    // =======================
+	// =======================
+	// Контактная информация
+	// =======================
 	router.HandleFunc("/api/contact", contactController.CreateContactRequest(db)).Methods("POST")
 
-// Включаем CORS
-handler := corsMiddleware(router)
+	// Включаем CORS
+	handler := corsMiddleware(router)
 
-// Запуск сервера
-log.Println("Сервер запущен на порту 8000")
-log.Fatal(http.ListenAndServe("0.0.0.0:8000", handler))
+	// Запуск сервера
+	log.Println("Сервер запущен на порту 8000")
+	log.Fatal(http.ListenAndServe("0.0.0.0:8000", handler))
 }
 
-
 func corsMiddleware(next http.Handler) http.Handler {
-return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 
-	next.ServeHTTP(w, r)
-})
+		next.ServeHTTP(w, r)
+	})
 }
