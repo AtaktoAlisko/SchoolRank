@@ -595,6 +595,7 @@ func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
 		var phone sql.NullString
 		var role string
 		var verified bool
+		var userFound bool = false
 
 		// Check that email, phone, or login are provided
 		if user.Email != "" {
@@ -612,32 +613,92 @@ func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Try to find the user
+		// Try to find the user in users table
 		row := db.QueryRow(query, identifier)
 		err = row.Scan(&user.ID, &email, &phone, &hashedPassword, &user.FirstName, &user.LastName, &user.Age, &role, &verified)
 
-		// If user is not found, check students table
+		// If user is not found in users table, check students table
 		if err == sql.ErrNoRows {
+			// Prepare query for Student table based on identifier type
+			var studentQuery string
+			if user.Email != "" {
+				studentQuery = "SELECT student_id, email, phone, password, first_name, last_name, grade, role FROM Student WHERE email = ?"
+			} else if user.Phone != "" {
+				studentQuery = "SELECT student_id, email, phone, password, first_name, last_name, grade, role FROM Student WHERE phone = ?"
+			} else if user.Login != "" {
+				studentQuery = "SELECT student_id, email, phone, password, first_name, last_name, grade, role FROM Student WHERE login = ?"
+			}
+
+			var studentGrade int
+			var studentID int
+			var studentEmail, studentPhone, studentPassword, studentFirstName, studentLastName, studentRole string
+
+			// Execute query on Student table
+			studentRow := db.QueryRow(studentQuery, identifier)
+			err = studentRow.Scan(&studentID, &studentEmail, &studentPhone, &studentPassword, &studentFirstName, &studentLastName, &studentGrade, &studentRole)
+
+			if err == nil {
+				// Student found
+				userFound = true
+				user.ID = studentID
+				email = sql.NullString{String: studentEmail, Valid: studentEmail != ""}
+				phone = sql.NullString{String: studentPhone, Valid: studentPhone != ""}
+				hashedPassword = studentPassword // For students, password may not be hashed
+				user.FirstName = studentFirstName
+				user.LastName = studentLastName
+				user.Age = 0 // Age might not be available for students, using grade instead
+				role = studentRole
+				verified = true // Students are considered verified by default
+
+				// Get additional student information that might be needed
+				var schoolID int
+				var letter string
+				db.QueryRow("SELECT school_id, letter FROM Student WHERE student_id = ?", studentID).Scan(&schoolID, &letter)
+				// These could be used in token generation or response
+			}
+		} else if err == nil {
+			// User found in users table
+			userFound = true
+		}
+
+		if !userFound {
 			error.Message = "User not found."
 			utils.RespondWithError(w, http.StatusNotFound, error)
 			return
 		}
 
-		// Check if the user is verified
-		// Check if the user is verified (но только если это обычный пользователь)
+		// Check if the user is verified (but only if it's a regular user)
 		if !verified && role == "user" {
 			error.Message = "Email not verified. Please verify your email before logging in."
 			utils.RespondWithError(w, http.StatusForbidden, error)
 			return
 		}
 
-		// Check password for non-students
-		err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(user.Password))
-		if err != nil {
+		// For students, we might store passwords in plaintext, so check differently
+		var passwordValid bool = false
+		if role == "student" {
+			// Direct comparison for students
+			passwordValid = (hashedPassword == user.Password)
+		} else {
+			// Bcrypt comparison for regular users
+			err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(user.Password))
+			passwordValid = (err == nil)
+		}
+
+		if !passwordValid {
 			error.Message = "Invalid password."
 			utils.RespondWithError(w, http.StatusUnauthorized, error)
 			return
 		}
+
+		// Set user properties before token generation
+		if email.Valid {
+			user.Email = email.String
+		}
+		if phone.Valid {
+			user.Phone = phone.String
+		}
+		user.Role = role
 
 		// Generate access token
 		accessToken, err := utils.GenerateToken(user)
@@ -655,11 +716,30 @@ func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Send tokens in response
-		utils.ResponseJSON(w, map[string]string{
+		// Prepare response
+		response := map[string]interface{}{
 			"token":         accessToken,
 			"refresh_token": refreshToken,
-		})
+			"user_id":       user.ID,
+			"role":          role,
+			"first_name":    user.FirstName,
+			"last_name":     user.LastName,
+		}
+
+		// Include extra info for students
+		if role == "student" {
+			var grade int
+			var letter string
+			var schoolID int
+			db.QueryRow("SELECT grade, letter, school_id FROM Student WHERE student_id = ?", user.ID).Scan(&grade, &letter, &schoolID)
+
+			response["grade"] = grade
+			response["letter"] = letter
+			response["school_id"] = schoolID
+		}
+
+		// Send tokens in response
+		utils.ResponseJSON(w, response)
 	}
 }
 func (c *Controller) GetAllUsers(db *sql.DB) http.HandlerFunc {
