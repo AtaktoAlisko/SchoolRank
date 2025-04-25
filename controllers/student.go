@@ -25,50 +25,61 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Step 2: Get user role and school ID
+		// Step 2: Get user role
 		var userRole string
-		var userSchoolID sql.NullInt64
-		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
 		if err != nil {
-			log.Println("Error fetching user role and school ID:", err)
+			log.Println("Error fetching user role:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
 			return
 		}
 
-		// Step 3: Ensure the user is a schooladmin and has a school assigned
+		// Step 3: Ensure the user is a schooladmin
 		if userRole != "schooladmin" {
 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create a student"})
 			return
 		}
 
-		if !userSchoolID.Valid {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Director does not have an assigned school"})
+		// Step 4: Get the school ID from the Schools table using the user's email
+		var userEmail string
+		err = db.QueryRow("SELECT email FROM users WHERE id = ?", userID).Scan(&userEmail)
+		if err != nil {
+			log.Println("Error fetching user email:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user email"})
 			return
 		}
 
-		// Step 4: Decode the student data from the request
+		var schoolID int
+		err = db.QueryRow("SELECT school_id FROM Schools WHERE school_admin_login = ?", userEmail).Scan(&schoolID)
+		if err != nil {
+			log.Println("Error fetching school ID:", err)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Director does not have an assigned school. Please create a school first."})
+			return
+		}
+
+		// Step 5: Decode the student data from the request
 		var student models.Student
 		if err := json.NewDecoder(r.Body).Decode(&student); err != nil {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
 			return
 		}
 
-		// Step 5: Set the school ID based on director's user
-		student.SchoolID = int(userSchoolID.Int64)
+		// Step 6: Set the school ID based on director's school
+		student.SchoolID = schoolID
 
-		// Step 6: Generate login and email for the student
+		// Step 7: Generate login and email for the student
 		randomString := generateRandomString(4)
 		student.Login = student.FirstName + student.LastName + randomString
 		student.Email = student.Login + "@school.com"
 
-		// Step 7: Generate the student's password
+		// Step 8: Generate the student's password
 		student.Password = student.FirstName + student.LastName
 
-		// Step 8: Set role to student
+		// Step 9: Set role to student
 		student.Role = "student"
 
-		// Step 9: Insert the student into the database
-		query := `INSERT INTO Student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, password, role, login) 
+		// Step 10: Insert the student into the database
+		query := `INSERT INTO Student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, password, role, login)
 		          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 		result, err := db.Exec(query, student.FirstName, student.LastName, student.Patronymic, student.IIN, student.SchoolID, student.DateOfBirth, student.Grade, student.Letter, student.Gender, student.Phone, student.Email, student.Password, student.Role, student.Login)
@@ -90,7 +101,85 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, student)
 	}
 }
+func (sc StudentController) CreateStudentAsSuperadmin(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify the user's token and get userID
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
 
+		// Step 2: Get user role and verify superadmin status
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil {
+			log.Println("Error fetching user role:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
+
+		// Step 3: Ensure the user is a superadmin
+		if userRole != "superadmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only superadmins can access this endpoint"})
+			return
+		}
+
+		// Step 4: Decode the student data from the request
+		var student models.Student
+		if err := json.NewDecoder(r.Body).Decode(&student); err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
+			return
+		}
+
+		// Step 5: Validate that the specified school exists
+		var schoolExists bool
+		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM Schools WHERE school_id = ?)", student.SchoolID).Scan(&schoolExists)
+		if err != nil {
+			log.Println("Error checking if school exists:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking if school exists"})
+			return
+		}
+
+		if !schoolExists {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "The specified school does not exist"})
+			return
+		}
+
+		// Step 6: Generate login and email for the student
+		randomString := generateRandomString(4)
+		student.Login = student.FirstName + student.LastName + randomString
+		student.Email = student.Login + "@school.com"
+
+		// Step 7: Generate the student's password
+		student.Password = student.FirstName + student.LastName
+
+		// Step 8: Set role to student
+		student.Role = "student"
+
+		// Step 9: Insert the student into the database
+		query := `INSERT INTO Student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, password, role, login)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+		result, err := db.Exec(query, student.FirstName, student.LastName, student.Patronymic, student.IIN, student.SchoolID, student.DateOfBirth, student.Grade, student.Letter, student.Gender, student.Phone, student.Email, student.Password, student.Role, student.Login)
+		if err != nil {
+			log.Println("Error inserting student:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create student"})
+			return
+		}
+
+		studentID, err := result.LastInsertId()
+		if err != nil {
+			log.Println("Error retrieving student ID:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve student ID"})
+			return
+		}
+
+		student.ID = int(studentID)
+
+		utils.ResponseJSON(w, student)
+	}
+}
 func generateRandomString(n int) string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	// generateRandomString generates a random string of length n
@@ -276,338 +365,527 @@ func (sc StudentController) GetStudentsBySchool(db *sql.DB) http.HandlerFunc {
 	}
 }
 func (sc StudentController) GetStudentsBySchoolAndGrade(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // Извлекаем параметры school_id и grade из URL
-        vars := mux.Vars(r)
-        schoolIDParam := vars["school_id"]
-        gradeParam := vars["grade"]
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Извлекаем параметры school_id и grade из URL
+		vars := mux.Vars(r)
+		schoolIDParam := vars["school_id"]
+		gradeParam := vars["grade"]
 
-        // Преобразуем параметры в нужные типы
-        schoolID, err := strconv.Atoi(schoolIDParam)
-        if err != nil {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
-            return
-        }
+		// Преобразуем параметры в нужные типы
+		schoolID, err := strconv.Atoi(schoolIDParam)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+			return
+		}
 
-        grade, err := strconv.Atoi(gradeParam)
-        if err != nil {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade"})
-            return
-        }
+		grade, err := strconv.Atoi(gradeParam)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade"})
+			return
+		}
 
-        // Шаг 1: Запрос к базе данных для получения студентов по school_id и grade
-        rows, err := db.Query("SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email FROM Student WHERE school_id = ? AND grade = ?", schoolID, grade)
-        if err != nil {
-            log.Println("SQL Error:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get students"})
-            return
-        }
-        defer rows.Close()
+		// Шаг 1: Запрос к базе данных для получения студентов по school_id и grade
+		rows, err := db.Query("SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email FROM Student WHERE school_id = ? AND grade = ?", schoolID, grade)
+		if err != nil {
+			log.Println("SQL Error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get students"})
+			return
+		}
+		defer rows.Close()
 
-        // Шаг 2: Создаем срез для хранения студентов
-        var students []models.Student
-        for rows.Next() {
-            var student models.Student
+		// Шаг 2: Создаем срез для хранения студентов
+		var students []models.Student
+		for rows.Next() {
+			var student models.Student
 
-            // Шаг 3: Обработка возможных NULL значений с помощью sql.Null типов
-            var firstName, lastName, patronymic, iin, letter, gender, phone, email sql.NullString
-            var schoolID sql.NullInt64
-            var dateOfBirth sql.NullString
-            var grade sql.NullInt64
+			// Шаг 3: Обработка возможных NULL значений с помощью sql.Null типов
+			var firstName, lastName, patronymic, iin, letter, gender, phone, email sql.NullString
+			var schoolID sql.NullInt64
+			var dateOfBirth sql.NullString
+			var grade sql.NullInt64
 
-            // Шаг 4: Сканирование строки в объект student
-            if err := rows.Scan(&student.ID, &firstName, &lastName, &patronymic, &iin, &schoolID, &dateOfBirth, &grade, &letter, &gender, &phone, &email); err != nil {
-                log.Println("Scan Error:", err)
-                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse students"})
-                return
-            }
+			// Шаг 4: Сканирование строки в объект student
+			if err := rows.Scan(&student.ID, &firstName, &lastName, &patronymic, &iin, &schoolID, &dateOfBirth, &grade, &letter, &gender, &phone, &email); err != nil {
+				log.Println("Scan Error:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse students"})
+				return
+			}
 
-            // Шаг 5: Присваиваем значения студенту, проверяя на NULL
-            if firstName.Valid {
-                student.FirstName = firstName.String
-            }
-            if lastName.Valid {
-                student.LastName = lastName.String
-            }
-            if patronymic.Valid {
-                student.Patronymic = patronymic.String
-            }
-            if iin.Valid {
-                student.IIN = iin.String
-            }
-            if schoolID.Valid {
-                student.SchoolID = int(schoolID.Int64)
-            }
-            if dateOfBirth.Valid {
-                student.DateOfBirth = dateOfBirth.String
-            }
-            if grade.Valid {
-                student.Grade = int(grade.Int64)
-            }
-            if letter.Valid {
-                student.Letter = letter.String
-            }
-            if gender.Valid {
-                student.Gender = gender.String
-            }
-            if phone.Valid {
-                student.Phone = phone.String
-            }
-            if email.Valid {
-                student.Email = email.String
-            }
+			// Шаг 5: Присваиваем значения студенту, проверяя на NULL
+			if firstName.Valid {
+				student.FirstName = firstName.String
+			}
+			if lastName.Valid {
+				student.LastName = lastName.String
+			}
+			if patronymic.Valid {
+				student.Patronymic = patronymic.String
+			}
+			if iin.Valid {
+				student.IIN = iin.String
+			}
+			if schoolID.Valid {
+				student.SchoolID = int(schoolID.Int64)
+			}
+			if dateOfBirth.Valid {
+				student.DateOfBirth = dateOfBirth.String
+			}
+			if grade.Valid {
+				student.Grade = int(grade.Int64)
+			}
+			if letter.Valid {
+				student.Letter = letter.String
+			}
+			if gender.Valid {
+				student.Gender = gender.String
+			}
+			if phone.Valid {
+				student.Phone = phone.String
+			}
+			if email.Valid {
+				student.Email = email.String
+			}
 
-            // Шаг 6: Добавляем студента в срез
-            students = append(students, student)
-        }
+			// Шаг 6: Добавляем студента в срез
+			students = append(students, student)
+		}
 
-        // Шаг 7: Проверяем на ошибки при обработке строк
-        if err := rows.Err(); err != nil {
-            log.Println("Rows Error:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing students"})
-            return
-        }
+		// Шаг 7: Проверяем на ошибки при обработке строк
+		if err := rows.Err(); err != nil {
+			log.Println("Rows Error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing students"})
+			return
+		}
 
-        // Шаг 8: Ответ с данным списком студентов
-        utils.ResponseJSON(w, students)
-    }
+		// Шаг 8: Ответ с данным списком студентов
+		utils.ResponseJSON(w, students)
+	}
 }
 func (sc StudentController) GetStudentsByGradeAndLetter(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // Извлекаем параметры grade и letter из URL
-        vars := mux.Vars(r)
-        gradeParam := vars["grade"]
-        letterParam := vars["letter"]
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Извлекаем параметры grade и letter из URL
+		vars := mux.Vars(r)
+		gradeParam := vars["grade"]
+		letterParam := vars["letter"]
 
-        // Преобразуем grade в целое число
-        grade, err := strconv.Atoi(gradeParam)
-        if err != nil {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade"})
-            return
-        }
+		// Преобразуем grade в целое число
+		grade, err := strconv.Atoi(gradeParam)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade"})
+			return
+		}
 
-        // Шаг 1: Запрос к базе данных для получения студентов по grade и letter
-        rows, err := db.Query("SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email FROM Student WHERE grade = ? AND letter = ?", grade, letterParam)
-        if err != nil {
-            log.Println("SQL Error:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get students"})
-            return
-        }
-        defer rows.Close()
+		// Шаг 1: Запрос к базе данных для получения студентов по grade и letter
+		rows, err := db.Query("SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email FROM Student WHERE grade = ? AND letter = ?", grade, letterParam)
+		if err != nil {
+			log.Println("SQL Error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get students"})
+			return
+		}
+		defer rows.Close()
 
-        // Шаг 2: Создаем срез для хранения студентов
-        var students []models.Student
-        for rows.Next() {
-            var student models.Student
+		// Шаг 2: Создаем срез для хранения студентов
+		var students []models.Student
+		for rows.Next() {
+			var student models.Student
 
-            // Шаг 3: Обработка возможных NULL значений с помощью sql.Null типов
-            var firstName, lastName, patronymic, iin, letter, gender, phone, email sql.NullString
-            var schoolID sql.NullInt64
-            var dateOfBirth sql.NullString
-            var grade sql.NullInt64
+			// Шаг 3: Обработка возможных NULL значений с помощью sql.Null типов
+			var firstName, lastName, patronymic, iin, letter, gender, phone, email sql.NullString
+			var schoolID sql.NullInt64
+			var dateOfBirth sql.NullString
+			var grade sql.NullInt64
 
-            // Шаг 4: Сканирование строки в объект student
-            if err := rows.Scan(&student.ID, &firstName, &lastName, &patronymic, &iin, &schoolID, &dateOfBirth, &grade, &letter, &gender, &phone, &email); err != nil {
-                log.Println("Scan Error:", err)
-                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse students"})
-                return
-            }
+			// Шаг 4: Сканирование строки в объект student
+			if err := rows.Scan(&student.ID, &firstName, &lastName, &patronymic, &iin, &schoolID, &dateOfBirth, &grade, &letter, &gender, &phone, &email); err != nil {
+				log.Println("Scan Error:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse students"})
+				return
+			}
 
-            // Шаг 5: Присваиваем значения студенту, проверяя на NULL
-            if firstName.Valid {
-                student.FirstName = firstName.String
-            }
-            if lastName.Valid {
-                student.LastName = lastName.String
-            }
-            if patronymic.Valid {
-                student.Patronymic = patronymic.String
-            }
-            if iin.Valid {
-                student.IIN = iin.String
-            }
-            if schoolID.Valid {
-                student.SchoolID = int(schoolID.Int64)
-            }
-            if dateOfBirth.Valid {
-                student.DateOfBirth = dateOfBirth.String
-            }
-            if grade.Valid {
-                student.Grade = int(grade.Int64)
-            }
-            if letter.Valid {
-                student.Letter = letter.String
-            }
-            if gender.Valid {
-                student.Gender = gender.String
-            }
-            if phone.Valid {
-                student.Phone = phone.String
-            }
-            if email.Valid {
-                student.Email = email.String
-            }
+			// Шаг 5: Присваиваем значения студенту, проверяя на NULL
+			if firstName.Valid {
+				student.FirstName = firstName.String
+			}
+			if lastName.Valid {
+				student.LastName = lastName.String
+			}
+			if patronymic.Valid {
+				student.Patronymic = patronymic.String
+			}
+			if iin.Valid {
+				student.IIN = iin.String
+			}
+			if schoolID.Valid {
+				student.SchoolID = int(schoolID.Int64)
+			}
+			if dateOfBirth.Valid {
+				student.DateOfBirth = dateOfBirth.String
+			}
+			if grade.Valid {
+				student.Grade = int(grade.Int64)
+			}
+			if letter.Valid {
+				student.Letter = letter.String
+			}
+			if gender.Valid {
+				student.Gender = gender.String
+			}
+			if phone.Valid {
+				student.Phone = phone.String
+			}
+			if email.Valid {
+				student.Email = email.String
+			}
 
-            // Шаг 6: Добавляем студента в срез
-            students = append(students, student)
-        }
+			// Шаг 6: Добавляем студента в срез
+			students = append(students, student)
+		}
 
-        // Шаг 7: Проверяем на ошибки при обработке строк
-        if err := rows.Err(); err != nil {
-            log.Println("Rows Error:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing students"})
-            return
-        }
+		// Шаг 7: Проверяем на ошибки при обработке строк
+		if err := rows.Err(); err != nil {
+			log.Println("Rows Error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing students"})
+			return
+		}
 
-        // Шаг 8: Ответ с данным списком студентов
-        utils.ResponseJSON(w, students)
-    }
+		// Шаг 8: Ответ с данным списком студентов
+		utils.ResponseJSON(w, students)
+	}
 }
 func (sc StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // Извлекаем student_id из URL параметров
-        vars := mux.Vars(r)
-        studentIDParam := vars["student_id"]
-        studentID, err := strconv.Atoi(studentIDParam)
-        if err != nil {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid student ID"})
-            return
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Extract student_id from URL parameters
+		vars := mux.Vars(r)
+		studentIDParam, ok := vars["student_id"]
+		if !ok {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Missing student ID"})
+			return
+		}
 
-        // Step 1: Check if the student exists
-        var existingStudent models.Student
-        err = db.QueryRow("SELECT student_id FROM Student WHERE student_id = ?", studentID).Scan(&existingStudent.ID)
-        if err != nil {
-            if err == sql.ErrNoRows {
-                utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found"})
-            } else {
-                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching student details"})
-            }
-            return
-        }
+		studentID, err := strconv.Atoi(studentIDParam)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid student ID format"})
+			return
+		}
 
-        // Step 2: Decode the updated student data from the request body
-        var updatedStudent models.Student
-        if err := json.NewDecoder(r.Body).Decode(&updatedStudent); err != nil {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
-            return
-        }
+		// Step 1: Verify the user's token and get userID (similar to CreateStudent)
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
 
-        // Step 3: Prepare the update query
-        query := `UPDATE Student 
-                  SET first_name = ?, last_name = ?, patronymic = ?, iin = ?, date_of_birth = ?, grade = ?, school_id = ?, 
-                  letter = ?, gender = ?, phone = ?, email = ?
+		// Step 2: Get user role
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil {
+			log.Println("Error fetching user role:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
+
+		// Step 3: Ensure the user is authorized (schooladmin)
+		if userRole != "schooladmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to update a student"})
+			return
+		}
+
+		// Step 4: Check if the student exists
+		var existingStudent models.Student
+		err = db.QueryRow("SELECT student_id FROM Student WHERE student_id = ?", studentID).Scan(&existingStudent.ID)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found"})
+			} else {
+				log.Println("Error checking student existence:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching student details"})
+			}
+			return
+		}
+
+		// Step 5: Decode the updated student data from the request body
+		var updatedStudent models.Student
+		if err := json.NewDecoder(r.Body).Decode(&updatedStudent); err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request payload"})
+			return
+		}
+
+		// Step 6: Prepare and execute the update query
+		query := `UPDATE Student 
+                  SET first_name = ?, last_name = ?, patronymic = ?, iin = ?, date_of_birth = ?, 
+                  grade = ?, school_id = ?, letter = ?, gender = ?, phone = ?, email = ? 
                   WHERE student_id = ?`
 
-        // Step 4: Execute the update query
-        _, err = db.Exec(query, updatedStudent.FirstName, updatedStudent.LastName, updatedStudent.Patronymic, 
-                          updatedStudent.IIN, updatedStudent.DateOfBirth, updatedStudent.Grade, updatedStudent.SchoolID, 
-                          updatedStudent.Letter, updatedStudent.Gender, updatedStudent.Phone, updatedStudent.Email, studentID)
-        if err != nil {
-            log.Println("Error updating student:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update student"})
-            return
-        }
+		_, err = db.Exec(query,
+			updatedStudent.FirstName, updatedStudent.LastName, updatedStudent.Patronymic,
+			updatedStudent.IIN, updatedStudent.DateOfBirth, updatedStudent.Grade,
+			updatedStudent.SchoolID, updatedStudent.Letter, updatedStudent.Gender,
+			updatedStudent.Phone, updatedStudent.Email, studentID)
 
-        // Step 5: Respond with the updated student
-        updatedStudent.ID = studentID // Ensure the student ID is set in the response
-        utils.ResponseJSON(w, updatedStudent)
-    }
+		if err != nil {
+			log.Println("Error updating student:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update student"})
+			return
+		}
+
+		// Step 7: Fetch the updated student to return in the response
+		query = `SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, 
+                grade, letter, gender, phone, email, role, login 
+                FROM Student WHERE student_id = ?`
+
+		err = db.QueryRow(query, studentID).Scan(
+			&updatedStudent.ID, &updatedStudent.FirstName, &updatedStudent.LastName,
+			&updatedStudent.Patronymic, &updatedStudent.IIN, &updatedStudent.SchoolID,
+			&updatedStudent.DateOfBirth, &updatedStudent.Grade, &updatedStudent.Letter,
+			&updatedStudent.Gender, &updatedStudent.Phone, &updatedStudent.Email,
+			&updatedStudent.Role, &updatedStudent.Login)
+
+		if err != nil {
+			log.Println("Error fetching updated student:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Student updated but failed to retrieve updated details"})
+			return
+		}
+
+		// Step 8: Respond with the updated student
+		utils.ResponseJSON(w, updatedStudent)
+	}
 }
 func (sc StudentController) DeleteStudent(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // Извлекаем student_id из URL параметров
-        vars := mux.Vars(r)
-        studentIDParam := vars["student_id"]
-        studentID, err := strconv.Atoi(studentIDParam)
-        if err != nil {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid student ID"})
-            return
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Извлекаем student_id из URL параметров
+		vars := mux.Vars(r)
+		studentIDParam := vars["student_id"]
+		studentID, err := strconv.Atoi(studentIDParam)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid student ID"})
+			return
+		}
 
-        // Шаг 1: Проверка существования студента
-        var existingStudent models.Student
-        err = db.QueryRow("SELECT student_id FROM Student WHERE student_id = ?", studentID).Scan(&existingStudent.ID)
-        if err != nil {
-            if err == sql.ErrNoRows {
-                utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found"})
-            } else {
-                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching student details"})
-            }
-            return
-        }
+		// Шаг 1: Проверка существования студента
+		var existingStudent models.Student
+		err = db.QueryRow("SELECT student_id FROM Student WHERE student_id = ?", studentID).Scan(&existingStudent.ID)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found"})
+			} else {
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching student details"})
+			}
+			return
+		}
 
-        // Шаг 2: Удаление студента из базы данных
-        _, err = db.Exec("DELETE FROM Student WHERE student_id = ?", studentID)
-        if err != nil {
-            log.Println("Error deleting student:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete student"})
-            return
-        }
+		// Шаг 2: Удаление студента из базы данных
+		_, err = db.Exec("DELETE FROM Student WHERE student_id = ?", studentID)
+		if err != nil {
+			log.Println("Error deleting student:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete student"})
+			return
+		}
 
-        // Шаг 3: Ответ с успешным сообщением
-        utils.ResponseJSON(w, map[string]string{"message": "Student deleted successfully"})
-    }
+		// Шаг 3: Ответ с успешным сообщением
+		utils.ResponseJSON(w, map[string]string{"message": "Student deleted successfully"})
+	}
 }
 func (sc StudentController) GetStudentData(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // Step 1: Verify the user's token and get userID
-        userID, err := utils.VerifyToken(r)
-        if err != nil {
-            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
-            return
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify the user's token and get userID
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
 
-        // Step 2: Get user role and school ID
-        var userRole string
-        var userSchoolID sql.NullInt64
-        err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
-        if err != nil {
-            log.Println("Error fetching user role and school ID:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
-            return
-        }
+		// Step 2: Get user role and school ID
+		var userRole string
+		var userSchoolID sql.NullInt64
+		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+		if err != nil {
+			log.Println("Error fetching user role and school ID:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
 
-        // Step 3: Ensure the user is a director and has a school assigned
-        if userRole != "schooladmin" {
-            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view student data"})
-            return
-        }
+		// Step 3: Ensure the user is a director and has a school assigned
+		if userRole != "schooladmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view student data"})
+			return
+		}
 
-        if !userSchoolID.Valid {
-            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Director does not have an assigned school"})
-            return
-        }
+		if !userSchoolID.Valid {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Director does not have an assigned school"})
+			return
+		}
 
-        // Step 4: Extract student_id from the URL
-        vars := mux.Vars(r)
-        studentID, err := strconv.Atoi(vars["student_id"])
-        if err != nil {
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid student ID"})
-            return
-        }
+		// Step 4: Extract student_id from the URL
+		vars := mux.Vars(r)
+		studentID, err := strconv.Atoi(vars["student_id"])
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid student ID"})
+			return
+		}
 
-        // Step 5: Retrieve student data from the database
-        var student models.Student
-        query := `SELECT id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email 
+		// Step 5: Retrieve student data from the database
+		var student models.Student
+		query := `SELECT id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email 
                   FROM student WHERE id = ? AND school_id = ?`
-        err = db.QueryRow(query, studentID, userSchoolID.Int64).Scan(&student.ID, &student.FirstName, &student.LastName, &student.Patronymic, &student.IIN, &student.SchoolID, &student.DateOfBirth, &student.Grade, &student.Letter, &student.Gender, &student.Phone, &student.Email)
-        
-        if err != nil {
-            if err == sql.ErrNoRows {
-                utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found or does not belong to this school"})
-                return
-            }
-            log.Println("Error fetching student data:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching student data"})
-            return
-        }
+		err = db.QueryRow(query, studentID, userSchoolID.Int64).Scan(&student.ID, &student.FirstName, &student.LastName, &student.Patronymic, &student.IIN, &student.SchoolID, &student.DateOfBirth, &student.Grade, &student.Letter, &student.Gender, &student.Phone, &student.Email)
 
-        // Step 6: Respond with student data
-        utils.ResponseJSON(w, student)
-    }
+		if err != nil {
+			if err == sql.ErrNoRows {
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found or does not belong to this school"})
+				return
+			}
+			log.Println("Error fetching student data:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching student data"})
+			return
+		}
+
+		// Step 6: Respond with student data
+		utils.ResponseJSON(w, student)
+	}
 }
+func (sc StudentController) SuperadminUpdateStudent(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Извлекаем student_id из URL параметров
+		vars := mux.Vars(r)
+		studentIDParam, ok := vars["student_id"]
+		if !ok {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Missing student ID"})
+			return
+		}
 
+		studentID, err := strconv.Atoi(studentIDParam)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid student ID format"})
+			return
+		}
 
+		// Step 1: Verify the user's token and get userID
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
 
+		// Step 2: Get user role
+		var userRole string
+		var userSchoolID int // To store school ID for schooladmin
+		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+		if err != nil {
+			log.Println("Error fetching user role:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
 
+		// Step 3: Ensure the user is authorized (superadmin or schooladmin)
+		var studentSchoolID int
+		err = db.QueryRow("SELECT school_id FROM Student WHERE student_id = ?", studentID).Scan(&studentSchoolID)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found"})
+			return
+		}
+
+		// If user is superadmin, allow updating any student
+		if userRole != "superadmin" && userSchoolID != studentSchoolID {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to update this student"})
+			return
+		}
+
+		// Step 4: Decode the updated student data from the request body
+		var updatedStudent models.Student
+		if err := json.NewDecoder(r.Body).Decode(&updatedStudent); err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request payload"})
+			return
+		}
+
+		// Step 5: Prepare and execute the update query
+		query := `UPDATE Student 
+                  SET first_name = ?, last_name = ?, patronymic = ?, iin = ?, date_of_birth = ?, 
+                  grade = ?, school_id = ?, letter = ?, gender = ?, phone = ?, email = ? 
+                  WHERE student_id = ?`
+
+		_, err = db.Exec(query,
+			updatedStudent.FirstName, updatedStudent.LastName, updatedStudent.Patronymic,
+			updatedStudent.IIN, updatedStudent.DateOfBirth, updatedStudent.Grade,
+			updatedStudent.SchoolID, updatedStudent.Letter, updatedStudent.Gender,
+			updatedStudent.Phone, updatedStudent.Email, studentID)
+
+		if err != nil {
+			log.Println("Error updating student:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update student"})
+			return
+		}
+
+		// Step 6: Fetch the updated student to return in the response
+		query = `SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, 
+                grade, letter, gender, phone, email, role, login 
+                FROM Student WHERE student_id = ?`
+
+		err = db.QueryRow(query, studentID).Scan(
+			&updatedStudent.ID, &updatedStudent.FirstName, &updatedStudent.LastName,
+			&updatedStudent.Patronymic, &updatedStudent.IIN, &updatedStudent.SchoolID,
+			&updatedStudent.DateOfBirth, &updatedStudent.Grade, &updatedStudent.Letter,
+			&updatedStudent.Gender, &updatedStudent.Phone, &updatedStudent.Email,
+			&updatedStudent.Role, &updatedStudent.Login)
+
+		if err != nil {
+			log.Println("Error fetching updated student:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Student updated but failed to retrieve updated details"})
+			return
+		}
+
+		// Step 7: Respond with the updated student
+		utils.ResponseJSON(w, updatedStudent)
+	}
+}
+func (sc StudentController) SuperadminDeleteStudent(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Извлекаем student_id из URL параметров
+		vars := mux.Vars(r)
+		studentIDParam := vars["student_id"]
+		studentID, err := strconv.Atoi(studentIDParam)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid student ID"})
+			return
+		}
+
+		// Step 1: Verify the user's token and get userID
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		// Step 2: Get user role and school ID
+		var userRole string
+		var userSchoolID int
+		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
+
+		// Step 3: Check if the student exists and get student's school ID
+		var studentSchoolID int
+		err = db.QueryRow("SELECT school_id FROM Student WHERE student_id = ?", studentID).Scan(&studentSchoolID)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found"})
+			return
+		}
+
+		// Step 4: Check permission to delete the student
+		if userRole != "superadmin" && userSchoolID != studentSchoolID {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to delete this student"})
+			return
+		}
+
+		// Step 5: Delete the student from the database
+		_, err = db.Exec("DELETE FROM Student WHERE student_id = ?", studentID)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete student"})
+			return
+		}
+
+		// Step 6: Respond with a success message
+		utils.ResponseJSON(w, map[string]string{"message": "Student deleted successfully"})
+	}
+}

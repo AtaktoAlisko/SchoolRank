@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"ranking-school/models"
 	"ranking-school/utils"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -55,7 +56,21 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 		school.AboutSchool = r.FormValue("about_school")
 		school.SchoolEmail = r.FormValue("school_email")
 		school.SchoolPhone = r.FormValue("school_phone")
-		school.Specializations = r.FormValue("specializations")
+
+		// Обработка специализаций как массива
+		specializationsStr := r.FormValue("specializations")
+		if specializationsStr != "" {
+			// Преобразование строки JSON в массив строк
+			err = json.Unmarshal([]byte(specializationsStr), &school.Specializations)
+			if err != nil {
+				// Если не удалось распарсить JSON, пробуем разделить по запятой
+				school.Specializations = strings.Split(specializationsStr, ",")
+				// Удаляем лишние пробелы
+				for i := range school.Specializations {
+					school.Specializations[i] = strings.TrimSpace(school.Specializations[i])
+				}
+			}
+		}
 
 		if school.SchoolName == "" || school.City == "" || school.SchoolAdminLogin == "" {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Required fields: school_name, city, school_admin_login"})
@@ -131,12 +146,20 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 			school.PhotoURL = photoURL
 		}
 
+		// Преобразуем массив специализаций в JSON строку для сохранения в БД
+		specializationsJSON, err := json.Marshal(school.Specializations)
+		if err != nil {
+			log.Println("Error marshaling specializations:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error marshaling specializations"})
+			return
+		}
+
 		// Шаг 6: Вставка в таблицу Schools
 		query := `
            INSERT INTO Schools (school_name, school_address, city, about_school, photo_url, school_email, school_phone, school_admin_login, specializations, created_at, updated_at, user_id)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?)
         `
-		result, err := db.Exec(query, school.SchoolName, school.SchoolAddress, school.City, school.AboutSchool, school.PhotoURL, school.SchoolEmail, school.SchoolPhone, school.SchoolAdminLogin, school.Specializations, schoolAdminID)
+		result, err := db.Exec(query, school.SchoolName, school.SchoolAddress, school.City, school.AboutSchool, school.PhotoURL, school.SchoolEmail, school.SchoolPhone, school.SchoolAdminLogin, string(specializationsJSON), schoolAdminID)
 		if err != nil {
 			log.Println("Insert error:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create school"})
@@ -149,7 +172,6 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, school)
 	}
 }
-
 func (sc SchoolController) UpdateMySchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// 1. Проверка токена
@@ -372,11 +394,11 @@ func (sc SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 		})
 	}
 }
-
 func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Шаг 1: Выполнение запроса для получения всех школ, включая поле school_admin_login
-		query := "SELECT school_id, school_name, school_address, city, about_school, school_email, school_phone, school_admin_login FROM Schools"
+		// Шаг 1: Выполнение запроса для получения всех школ, включая поле specializations
+		query := `SELECT school_id, school_name, school_address, city, about_school, school_email, 
+                  school_phone, school_admin_login, specializations FROM Schools`
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Println("Error fetching schools:", err)
@@ -391,22 +413,24 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 		// Шаг 3: Прохождение по результатам запроса и заполнение среза
 		for rows.Next() {
 			var school models.School
-			var city sql.NullString             // Используем sql.NullString для обработки возможного NULL в поле city
-			var schoolAddress sql.NullString    // Для адреса
-			var aboutSchool sql.NullString      // Для описания школы
-			var schoolEmail sql.NullString      // Для email
-			var schoolPhone sql.NullString      // Для телефона
-			var schoolAdminLogin sql.NullString // Для логина администратора
+			var city sql.NullString                // Используем sql.NullString для обработки возможного NULL в поле city
+			var schoolAddress sql.NullString       // Для адреса
+			var aboutSchool sql.NullString         // Для описания школы
+			var schoolEmail sql.NullString         // Для email
+			var schoolPhone sql.NullString         // Для телефона
+			var schoolAdminLogin sql.NullString    // Для логина администратора
+			var specializationsJSON sql.NullString // Для специализаций в JSON формате
 
 			err := rows.Scan(
 				&school.SchoolID,
 				&school.SchoolName,
-				&schoolAddress,    // sql.NullString
-				&city,             // sql.NullString
-				&aboutSchool,      // sql.NullString
-				&schoolEmail,      // sql.NullString
-				&schoolPhone,      // sql.NullString
-				&schoolAdminLogin, // sql.NullString
+				&schoolAddress,       // sql.NullString
+				&city,                // sql.NullString
+				&aboutSchool,         // sql.NullString
+				&schoolEmail,         // sql.NullString
+				&schoolPhone,         // sql.NullString
+				&schoolAdminLogin,    // sql.NullString
+				&specializationsJSON, // sql.NullString
 			)
 			if err != nil {
 				log.Println("Error scanning school data:", err)
@@ -417,38 +441,37 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 			// Присваиваем значения из sql.NullString в обычные строки, если значение существует
 			if city.Valid {
 				school.City = city.String
-			} else {
-				school.City = "" // Если NULL, присваиваем пустую строку
 			}
 
 			if schoolAddress.Valid {
 				school.SchoolAddress = schoolAddress.String
-			} else {
-				school.SchoolAddress = "" // Если NULL, присваиваем пустую строку
 			}
 
 			if aboutSchool.Valid {
 				school.AboutSchool = aboutSchool.String
-			} else {
-				school.AboutSchool = "" // Если NULL, присваиваем пустую строку
 			}
 
 			if schoolEmail.Valid {
 				school.SchoolEmail = schoolEmail.String
-			} else {
-				school.SchoolEmail = "" // Если NULL, присваиваем пустую строку
 			}
 
 			if schoolPhone.Valid {
 				school.SchoolPhone = schoolPhone.String
-			} else {
-				school.SchoolPhone = "" // Если NULL, присваиваем пустую строку
 			}
 
 			if schoolAdminLogin.Valid {
 				school.SchoolAdminLogin = schoolAdminLogin.String
+			}
+
+			// Обработка специализаций
+			if specializationsJSON.Valid && specializationsJSON.String != "" {
+				err = json.Unmarshal([]byte(specializationsJSON.String), &school.Specializations)
+				if err != nil {
+					// Если не удалось распарсить JSON, сохраняем как одну строку
+					school.Specializations = []string{specializationsJSON.String}
+				}
 			} else {
-				school.SchoolAdminLogin = "" // Если NULL, присваиваем пустую строку
+				school.Specializations = []string{} // Пустой массив, если нет специализаций
 			}
 
 			// Добавляем школу в срез
