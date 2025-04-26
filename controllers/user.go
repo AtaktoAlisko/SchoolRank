@@ -649,12 +649,6 @@ func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
 				user.Age = 0 // Age might not be available for students, using grade instead
 				role = studentRole
 				verified = true // Students are considered verified by default
-
-				// Get additional student information that might be needed
-				var schoolID int
-				var letter string
-				db.QueryRow("SELECT school_id, letter FROM Student WHERE student_id = ?", studentID).Scan(&schoolID, &letter)
-				// These could be used in token generation or response
 			}
 		} else if err == nil {
 			// User found in users table
@@ -716,29 +710,13 @@ func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Prepare response
+		// Prepare response without unnecessary fields
 		response := map[string]interface{}{
-			"token":         accessToken,
+			"access_token":  accessToken,
 			"refresh_token": refreshToken,
-			"user_id":       user.ID,
-			"role":          role,
-			"first_name":    user.FirstName,
-			"last_name":     user.LastName,
 		}
 
-		// Include extra info for students
-		if role == "student" {
-			var grade int
-			var letter string
-			var schoolID int
-			db.QueryRow("SELECT grade, letter, school_id FROM Student WHERE student_id = ?", user.ID).Scan(&grade, &letter, &schoolID)
-
-			response["grade"] = grade
-			response["letter"] = letter
-			response["school_id"] = schoolID
-		}
-
-		// Send tokens in response
+		// Send response
 		utils.ResponseJSON(w, response)
 	}
 }
@@ -1189,69 +1167,51 @@ func (c Controller) TokenVerifyMiddleware(next http.HandlerFunc) http.HandlerFun
 		}
 	})
 }
-func (c Controller) RefreshToken(db *sql.DB) http.HandlerFunc {
+func (c Controller) RefreshTokenHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var jwtToken models.JWT
-		var error models.Error
 
+		// Разбираем refresh token из тела запроса
 		err := json.NewDecoder(r.Body).Decode(&jwtToken)
 		if err != nil {
-			error.Message = "Invalid request body."
-			utils.RespondWithError(w, http.StatusBadRequest, error)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request format"})
 			return
 		}
 
-		// Разбираем refresh token
+		// Парсим refresh token
 		token, err := utils.ParseToken(jwtToken.RefreshToken)
 		if err != nil {
-			error.Message = "Invalid refresh token."
-			utils.RespondWithError(w, http.StatusUnauthorized, error)
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid refresh token"})
 			return
 		}
 
-		// Проверяем, действителен ли токен
-		if !token.Valid {
-			error.Message = "Refresh token expired."
-			utils.RespondWithError(w, http.StatusUnauthorized, error)
-			return
-		}
+		// Проверка валидности токена
+		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+			// Извлекаем user_id из токена
+			userID := int(claims["user_id"].(float64))
 
-		// Извлекаем claims из токена
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok {
-			error.Message = "Invalid claims."
-			utils.RespondWithError(w, http.StatusUnauthorized, error)
-			return
-		}
+			// Получаем пользователя из базы данных
+			user, err := utils.GetUserByID(db, userID)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "User not found"})
+				return
+			}
 
-		// Извлекаем user_id из claims
-		userID, ok := claims["user_id"].(float64)
-		if !ok {
-			error.Message = "Invalid user_id in token."
-			utils.RespondWithError(w, http.StatusUnauthorized, error)
-			return
-		}
+			// Генерация нового access токена
+			accessToken, err := utils.GenerateAccessToken(user)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to generate access token"})
+				return
+			}
 
-		var user models.User
-		query := "SELECT id, email, phone, first_name, last_name, age, status FROM users WHERE id = ?"
-		err = db.QueryRow(query, int(userID)).Scan(&user.ID, &user.Email, &user.Phone, &user.FirstName, &user.LastName, &user.Age, &user.Role)
-		if err != nil {
-			error.Message = "User not found."
-			utils.RespondWithError(w, http.StatusNotFound, error)
-			return
+			// Возвращаем новый access token и refresh token
+			utils.ResponseJSON(w, map[string]string{
+				"access_token":  accessToken,
+				"refresh_token": jwtToken.RefreshToken, // или новый refresh token, если он был обновлен
+			})
+		} else {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid refresh token"})
 		}
-
-		// Генерация нового access токена
-		newAccessToken, err := utils.GenerateToken(user)
-		if err != nil {
-			error.Message = "Error generating new access token."
-			utils.RespondWithError(w, http.StatusInternalServerError, error)
-			return
-		}
-
-		// Возвращаем новый токен
-		jwtToken.Token = newAccessToken
-		utils.ResponseJSON(w, jwtToken)
 	}
 }
 func (c Controller) VerifyResetToken(w http.ResponseWriter, r *http.Request) {
@@ -2151,7 +2111,6 @@ func (c *Controller) GetAllSchoolAdmins(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, schoolAdmins)
 	}
 }
-
 func (c *Controller) GetAllSuperAdmins(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Запрос для получения всех пользователей с ролью superadmin

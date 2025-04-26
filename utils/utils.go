@@ -3,6 +3,7 @@ package utils
 import (
 	"bytes"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -27,18 +28,20 @@ import (
 	"github.com/golang-jwt/jwt"
 	"golang.org/x/crypto/bcrypt"
 )
-var secretKey = []byte(os.Getenv("SECRET")) 
+
+var secretKey = []byte(os.Getenv("SECRET"))
+
 func RespondWithError(w http.ResponseWriter, status int, error models.Error) {
-    w.WriteHeader(status)
-    if err := json.NewEncoder(w).Encode(error); err != nil {
-        log.Printf("Ошибка при отправке JSON ошибки: %v", err)
-    }
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(error); err != nil {
+		log.Printf("Ошибка при отправке JSON ошибки: %v", err)
+	}
 }
 func ResponseJSON(w http.ResponseWriter, data interface{}) {
-    w.Header().Set("Content-Type", "application/json")
-    if err := json.NewEncoder(w).Encode(data); err != nil {
-        http.Error(w, "Не удалось сформировать JSON", http.StatusInternalServerError)
-    }
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		http.Error(w, "Не удалось сформировать JSON", http.StatusInternalServerError)
+	}
 }
 func ComparePasswords(hashedPassword string, password []byte) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), password)
@@ -53,40 +56,35 @@ func IsPhoneNumber(input string) bool {
 	return phoneRegex.MatchString(strings.TrimSpace(input))
 }
 func GenerateToken(user models.User) (string, error) {
-    secret := os.Getenv("SECRET")
-    if secret == "" {
-        return "", errors.New("SECRET environment variable is not set")
-    }
+	secret := os.Getenv("SECRET")
+	if secret == "" {
+		return "", errors.New("SECRET environment variable is not set")
+	}
 
-    // Ensure the user has either email or phone
-    if user.Email == "" && user.Phone == "" {
-        return "", errors.New("user must have either email or phone")
-    }
+	if user.Email == "" && user.Phone == "" {
+		return "", errors.New("user must have either email or phone")
+	}
 
-    // Create the claims for the token
-    claims := jwt.MapClaims{
-        "iss": "course",    // Issuer of the token
-        "user_id": user.ID, // Add user ID claim
-        "role": user.Role,  // Add role claim (make sure this exists in your user model)
-    }
+	claims := jwt.MapClaims{
+		"iss":     "course",
+		"user_id": user.ID,
+		"role":    user.Role,
+	}
 
-    // Add email or phone depending on what the user provided
-    if user.Email != "" {
-        claims["email"] = user.Email
-    } else if user.Phone != "" {
-        claims["phone"] = user.Phone
-    }
+	if user.Email != "" {
+		claims["email"] = user.Email
+	} else if user.Phone != "" {
+		claims["phone"] = user.Phone
+	}
 
-    // Generate the token
-    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
-    // Sign the token with the secret
-    tokenString, err := token.SignedString([]byte(secret))
-    if err != nil {
-        return "", err
-    }
+	tokenString, err := token.SignedString([]byte(secret))
+	if err != nil {
+		return "", err
+	}
 
-    return tokenString, nil
+	return tokenString, nil
 }
 func GenerateVerificationToken(email string) (string, error) {
 	secret := os.Getenv("SECRET")
@@ -103,12 +101,12 @@ func GenerateVerificationToken(email string) (string, error) {
 	return token.SignedString([]byte(secret))
 }
 func ParseToken(tokenStr string) (*jwt.Token, error) {
-    return jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
-        if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-            return nil, fmt.Errorf("unexpected signing method")
-        }
-        return []byte(os.Getenv("SECRET")), nil
-    })
+	return jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return []byte(os.Getenv("SECRET")), nil
+	})
 }
 func VerifyToken(r *http.Request) (int, error) {
 	authHeader := r.Header.Get("Authorization")
@@ -135,51 +133,50 @@ func VerifyToken(r *http.Request) (int, error) {
 	return 0, errors.New("Invalid token")
 }
 func GenerateRefreshToken(user models.User) (string, error) {
-    secret := os.Getenv("SECRET")
-    if secret == "" {
-        return "", errors.New("SECRET environment variable is not set")
-    }
+	secret := os.Getenv("SECRET")
+	if secret == "" {
+		return "", errors.New("SECRET environment variable is not set")
+	}
 
-    // Create refresh token claims with expiration time of 5 minutes
-    claims := jwt.MapClaims{
-        "iss":    "course",
-        "user_id": user.ID, // Adding user_id
-        "exp":    time.Now().Add(24 * time.Hour).Unix(), 
-    }
+	// Создаем claims для Refresh Token
+	claims := jwt.MapClaims{
+		"iss":     "course",
+		"user_id": user.ID,                                   // Добавляем user_id
+		"exp":     time.Now().Add(7 * 24 * time.Hour).Unix(), // Токен истекает через 7 дней
+	}
 
-    // Adding email or phone based on provided information
-    if user.Email != "" {
-        claims["email"] = user.Email
-    } else if user.Phone != "" {
-        claims["phone"] = user.Phone
-    }
+	if user.Email != "" {
+		claims["email"] = user.Email
+	} else if user.Phone != "" {
+		claims["phone"] = user.Phone
+	}
 
-    // Generate refresh token
-    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-    tokenString, err := token.SignedString([]byte(secret))
-    if err != nil {
-        return "", err
-    }
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte(secret))
+	if err != nil {
+		return "", err
+	}
 
-    return tokenString, nil
+	return tokenString, nil
 }
+
 func SendEmail(to, subject, body string) {
-    from := "mralibekmurat27@gmail.com"
-    password := "bdyi mtae fqub cfcr"
+	from := "mralibekmurat27@gmail.com"
+	password := "bdyi mtae fqub cfcr"
 
-    smtpHost := "smtp.gmail.com"
-    smtpPort := "587"
+	smtpHost := "smtp.gmail.com"
+	smtpPort := "587"
 
-    auth := smtp.PlainAuth("", from, password, smtpHost)
+	auth := smtp.PlainAuth("", from, password, smtpHost)
 
-    msg := []byte("To: " + to + "\r\n" +
-        "Subject: " + subject + "\r\n" +
-        "\r\n" + body + "\r\n")
+	msg := []byte("To: " + to + "\r\n" +
+		"Subject: " + subject + "\r\n" +
+		"\r\n" + body + "\r\n")
 
-    err := smtp.SendMail(smtpHost+":"+smtpPort, auth, from, []string{to}, msg)
-    if err != nil {
-        log.Printf("Error sending email: %v", err)
-    }
+	err := smtp.SendMail(smtpHost+":"+smtpPort, auth, from, []string{to}, msg)
+	if err != nil {
+		log.Printf("Error sending email: %v", err)
+	}
 }
 func GenerateResetToken(email string) string {
 	b := make([]byte, 32)
@@ -210,7 +207,7 @@ func SendVerificationEmail(to, token, otp string) {
 
 	// Сообщение с ссылкой и OTP
 	message := fmt.Sprintf(
-		"Click here to verify your email: %s\n\nYour OTP code is: %s", 
+		"Click here to verify your email: %s\n\nYour OTP code is: %s",
 		verificationLink, otp)
 
 	// Формируем и отправляем письмо
@@ -224,8 +221,8 @@ func SendVerificationEmail(to, token, otp string) {
 	}
 }
 func SendVerificationOTP(to, otp string) {
-	 from := "mralibekmurat27@gmail.com"
-	 password := "bdyi mtae fqub cfcr"
+	from := "mralibekmurat27@gmail.com"
+	password := "bdyi mtae fqub cfcr"
 
 	smtpHost := "smtp.gmail.com"
 	smtpPort := "587"
@@ -244,114 +241,114 @@ func SendVerificationOTP(to, otp string) {
 	}
 }
 func NullableValue(value interface{}) interface{} {
-    if value == nil {
-        return nil
-    }
-    return value
+	if value == nil {
+		return nil
+	}
+	return value
 }
 func UploadFileToS3(file multipart.File, fileName string, isAvatar bool) (string, error) {
-    var accessKey, secretKey, region, bucketName string
+	var accessKey, secretKey, region, bucketName string
 
-    // Если это аватар, используем второй набор ключей и бакет для аватаров
-    if isAvatar {
-        accessKey = os.Getenv("AWS_ACCESS_KEY2_ID")
-        secretKey = os.Getenv("AWS_SECRET_ACCESS2_KEY")
-        region = os.Getenv("AWS_REGION2")
-        bucketName = "avatarschoolrank" // Бакет для аватаров
-    } else {
-        // Для школьных фото используем первый набор ключей и бакет для фото
-        accessKey = os.Getenv("AWS_ACCESS_KEY_ID")
-        secretKey = os.Getenv("AWS_SECRET_ACCESS_KEY")
-        region = os.Getenv("AWS_REGION")
-        bucketName = "schoolrank-schoolphotos" // Бакет для школьных фото
-    }
+	// Если это аватар, используем второй набор ключей и бакет для аватаров
+	if isAvatar {
+		accessKey = os.Getenv("AWS_ACCESS_KEY2_ID")
+		secretKey = os.Getenv("AWS_SECRET_ACCESS2_KEY")
+		region = os.Getenv("AWS_REGION2")
+		bucketName = "avatarschoolrank" // Бакет для аватаров
+	} else {
+		// Для школьных фото используем первый набор ключей и бакет для фото
+		accessKey = os.Getenv("AWS_ACCESS_KEY_ID")
+		secretKey = os.Getenv("AWS_SECRET_ACCESS_KEY")
+		region = os.Getenv("AWS_REGION")
+		bucketName = "schoolrank-schoolphotos" // Бакет для школьных фото
+	}
 
-    // Проверяем, что ключи и регион заданы
-    if accessKey == "" || secretKey == "" || region == "" {
-        return "", fmt.Errorf("AWS credentials or region not set in environment")
-    }
+	// Проверяем, что ключи и регион заданы
+	if accessKey == "" || secretKey == "" || region == "" {
+		return "", fmt.Errorf("AWS credentials or region not set in environment")
+	}
 
-    // Создаем сессию с AWS
-    sess, err := session.NewSession(&aws.Config{
-        Region:      aws.String(region),
-        Credentials: credentials.NewStaticCredentials(accessKey, secretKey, ""),
-    })
-    if err != nil {
-        return "", fmt.Errorf("failed to create AWS session: %v", err)
-    }
+	// Создаем сессию с AWS
+	sess, err := session.NewSession(&aws.Config{
+		Region:      aws.String(region),
+		Credentials: credentials.NewStaticCredentials(accessKey, secretKey, ""),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create AWS session: %v", err)
+	}
 
-    // Создаем клиент для S3
-    svc := s3.New(sess)
+	// Создаем клиент для S3
+	svc := s3.New(sess)
 
-    // Считываем файл в буфер
-    buf := new(bytes.Buffer)
-    _, err = io.Copy(buf, file)
-    if err != nil {
-        return "", fmt.Errorf("failed to read file buffer: %v", err)
-    }
+	// Считываем файл в буфер
+	buf := new(bytes.Buffer)
+	_, err = io.Copy(buf, file)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file buffer: %v", err)
+	}
 
-    // Задаем имя бакета
-    input := &s3.PutObjectInput{
-        Bucket: aws.String(bucketName),
-        Key:    aws.String(fileName),
-        Body:   bytes.NewReader(buf.Bytes()),
-    }
+	// Задаем имя бакета
+	input := &s3.PutObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(fileName),
+		Body:   bytes.NewReader(buf.Bytes()),
+	}
 
-    // Загружаем файл в S3
-    _, err = svc.PutObject(input)
-    if err != nil {
-        return "", fmt.Errorf("failed to upload file to S3: %v", err)
-    }
+	// Загружаем файл в S3
+	_, err = svc.PutObject(input)
+	if err != nil {
+		return "", fmt.Errorf("failed to upload file to S3: %v", err)
+	}
 
-    // Формируем URL для доступа к файлу
-    url := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", bucketName, region, fileName)
-    return url, nil
+	// Формируем URL для доступа к файлу
+	url := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", bucketName, region, fileName)
+	return url, nil
 }
 func StrToInt(s string) (int, error) {
-	s = strings.TrimSpace(s)  // Убираем все пробельные символы (включая новую строку)
+	s = strings.TrimSpace(s) // Убираем все пробельные символы (включая новую строку)
 	return strconv.Atoi(s)
 }
 func DeleteFileFromS3(fileURL string) error {
-    // Определяем, какой бакет использовать
-    var accessKey, secretKey, region, bucketName string
+	// Определяем, какой бакет использовать
+	var accessKey, secretKey, region, bucketName string
 
-    if strings.Contains(fileURL, "avatar") {
-        // Для аватаров
-        accessKey = os.Getenv("AWS_ACCESS_KEY2_ID")
-        secretKey = os.Getenv("AWS_SECRET_ACCESS2_KEY")
-        region = os.Getenv("AWS_REGION2")
-        bucketName = "avatarschoolrank" // Бакет для аватаров
-    } else {
-        // Для других файлов (школьных фото)
-        accessKey = os.Getenv("AWS_ACCESS_KEY_ID")
-        secretKey = os.Getenv("AWS_SECRET_ACCESS_KEY")
-        region = os.Getenv("AWS_REGION")
-        bucketName = "your-school-photo-bucket" // Бакет для школьных фото
-    }
+	if strings.Contains(fileURL, "avatar") {
+		// Для аватаров
+		accessKey = os.Getenv("AWS_ACCESS_KEY2_ID")
+		secretKey = os.Getenv("AWS_SECRET_ACCESS2_KEY")
+		region = os.Getenv("AWS_REGION2")
+		bucketName = "avatarschoolrank" // Бакет для аватаров
+	} else {
+		// Для других файлов (школьных фото)
+		accessKey = os.Getenv("AWS_ACCESS_KEY_ID")
+		secretKey = os.Getenv("AWS_SECRET_ACCESS_KEY")
+		region = os.Getenv("AWS_REGION")
+		bucketName = "your-school-photo-bucket" // Бакет для школьных фото
+	}
 
-    // Создаем сессию с AWS
-    sess, err := session.NewSession(&aws.Config{
-        Region:      aws.String(region),
-        Credentials: credentials.NewStaticCredentials(accessKey, secretKey, ""),
-    })
-    if err != nil {
-        return fmt.Errorf("failed to create AWS session: %v", err)
-    }
+	// Создаем сессию с AWS
+	sess, err := session.NewSession(&aws.Config{
+		Region:      aws.String(region),
+		Credentials: credentials.NewStaticCredentials(accessKey, secretKey, ""),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create AWS session: %v", err)
+	}
 
-    svc := s3.New(sess)
-    // Извлекаем ключ из URL
-    key := strings.TrimPrefix(fileURL, "https://"+bucketName+".s3."+region+".amazonaws.com/")
+	svc := s3.New(sess)
+	// Извлекаем ключ из URL
+	key := strings.TrimPrefix(fileURL, "https://"+bucketName+".s3."+region+".amazonaws.com/")
 
-    // Удаляем объект из S3
-    _, err = svc.DeleteObject(&s3.DeleteObjectInput{
-        Bucket: aws.String(bucketName),
-        Key:    aws.String(key),
-    })
-    if err != nil {
-        return fmt.Errorf("failed to delete file from S3: %v", err)
-    }
+	// Удаляем объект из S3
+	_, err = svc.DeleteObject(&s3.DeleteObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete file from S3: %v", err)
+	}
 
-    return nil
+	return nil
 }
 func GenerateRandomPassword(length int) string {
 	randomBytes := make([]byte, length)
@@ -362,14 +359,81 @@ func GenerateRandomPassword(length int) string {
 	}
 	return base64.StdEncoding.EncodeToString(randomBytes)[:length]
 }
-// HashPassword хеширует пароль с использованием bcrypt
 func HashPassword(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	return string(bytes), err
 }
+func GenerateAccessToken(user models.User) (string, error) {
+	secret := os.Getenv("SECRET")
+	if secret == "" {
+		return "", errors.New("SECRET environment variable is not set")
+	}
 
+	// Создаем claims для Access Token
+	claims := jwt.MapClaims{
+		"iss":     "course",
+		"user_id": user.ID,
+		"role":    user.Role,
+		"exp":     time.Now().Add(time.Minute * 15).Unix(), // Токен истекает через 15 минут
+	}
 
+	if user.Email != "" {
+		claims["email"] = user.Email
+	} else if user.Phone != "" {
+		claims["phone"] = user.Phone
+	}
 
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
+	tokenString, err := token.SignedString([]byte(secret))
+	if err != nil {
+		return "", err
+	}
 
+	return tokenString, nil
+}
+func GetUserByID(db *sql.DB, userID int) (models.User, error) {
+	var user models.User
+	var email, phone, firstName, lastName sql.NullString
+	var age sql.NullInt64
+	var role sql.NullString
 
+	// Use appropriate placeholder for your database
+	query := "SELECT id, email, phone, first_name, last_name, age, role FROM users WHERE id = ?"
+
+	err := db.QueryRow(query, userID).Scan(
+		&user.ID,
+		&email,
+		&phone,
+		&firstName,
+		&lastName,
+		&age,
+		&role,
+	)
+
+	if err != nil {
+		return user, fmt.Errorf("user not found: %v", err)
+	}
+
+	// Convert nullable fields to regular fields
+	if email.Valid {
+		user.Email = email.String
+	}
+	if phone.Valid {
+		user.Phone = phone.String
+	}
+	if firstName.Valid {
+		user.FirstName = firstName.String
+	}
+	if lastName.Valid {
+		user.LastName = lastName.String
+	}
+	if age.Valid {
+		user.Age = int(age.Int64)
+	}
+	if role.Valid {
+		user.Role = role.String
+	}
+
+	return user, nil
+}
