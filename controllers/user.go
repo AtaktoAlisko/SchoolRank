@@ -473,12 +473,47 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
 }
 func (c *Controller) GetMe(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Проверяем токен и получаем userID
-		id, err := utils.VerifyToken(r)
+		// Extract token from Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Authorization header is required"})
+			return
+		}
+
+		// Typically, the token is prefixed with "Bearer "
+		tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
+
+		// Parse the token
+		token, err := utils.ParseToken(tokenString)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
 			return
 		}
+
+		// Verify token is valid
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok || !token.Valid {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
+
+		// Check if this is an access token (distinguish from refresh token)
+		// Access tokens have 'role' claim, refresh tokens don't
+		_, hasRole := claims["role"]
+		if !hasRole {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Refresh tokens are not allowed for this endpoint"})
+			return
+		}
+
+		// Check if token is expired
+		expTime := time.Unix(int64(claims["exp"].(float64)), 0)
+		if time.Now().After(expTime) {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Token expired"})
+			return
+		}
+
+		// Extract user ID from token
+		id := int(claims["user_id"].(float64))
 
 		// Запрос к базе для получения данных пользователя, включая date_of_birth и age
 		var user models.User
@@ -692,7 +727,7 @@ func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
 		user.Role = role
 
 		// Generate access token with 15 minutes expiration
-		accessToken, err := utils.GenerateToken(user, 15*time.Minute)
+		accessToken, err := utils.GenerateToken(user, 1*time.Minute)
 		if err != nil {
 			error.Message = "Server error."
 			utils.RespondWithError(w, http.StatusInternalServerError, error)
@@ -1021,9 +1056,9 @@ func (c Controller) DeleteAccount(db *sql.DB) http.HandlerFunc {
 func (c Controller) EditProfile(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var requestData struct {
-			FirstName string `json:"first_name"`
-			LastName  string `json:"last_name"`
-			Age       int    `json:"age"`
+			FirstName   string `json:"first_name"`
+			LastName    string `json:"last_name"`
+			DateOfBirth string `json:"date_of_birth"` // Изменено с "age" на "date_of_birth"
 		}
 
 		// Decode the body of the request
@@ -1040,22 +1075,25 @@ func (c Controller) EditProfile(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Check if the user is updating their own profile
-		var currentUserID int
-		query := "SELECT id FROM users WHERE id = ?"
-		err = db.QueryRow(query, userID).Scan(&currentUserID)
-		if err != nil || currentUserID == 0 {
+		// Проверяем существование пользователя
+		var exists bool
+		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)", userID).Scan(&exists)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error."})
+			return
+		}
+		if !exists {
 			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "User not found."})
 			return
 		}
 
-		// Update the profile data in the database, but do not allow email to be changed
+		// Update the profile data in the database
 		updateQuery := `
             UPDATE users 
-            SET first_name = ?, last_name = ?, age = ? 
+            SET first_name = ?, last_name = ?, date_of_birth = ? 
             WHERE id = ?
         `
-		_, err = db.Exec(updateQuery, requestData.FirstName, requestData.LastName, requestData.Age, userID)
+		_, err = db.Exec(updateQuery, requestData.FirstName, requestData.LastName, requestData.DateOfBirth, userID)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error updating profile."})
 			return
@@ -1217,7 +1255,6 @@ func (c *Controller) RefreshTokenHandler(db *sql.DB) http.HandlerFunc {
 		}
 	}
 }
-
 func (c Controller) VerifyResetToken(w http.ResponseWriter, r *http.Request) {
 	tokenStr := r.FormValue("token")
 	if tokenStr == "" {
@@ -2033,7 +2070,7 @@ func (c *Controller) VerifyResetCode(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Check if OTP has expired (15 minutes)
-		if time.Now().Sub(createdAt).Minutes() > 15 {
+		if time.Now().Sub(createdAt).Minutes() > 1 {
 			error.Message = "OTP has expired. Please request a new one."
 			utils.RespondWithError(w, http.StatusUnauthorized, error)
 			return
