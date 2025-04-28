@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -619,7 +620,7 @@ func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
 
 		// If user is not found in users table, check students table
 		if err == sql.ErrNoRows {
-			// Prepare query for Student table based on identifier type
+			// Check if student
 			var studentQuery string
 			if user.Email != "" {
 				studentQuery = "SELECT student_id, email, phone, password, first_name, last_name, grade, role FROM Student WHERE email = ?"
@@ -633,12 +634,10 @@ func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
 			var studentID int
 			var studentEmail, studentPhone, studentPassword, studentFirstName, studentLastName, studentRole string
 
-			// Execute query on Student table
 			studentRow := db.QueryRow(studentQuery, identifier)
 			err = studentRow.Scan(&studentID, &studentEmail, &studentPhone, &studentPassword, &studentFirstName, &studentLastName, &studentGrade, &studentRole)
 
 			if err == nil {
-				// Student found
 				userFound = true
 				user.ID = studentID
 				email = sql.NullString{String: studentEmail, Valid: studentEmail != ""}
@@ -661,20 +660,18 @@ func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Check if the user is verified (but only if it's a regular user)
+		// Check if the user is verified
 		if !verified && role == "user" {
 			error.Message = "Email not verified. Please verify your email before logging in."
 			utils.RespondWithError(w, http.StatusForbidden, error)
 			return
 		}
 
-		// For students, we might store passwords in plaintext, so check differently
+		// Validate password
 		var passwordValid bool = false
 		if role == "student" {
-			// Direct comparison for students
 			passwordValid = (hashedPassword == user.Password)
 		} else {
-			// Bcrypt comparison for regular users
 			err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(user.Password))
 			passwordValid = (err == nil)
 		}
@@ -694,29 +691,28 @@ func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
 		}
 		user.Role = role
 
-		// Generate access token
-		accessToken, err := utils.GenerateToken(user)
+		// Generate access token with 15 minutes expiration
+		accessToken, err := utils.GenerateToken(user, 15*time.Minute)
 		if err != nil {
 			error.Message = "Server error."
 			utils.RespondWithError(w, http.StatusInternalServerError, error)
 			return
 		}
 
-		// Generate refresh token
-		refreshToken, err := utils.GenerateRefreshToken(user)
+		// Generate refresh token with 7 days expiration
+		refreshToken, err := utils.GenerateRefreshToken(user, 7*24*time.Hour)
 		if err != nil {
 			error.Message = "Server error."
 			utils.RespondWithError(w, http.StatusInternalServerError, error)
 			return
 		}
 
-		// Prepare response without unnecessary fields
+		// Send response with the tokens
 		response := map[string]interface{}{
 			"access_token":  accessToken,
 			"refresh_token": refreshToken,
 		}
 
-		// Send response
 		utils.ResponseJSON(w, response)
 	}
 }
@@ -1167,53 +1163,61 @@ func (c Controller) TokenVerifyMiddleware(next http.HandlerFunc) http.HandlerFun
 		}
 	})
 }
-func (c Controller) RefreshTokenHandler(db *sql.DB) http.HandlerFunc {
+func (c *Controller) RefreshTokenHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var jwtToken models.JWT
 
-		// Разбираем refresh token из тела запроса
+		// Parse refresh token from request body
 		err := json.NewDecoder(r.Body).Decode(&jwtToken)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request format"})
 			return
 		}
 
-		// Парсим refresh token
+		// Parse refresh token
 		token, err := utils.ParseToken(jwtToken.RefreshToken)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid refresh token"})
 			return
 		}
 
-		// Проверка валидности токена
+		// Validate token
 		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-			// Извлекаем user_id из токена
+			// Extract user_id from token
 			userID := int(claims["user_id"].(float64))
 
-			// Получаем пользователя из базы данных
+			// Check expiration (should be valid for 7 days from creation)
+			expTime := time.Unix(int64(claims["exp"].(float64)), 0)
+			if time.Now().After(expTime) {
+				utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Refresh token expired"})
+				return
+			}
+
+			// Get user from database
 			user, err := utils.GetUserByID(db, userID)
 			if err != nil {
 				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "User not found"})
 				return
 			}
 
-			// Генерация нового access токена
-			accessToken, err := utils.GenerateAccessToken(user)
+			// Generate new access token with 15-minute expiration
+			accessToken, err := utils.GenerateToken(user, 1*time.Minute)
 			if err != nil {
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to generate access token"})
 				return
 			}
 
-			// Возвращаем новый access token и refresh token
+			// Return new access token with ORIGINAL refresh token
 			utils.ResponseJSON(w, map[string]string{
 				"access_token":  accessToken,
-				"refresh_token": jwtToken.RefreshToken, // или новый refresh token, если он был обновлен
+				"refresh_token": jwtToken.RefreshToken, // Keep the original refresh token
 			})
 		} else {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid refresh token"})
 		}
 	}
 }
+
 func (c Controller) VerifyResetToken(w http.ResponseWriter, r *http.Request) {
 	tokenStr := r.FormValue("token")
 	if tokenStr == "" {
@@ -2190,4 +2194,47 @@ func (c *Controller) GetSchoolAdminsWithoutSchools(db *sql.DB) http.HandlerFunc 
 		// Отправляем список schooladmins без школ в формате JSON
 		utils.ResponseJSON(w, schoolAdminsWithoutSchools)
 	}
+}
+func AuthMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Get token from Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Authorization header is required"})
+			return
+		}
+
+		// Typically, the token is prefixed with "Bearer "
+		tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
+
+		// Parse and validate the token
+		token, err := utils.ParseToken(tokenString)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
+
+		// Check if token is valid
+		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+			// Check expiration time explicitly to ensure it's enforced
+			expTime := time.Unix(int64(claims["exp"].(float64)), 0)
+			if time.Now().After(expTime) {
+				utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Token expired"})
+				return
+			}
+
+			// Add user information to request context for further handlers
+			userID := int(claims["user_id"].(float64))
+			role := claims["role"].(string)
+
+			// Create a context with user information
+			ctx := context.WithValue(r.Context(), "user_id", userID)
+			ctx = context.WithValue(ctx, "role", role)
+
+			// Continue with the next handler with the updated context
+			next.ServeHTTP(w, r.WithContext(ctx))
+		} else {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+		}
+	})
 }

@@ -55,37 +55,43 @@ func IsPhoneNumber(input string) bool {
 	phoneRegex := regexp.MustCompile(`^\d{7,15}$`)
 	return phoneRegex.MatchString(strings.TrimSpace(input))
 }
-func GenerateToken(user models.User) (string, error) {
-	secret := os.Getenv("SECRET")
-	if secret == "" {
-		return "", errors.New("SECRET environment variable is not set")
-	}
+func GenerateToken(user models.User, expiration time.Duration) (string, error) {
+    secret := os.Getenv("SECRET")
+    if secret == "" {
+        return "", errors.New("SECRET environment variable is not set")
+    }
 
-	if user.Email == "" && user.Phone == "" {
-		return "", errors.New("user must have either email or phone")
-	}
+    if user.Email == "" && user.Phone == "" {
+        return "", errors.New("user must have either email or phone")
+    }
 
-	claims := jwt.MapClaims{
-		"iss":     "course",
-		"user_id": user.ID,
-		"role":    user.Role,
-	}
+    // Create token with explicit expiration time
+    expirationTime := time.Now().Add(expiration)
+    
+    claims := jwt.MapClaims{
+        "iss":     "course",
+        "user_id": user.ID,
+        "role":    user.Role,
+        "exp":     expirationTime.Unix(),
+        "iat":     time.Now().Unix(), // Issued at time
+    }
 
-	if user.Email != "" {
-		claims["email"] = user.Email
-	} else if user.Phone != "" {
-		claims["phone"] = user.Phone
-	}
+    if user.Email != "" {
+        claims["email"] = user.Email
+    } else if user.Phone != "" {
+        claims["phone"] = user.Phone
+    }
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
-	tokenString, err := token.SignedString([]byte(secret))
-	if err != nil {
-		return "", err
-	}
+    tokenString, err := token.SignedString([]byte(secret))
+    if err != nil {
+        return "", err
+    }
 
-	return tokenString, nil
+    return tokenString, nil
 }
+
 func GenerateVerificationToken(email string) (string, error) {
 	secret := os.Getenv("SECRET")
 	if secret == "" {
@@ -100,14 +106,34 @@ func GenerateVerificationToken(email string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(secret))
 }
-func ParseToken(tokenStr string) (*jwt.Token, error) {
-	return jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+func ParseToken(tokenString string) (*jwt.Token, error) {
+	secret := os.Getenv("SECRET")
+	if secret == "" {
+		return nil, errors.New("SECRET environment variable is not set")
+	}
+
+	// Use ParseWithClaims to explicitly handle claims validation
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// Verify signing algorithm
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method")
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return []byte(os.Getenv("SECRET")), nil
+		return []byte(secret), nil
 	})
+
+	// Handle validation errors
+	if err != nil {
+		if ve, ok := err.(*jwt.ValidationError); ok {
+			if ve.Errors&jwt.ValidationErrorExpired != 0 {
+				return nil, errors.New("token expired")
+			}
+		}
+		return nil, err
+	}
+
+	return token, nil
 }
+
 func VerifyToken(r *http.Request) (int, error) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
@@ -132,7 +158,7 @@ func VerifyToken(r *http.Request) (int, error) {
 	}
 	return 0, errors.New("Invalid token")
 }
-func GenerateRefreshToken(user models.User) (string, error) {
+func GenerateRefreshToken(user models.User, expiration time.Duration) (string, error) {
 	secret := os.Getenv("SECRET")
 	if secret == "" {
 		return "", errors.New("SECRET environment variable is not set")
@@ -141,8 +167,8 @@ func GenerateRefreshToken(user models.User) (string, error) {
 	// Создаем claims для Refresh Token
 	claims := jwt.MapClaims{
 		"iss":     "course",
-		"user_id": user.ID,                                   // Добавляем user_id
-		"exp":     time.Now().Add(7 * 24 * time.Hour).Unix(), // Токен истекает через 7 дней
+		"user_id": user.ID,                           // Добавляем user_id
+		"exp":     time.Now().Add(expiration).Unix(), // Токен истекает через expiration времени
 	}
 
 	if user.Email != "" {
@@ -159,7 +185,6 @@ func GenerateRefreshToken(user models.User) (string, error) {
 
 	return tokenString, nil
 }
-
 func SendEmail(to, subject, body string) {
 	from := "mralibekmurat27@gmail.com"
 	password := "bdyi mtae fqub cfcr"
@@ -363,18 +388,21 @@ func HashPassword(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	return string(bytes), err
 }
-func GenerateAccessToken(user models.User) (string, error) {
+func GenerateAccessToken(user models.User, expiration time.Duration) (string, error) {
 	secret := os.Getenv("SECRET")
 	if secret == "" {
 		return "", errors.New("SECRET environment variable is not set")
 	}
 
-	// Создаем claims для Access Token
+	if user.Email == "" && user.Phone == "" {
+		return "", errors.New("user must have either email or phone")
+	}
+
 	claims := jwt.MapClaims{
 		"iss":     "course",
 		"user_id": user.ID,
 		"role":    user.Role,
-		"exp":     time.Now().Add(time.Minute * 15).Unix(), // Токен истекает через 15 минут
+		"exp":     time.Now().Add(expiration).Unix(), // Используем expiration для времени жизни токена
 	}
 
 	if user.Email != "" {
@@ -394,46 +422,50 @@ func GenerateAccessToken(user models.User) (string, error) {
 }
 func GetUserByID(db *sql.DB, userID int) (models.User, error) {
 	var user models.User
-	var email, phone, firstName, lastName sql.NullString
-	var age sql.NullInt64
-	var role sql.NullString
+	var email sql.NullString
+	var phone sql.NullString
 
-	// Use appropriate placeholder for your database
+	// Try to find in users table first
 	query := "SELECT id, email, phone, first_name, last_name, age, role FROM users WHERE id = ?"
+	err := db.QueryRow(query, userID).Scan(&user.ID, &email, &phone, &user.FirstName, &user.LastName, &user.Age, &user.Role)
 
-	err := db.QueryRow(query, userID).Scan(
-		&user.ID,
-		&email,
-		&phone,
-		&firstName,
-		&lastName,
-		&age,
-		&role,
-	)
-
-	if err != nil {
-		return user, fmt.Errorf("user not found: %v", err)
+	// If not found in users table, check students table
+	if err == sql.ErrNoRows {
+		var studentGrade int
+		studentQuery := "SELECT student_id, email, phone, first_name, last_name, grade, role FROM Student WHERE student_id = ?"
+		err = db.QueryRow(studentQuery, userID).Scan(&user.ID, &email, &phone, &user.FirstName, &user.LastName, &studentGrade, &user.Role)
+		if err != nil {
+			return user, err
+		}
+	} else if err != nil {
+		return user, err
 	}
 
-	// Convert nullable fields to regular fields
+	// Set user properties
 	if email.Valid {
 		user.Email = email.String
 	}
 	if phone.Valid {
 		user.Phone = phone.String
 	}
-	if firstName.Valid {
-		user.FirstName = firstName.String
-	}
-	if lastName.Valid {
-		user.LastName = lastName.String
-	}
-	if age.Valid {
-		user.Age = int(age.Int64)
-	}
-	if role.Valid {
-		user.Role = role.String
-	}
 
 	return user, nil
+}
+func IsTokenExpired(tokenString string) bool {
+    token, err := ParseToken(tokenString)
+    if err != nil {
+        return true
+    }
+    
+    claims, ok := token.Claims.(jwt.MapClaims)
+    if !ok {
+        return true
+    }
+    
+    exp, ok := claims["exp"].(float64)
+    if !ok {
+        return true
+    }
+    
+    return time.Now().Unix() > int64(exp)
 }
