@@ -72,6 +72,7 @@ func main() {
 	republicanOlympiadController := controllers.RepublicanOlympiadController{}
 	TotalOlympiadRatingController := controllers.TotalOlympiadRatingController{}
 	contactController := &controllers.ContactUsController{}
+	SubjectOlympiadController := controllers.SubjectOlympiadController{}
 
 	router := mux.NewRouter()
 
@@ -94,6 +95,7 @@ func main() {
 	router.HandleFunc("/api/users", controller.GetAllUsers(db)).Methods("GET")
 	router.HandleFunc("/api/users", controller.CreateUser(db)).Methods("POST")
 	router.HandleFunc("/api/users/{id}", controller.UpdateUser(db)).Methods("PUT")
+	router.HandleFunc("/api/users/me", controller.EditProfile(db)).Methods("PUT")
 	router.HandleFunc("/api/users/me", controller.TokenVerifyMiddleware(controller.EditProfile(db))).Methods("PUT")
 	router.HandleFunc("/api/users/me/avatar", controller.UploadAvatar(db)).Methods("POST")
 	router.HandleFunc("/api/users/me/avatar", controller.UpdateAvatar(db)).Methods("PUT")
@@ -208,6 +210,9 @@ func main() {
 	// Итоговый рейтинг по олимппиадам
 	// =======================
 	router.HandleFunc("/api/olympiads/total-rating", TotalOlympiadRatingController.GetTotalOlympiadRating(db)).Methods("GET")
+
+	router.HandleFunc("/api/olympiads/create", SubjectOlympiadController.CreateOlympiad(db)).Methods("POST")
+	router.HandleFunc("/api/olympiads/register", SubjectOlympiadController.RegisterStudentToOlympiad(db)).Methods("POST")
 
 	// =======================
 	// Контактная информация

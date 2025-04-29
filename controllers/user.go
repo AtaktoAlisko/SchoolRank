@@ -472,6 +472,7 @@ func (c *Controller) Signup(db *sql.DB) http.HandlerFunc {
 	}
 }
 func (c *Controller) GetMe(db *sql.DB) http.HandlerFunc {
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract token from Authorization header
 		authHeader := r.Header.Get("Authorization")
@@ -497,119 +498,150 @@ func (c *Controller) GetMe(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Check if this is an access token (distinguish from refresh token)
-		// Access tokens have 'role' claim, refresh tokens don't
-		_, hasRole := claims["role"]
-		if !hasRole {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Refresh tokens are not allowed for this endpoint"})
-			return
-		}
-
-		// Check if token is expired
-		expTime := time.Unix(int64(claims["exp"].(float64)), 0)
-		if time.Now().After(expTime) {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Token expired"})
-			return
-		}
-
-		// Extract user ID from token
+		// Extract user ID and role from token
 		id := int(claims["user_id"].(float64))
+		role := claims["role"].(string)
 
-		// Запрос к базе для получения данных пользователя, включая date_of_birth и age
-		var user models.User
-		var email sql.NullString
-		var role sql.NullString
-		var avatarURL sql.NullString
-		var dateOfBirth sql.NullString
-		var age sql.NullInt64           // Use nullable int for age
-		var passwordHash sql.NullString // Хэш пароля (но мы не будем его возвращать)
+		// Initialize variables for user/student data
+		var userOrStudent interface{}
+		var found bool = false
 
-		err = db.QueryRow("SELECT id, first_name, last_name, email, role, avatar_url, date_of_birth, age, password FROM users WHERE id = ?", id).
-			Scan(&user.ID, &user.FirstName, &user.LastName, &email, &role, &avatarURL, &dateOfBirth, &age, &passwordHash)
+		// Try to check in the student table first if role is "student"
+		if role == "student" {
+			userOrStudent, found = c.getStudentData(db, id)
+		}
 
-		if err != nil {
-			if err == sql.ErrNoRows {
-				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "User not found"})
-			} else {
-				log.Printf("Error fetching user data: %v", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: err.Error()})
-			}
+		// If not found as a student or role is "user", check in the users table
+		if !found {
+			userOrStudent, found = c.getUserData(db, id)
+		}
+
+		if !found {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "User not found"})
 			return
 		}
 
-		// Log the fetched values for debugging
-		log.Printf("GetMe: Fetched user ID=%d with DOB=%v, Age=%v", id, dateOfBirth, age)
+		// Return the appropriate user or student data
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(userOrStudent)
+	}
+}
+func (c *Controller) getStudentData(db *sql.DB, id int) (interface{}, bool) {
+	var email, phone, login sql.NullString
+	var avatarURL, dateOfBirth sql.NullString
+	var age sql.NullInt64
+	var passwordHash sql.NullString
+	var patronymic, iin, letter, gender sql.NullString
+	var grade, schoolID sql.NullInt64
 
-		// Если email не NULL, присваиваем его
-		if email.Valid {
-			user.Email = email.String
+	var student models.Student
+
+	err := db.QueryRow(`
+		SELECT student_id, first_name, last_name, email, avatar_url, date_of_birth, 
+		       age, password, patronymic, iin, grade, school_id, letter, gender, phone, login 
+		FROM student WHERE student_id = ?`, id).
+		Scan(&student.ID, &student.FirstName, &student.LastName, &email, &avatarURL,
+			&dateOfBirth, &age, &passwordHash, &patronymic, &iin, &grade, &schoolID,
+			&letter, &gender, &phone, &login)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, false
 		}
+		log.Printf("Error fetching student data: %v", err)
+		return nil, false
+	}
 
-		// Если роль не NULL, присваиваем роль
-		if role.Valid {
-			user.Role = role.String
-		}
+	// Заполняем student
+	if email.Valid {
+		student.Email = email.String
+	}
+	if phone.Valid {
+		student.Phone = phone.String
+	}
+	if login.Valid {
+		student.Login = login.String
+	}
+	if patronymic.Valid {
+		student.Patronymic = patronymic.String
+	}
+	if iin.Valid {
+		student.IIN = iin.String
+	}
+	if letter.Valid {
+		student.Letter = letter.String
+	}
+	if gender.Valid {
+		student.Gender = gender.String
+	}
+	if grade.Valid {
+		student.Grade = int(grade.Int64)
+	}
+	if schoolID.Valid {
+		student.SchoolID = int(schoolID.Int64)
+	}
 
-		// Если дата рождения или возраст равны NULL, используем корректные значения
-		var dateOfBirthStr string
-		var ageValue int
-
-		if dateOfBirth.Valid {
-			dateOfBirthStr = dateOfBirth.String
-		} else {
-			dateOfBirthStr = "" // Ensure empty string is returned rather than null
-		}
-
-		if age.Valid {
-			ageValue = int(age.Int64)
-		} else {
-			ageValue = 0
-
-			// Если есть дата рождения, но нет возраста, вычисляем его
-			if dateOfBirth.Valid && dateOfBirth.String != "" {
-				dob, err := time.Parse("2006-01-02", dateOfBirth.String)
-				if err == nil {
-					now := time.Now()
-					ageValue = now.Year() - dob.Year()
-
-					// Корректируем возраст, если день рождения еще не был в этом году
-					if now.Month() < dob.Month() || (now.Month() == dob.Month() && now.Day() < dob.Day()) {
-						ageValue--
-					}
-
-					// Обновляем возраст в базе данных, если его пришлось вычислить
-					_, updateErr := db.Exec("UPDATE users SET age = ? WHERE id = ?", ageValue, id)
-					if updateErr != nil {
-						log.Printf("Failed to update age in database: %v", updateErr)
-					} else {
-						log.Printf("Updated missing age value to %d for user ID %d", ageValue, id)
-					}
+	// Вычисляем возраст
+	var ageValue int
+	if age.Valid {
+		ageValue = int(age.Int64)
+	} else {
+		ageValue = 0
+		if dateOfBirth.Valid && dateOfBirth.String != "" {
+			dob, err := time.Parse("2006-01-02", dateOfBirth.String)
+			if err == nil {
+				now := time.Now()
+				ageValue = now.Year() - dob.Year()
+				if now.Month() < dob.Month() || (now.Month() == dob.Month() && now.Day() < dob.Day()) {
+					ageValue--
+				}
+				_, updateErr := db.Exec("UPDATE student SET age = ? WHERE student_id = ?", ageValue, id)
+				if updateErr != nil {
+					log.Printf("Failed to update age in database: %v", updateErr)
 				}
 			}
 		}
-
-		// Создаем кастомную карту для ответа
-		userMap := map[string]interface{}{
-			"id":            user.ID,
-			"email":         user.Email,
-			"first_name":    user.FirstName,
-			"last_name":     user.LastName,
-			"role":          user.Role,
-			"age":           ageValue,
-			"date_of_birth": dateOfBirthStr, // Always include date_of_birth, even if empty
-		}
-
-		// Только если avatar_url существует, добавляем его
-		if avatarURL.Valid {
-			userMap["avatar_url"] = avatarURL.String
-		} else {
-			userMap["avatar_url"] = nil
-		}
-
-		// Возвращаем кастомный ответ
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(userMap)
 	}
+
+	type StudentResponse struct {
+		ID          int     `json:"id"`
+		FirstName   string  `json:"first_name"`
+		LastName    string  `json:"last_name"`
+		Patronymic  string  `json:"patronymic"`
+		IIN         string  `json:"iin"`
+		Gender      string  `json:"gender"`
+		Age         int     `json:"age"`
+		AvatarURL   *string `json:"avatar_url"`
+		DateOfBirth string  `json:"date_of_birth"`
+		Email       string  `json:"email"`
+		Role        string  `json:"role"`
+		SchoolID    int     `json:"school_id"`
+	}
+
+	studentData := StudentResponse{
+		Age:         ageValue,
+		AvatarURL:   nil,
+		DateOfBirth: "",
+		Email:       student.Email,
+		FirstName:   student.FirstName,
+		Gender:      student.Gender,
+		ID:          student.ID,
+		IIN:         student.IIN,
+		LastName:    student.LastName,
+		Patronymic:  student.Patronymic,
+		Role:        "student",
+		SchoolID:    student.SchoolID,
+	}
+
+	if avatarURL.Valid {
+		studentData.AvatarURL = &avatarURL.String
+	}
+	if dateOfBirth.Valid {
+		studentData.DateOfBirth = dateOfBirth.String
+	}
+
+	// Возвращаем результат
+	return studentData, true
 }
 func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -632,16 +664,20 @@ func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
 		var role string
 		var verified bool
 		var userFound bool = false
+		var login sql.NullString
+
+		// For debugging
+		log.Println("Login attempt with:", user.Email, user.Phone, user.Login, user.Password)
 
 		// Check that email, phone, or login are provided
 		if user.Email != "" {
-			query = "SELECT id, email, phone, password, first_name, last_name, age, role, verified FROM users WHERE email = ?"
+			query = "SELECT id, email, phone, password, first_name, last_name, age, role, verified, login FROM users WHERE email = ?"
 			identifier = user.Email
 		} else if user.Phone != "" {
-			query = "SELECT id, email, phone, password, first_name, last_name, age, role, verified FROM users WHERE phone = ?"
+			query = "SELECT id, email, phone, password, first_name, last_name, age, role, verified, login FROM users WHERE phone = ?"
 			identifier = user.Phone
 		} else if user.Login != "" { // If login is provided
-			query = "SELECT id, email, phone, password, first_name, last_name, age, role, verified FROM users WHERE login = ?"
+			query = "SELECT id, email, phone, password, first_name, last_name, age, role, verified, login FROM users WHERE login = ?"
 			identifier = user.Login
 		} else {
 			error.Message = "Email, phone, or login is required."
@@ -651,28 +687,32 @@ func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
 
 		// Try to find the user in users table
 		row := db.QueryRow(query, identifier)
-		err = row.Scan(&user.ID, &email, &phone, &hashedPassword, &user.FirstName, &user.LastName, &user.Age, &role, &verified)
+		err = row.Scan(&user.ID, &email, &phone, &hashedPassword, &user.FirstName, &user.LastName, &user.Age, &role, &verified, &login)
 
 		// If user is not found in users table, check students table
 		if err == sql.ErrNoRows {
+			log.Println("User not found in users table, checking Student table...")
+
 			// Check if student
 			var studentQuery string
 			if user.Email != "" {
-				studentQuery = "SELECT student_id, email, phone, password, first_name, last_name, grade, role FROM Student WHERE email = ?"
+				studentQuery = "SELECT student_id, email, phone, password, first_name, last_name, grade, role, login FROM student WHERE email = ?"
 			} else if user.Phone != "" {
-				studentQuery = "SELECT student_id, email, phone, password, first_name, last_name, grade, role FROM Student WHERE phone = ?"
+				studentQuery = "SELECT student_id, email, phone, password, first_name, last_name, grade, role, login FROM student WHERE phone = ?"
 			} else if user.Login != "" {
-				studentQuery = "SELECT student_id, email, phone, password, first_name, last_name, grade, role FROM Student WHERE login = ?"
+				studentQuery = "SELECT student_id, email, phone, password, first_name, last_name, grade, role, login FROM student WHERE login = ?"
 			}
 
 			var studentGrade int
 			var studentID int
-			var studentEmail, studentPhone, studentPassword, studentFirstName, studentLastName, studentRole string
+			var studentEmail, studentPhone, studentPassword, studentFirstName, studentLastName, studentRole, studentLogin string
 
+			log.Println("Executing student query:", studentQuery, "with identifier:", identifier)
 			studentRow := db.QueryRow(studentQuery, identifier)
-			err = studentRow.Scan(&studentID, &studentEmail, &studentPhone, &studentPassword, &studentFirstName, &studentLastName, &studentGrade, &studentRole)
+			err = studentRow.Scan(&studentID, &studentEmail, &studentPhone, &studentPassword, &studentFirstName, &studentLastName, &studentGrade, &studentRole, &studentLogin)
 
 			if err == nil {
+				log.Println("Student found:", studentID, studentEmail, studentRole)
 				userFound = true
 				user.ID = studentID
 				email = sql.NullString{String: studentEmail, Valid: studentEmail != ""}
@@ -682,11 +722,26 @@ func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
 				user.LastName = studentLastName
 				user.Age = 0 // Age might not be available for students, using grade instead
 				role = studentRole
+				if login.Valid {
+					user.Login = login.String
+				}
+
 				verified = true // Students are considered verified by default
+
+				log.Println("Student password from DB:", hashedPassword)
+				log.Println("Password provided:", user.Password)
+			} else {
+				log.Println("Error finding student:", err)
 			}
 		} else if err == nil {
 			// User found in users table
 			userFound = true
+			if login.Valid {
+				user.Login = login.String
+			}
+			user.Role = role // ✅ Добавь ЭТО
+		} else {
+			log.Println("Error querying users table:", err)
 		}
 
 		if !userFound {
@@ -705,7 +760,9 @@ func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
 		// Validate password
 		var passwordValid bool = false
 		if role == "student" {
+			// Direct comparison for student passwords as they may not be hashed
 			passwordValid = (hashedPassword == user.Password)
+			log.Println("Student password validation:", passwordValid, hashedPassword, user.Password)
 		} else {
 			err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(user.Password))
 			passwordValid = (err == nil)
@@ -727,7 +784,7 @@ func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
 		user.Role = role
 
 		// Generate access token with 15 minutes expiration
-		accessToken, err := utils.GenerateToken(user, 1*time.Minute)
+		accessToken, err := utils.GenerateToken(user, 15*time.Minute)
 		if err != nil {
 			error.Message = "Server error."
 			utils.RespondWithError(w, http.StatusInternalServerError, error)
@@ -1053,56 +1110,124 @@ func (c Controller) DeleteAccount(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, map[string]string{"message": "Account deleted successfully"})
 	}
 }
-func (c Controller) EditProfile(db *sql.DB) http.HandlerFunc {
+func (c *Controller) EditProfile(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var requestData struct {
-			FirstName   string `json:"first_name"`
-			LastName    string `json:"last_name"`
-			DateOfBirth string `json:"date_of_birth"` // Изменено с "age" на "date_of_birth"
-		}
+		var user models.User
+		var error models.Error
 
-		// Decode the body of the request
-		err := json.NewDecoder(r.Body).Decode(&requestData)
+		// Декодируем запрос
+		err := json.NewDecoder(r.Body).Decode(&user)
 		if err != nil {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body."})
+			error.Message = "Invalid request body."
+			utils.RespondWithError(w, http.StatusBadRequest, error)
 			return
 		}
 
-		// Get the user ID from the token (which is validated in the middleware)
-		userID, err := utils.VerifyToken(r)
+		// Извлекаем токен авторизации
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			error.Message = "Authorization header is required"
+			utils.RespondWithError(w, http.StatusUnauthorized, error)
+			return
+		}
+
+		// Ожидаем, что токен будет в формате "Bearer <token>"
+		tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
+
+		// Парсим токен
+		token, err := utils.ParseToken(tokenString)
 		if err != nil {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			error.Message = "Invalid token"
+			utils.RespondWithError(w, http.StatusUnauthorized, error)
 			return
 		}
 
-		// Проверяем существование пользователя
-		var exists bool
-		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)", userID).Scan(&exists)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error."})
-			return
-		}
-		if !exists {
-			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "User not found."})
+		// Проверяем, что токен валидный и извлекаем данные
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok || !token.Valid {
+			error.Message = "Invalid token"
+			utils.RespondWithError(w, http.StatusUnauthorized, error)
 			return
 		}
 
-		// Update the profile data in the database
-		updateQuery := `
-            UPDATE users 
-            SET first_name = ?, last_name = ?, date_of_birth = ? 
-            WHERE id = ?
-        `
-		_, err = db.Exec(updateQuery, requestData.FirstName, requestData.LastName, requestData.DateOfBirth, userID)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error updating profile."})
+		// Извлекаем userID и роль из токена
+		userID := int(claims["user_id"].(float64))
+		role := claims["role"].(string)
+
+		// Логируем извлеченные данные для отладки
+		log.Printf("User ID from token: %d", userID)
+		log.Printf("User role from token: %s", role)
+
+		// Проверяем, существует ли пользователь в базе данных
+		var existingID int
+		var currentPassword string
+		err = db.QueryRow("SELECT id, password, role FROM users WHERE id = ?", userID).Scan(&existingID, &currentPassword, &role)
+		if err == sql.ErrNoRows {
+			error.Message = "User not found"
+			utils.RespondWithError(w, http.StatusNotFound, error)
+			return
+		} else if err != nil {
+			log.Printf("Error fetching user: %v", err)
+			error.Message = "Server error."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
 			return
 		}
 
-		// Respond with a success message
-		utils.ResponseJSON(w, map[string]string{"message": "Profile updated successfully."})
+		// Логируем извлеченные данные пользователя
+		log.Printf("User ID from DB: %d", existingID)
+		log.Printf("User role from DB: %s", role)
+
+		// Если роль не "superadmin", проверяем, что пользователь обновляет только свои данные
+		if role != "superadmin" && userID != existingID {
+			error.Message = "You do not have permission to edit this profile."
+			utils.RespondWithError(w, http.StatusForbidden, error)
+			return
+		}
+
+		// Обновляем только те данные, которые были переданы в запросе
+		if user.FirstName != "" {
+			// Если передано новое имя, обновляем его
+			_, err = db.Exec("UPDATE users SET first_name = ? WHERE id = ?", user.FirstName, userID)
+			if err != nil {
+				log.Printf("Error updating first_name: %v", err)
+				error.Message = "Failed to update first name."
+				utils.RespondWithError(w, http.StatusInternalServerError, error)
+				return
+			}
+		}
+
+		if user.LastName != "" {
+			// Если передана новая фамилия, обновляем её
+			_, err = db.Exec("UPDATE users SET last_name = ? WHERE id = ?", user.LastName, userID)
+			if err != nil {
+				log.Printf("Error updating last_name: %v", err)
+				error.Message = "Failed to update last name."
+				utils.RespondWithError(w, http.StatusInternalServerError, error)
+				return
+			}
+		}
+
+		if user.DateOfBirth != "" {
+			// Если передана новая дата рождения, обновляем её
+			_, err = db.Exec("UPDATE users SET date_of_birth = ? WHERE id = ?", user.DateOfBirth, userID)
+			if err != nil {
+				log.Printf("Error updating date_of_birth: %v", err)
+				error.Message = "Failed to update date of birth."
+				utils.RespondWithError(w, http.StatusInternalServerError, error)
+				return
+			}
+		}
+
+		// Возвращаем успешный ответ
+		response := map[string]interface{}{
+			"message": "Profile updated successfully.",
+		}
+
+		utils.ResponseJSON(w, response)
 	}
 }
+
+
 func (c Controller) UpdatePassword(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var requestData struct {
@@ -1165,37 +1290,41 @@ func (c Controller) UpdatePassword(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, map[string]string{"message": "Password updated successfully."})
 	}
 }
-func (c Controller) TokenVerifyMiddleware(next http.HandlerFunc) http.HandlerFunc {
+func (c *Controller) TokenVerifyMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var errorObject models.Error
 		authHeader := r.Header.Get("Authorization")
 		bearerToken := strings.Split(authHeader, " ")
 
+		// Check if the token exists
 		if len(bearerToken) == 2 {
 			authToken := bearerToken[1]
 
+			// Parse and validate the token
 			token, err := jwt.Parse(authToken, func(token *jwt.Token) (interface{}, error) {
 				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-					return nil, fmt.Errorf("There was an error")
+					return nil, fmt.Errorf("there was an error with the token")
 				}
 				return []byte(os.Getenv("SECRET")), nil
 			})
 
+			// If there's an error in token parsing or it's invalid
 			if err != nil {
 				errorObject.Message = err.Error()
 				utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
 				return
 			}
 
+			// If the token is valid, proceed to the next handler
 			if token.Valid {
 				next.ServeHTTP(w, r)
 			} else {
-				errorObject.Message = err.Error()
+				errorObject.Message = "Invalid token."
 				utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
 				return
 			}
 		} else {
-			errorObject.Message = "Invalid Token."
+			errorObject.Message = "Invalid token format."
 			utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
 			return
 		}
@@ -1239,7 +1368,7 @@ func (c *Controller) RefreshTokenHandler(db *sql.DB) http.HandlerFunc {
 			}
 
 			// Generate new access token with 15-minute expiration
-			accessToken, err := utils.GenerateToken(user, 1*time.Minute)
+			accessToken, err := utils.GenerateToken(user, 15*time.Minute)
 			if err != nil {
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to generate access token"})
 				return
@@ -1837,12 +1966,15 @@ func (c Controller) ChangeUserRole(db *sql.DB) http.HandlerFunc {
 }
 func (c Controller) UploadAvatar(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Получаем userID из токена
-		userID, err := utils.VerifyToken(r)
+		// Получаем userID из токенаs
+		user, err := utils.VerifyToken(r)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
 			return
 		}
+
+		// Извлекаем userID из структуры
+		userID := user.ID
 
 		// Чтение файла аватара
 		file, _, err := r.FormFile("avatar")
@@ -1866,7 +1998,7 @@ func (c Controller) UploadAvatar(db *sql.DB) http.HandlerFunc {
 
 		// Обновление URL аватара в базе данных
 		query := "UPDATE users SET avatar_url = ? WHERE id = ?"
-		_, err = db.Exec(query, photoURL, userID)
+		_, err = db.Exec(query, photoURL, userID) // Теперь передаем только userID
 		if err != nil {
 			log.Println("Error updating avatar URL:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update avatar URL"})
@@ -1877,14 +2009,21 @@ func (c Controller) UploadAvatar(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, map[string]string{"message": "Avatar uploaded successfully", "avatar_url": photoURL})
 	}
 }
+
 func (c Controller) UpdateAvatar(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Получаем userID из токена
-		userID, err := utils.VerifyToken(r)
+		user, err := utils.VerifyToken(r)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
 			return
 		}
+
+		// Извлекаем userID из структуры User
+		userID := user.ID // Используем только ID из структуры
+
+		// Логируем userID для отладки
+		log.Println("UserID from token:", userID)
 
 		// Получаем данные о старом аватаре
 		var currentAvatarURL sql.NullString
@@ -1895,6 +2034,9 @@ func (c Controller) UpdateAvatar(db *sql.DB) http.HandlerFunc {
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch current avatar"})
 			return
 		}
+
+		// Логируем URL текущего аватара для отладки
+		log.Println("Current avatar URL:", currentAvatarURL.String)
 
 		// Удаление старого аватара с S3, если он существует
 		if currentAvatarURL.Valid && currentAvatarURL.String != "" && currentAvatarURL.String != "https://your-bucket-name.s3.amazonaws.com/default-avatar.jpg" {
@@ -1928,7 +2070,7 @@ func (c Controller) UpdateAvatar(db *sql.DB) http.HandlerFunc {
 
 		// Обновление URL аватара в базе данных
 		query = "UPDATE users SET avatar_url = ? WHERE id = ?"
-		_, err = db.Exec(query, newAvatarURL, userID)
+		_, err = db.Exec(query, newAvatarURL, userID) // Теперь передаем только userID
 		if err != nil {
 			log.Println("Error updating avatar URL:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update avatar URL"})
@@ -2070,7 +2212,7 @@ func (c *Controller) VerifyResetCode(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Check if OTP has expired (15 minutes)
-		if time.Now().Sub(createdAt).Minutes() > 1 {
+		if time.Now().Sub(createdAt).Minutes() > 15 {
 			error.Message = "OTP has expired. Please request a new one."
 			utils.RespondWithError(w, http.StatusUnauthorized, error)
 			return
@@ -2274,4 +2416,104 @@ func AuthMiddleware(next http.Handler) http.Handler {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
 		}
 	})
+}
+func (c *Controller) getUserData(db *sql.DB, id int) (interface{}, bool) {
+	var email, phone, login sql.NullString
+	var avatarURL, dateOfBirth sql.NullString
+	var age sql.NullInt64
+	var passwordHash sql.NullString
+	var schoolID sql.NullInt64
+	var isVerified sql.NullBool
+
+	var user models.User
+
+	err := db.QueryRow(`
+		SELECT id, first_name, last_name, email, phone, login, avatar_url, date_of_birth, 
+		       age, password, role, school_id, is_verified 
+		FROM users WHERE id = ?`, id).
+		Scan(&user.ID, &user.FirstName, &user.LastName, &email, &phone, &login, &avatarURL,
+			&dateOfBirth, &age, &passwordHash, &user.Role, &schoolID, &isVerified)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, false
+		}
+		log.Printf("Error fetching user data: %v", err)
+		return nil, false
+	}
+
+	// Обрабатываем значения
+	if email.Valid {
+		user.Email = email.String
+	}
+	if phone.Valid {
+		user.Phone = phone.String
+	}
+	if login.Valid {
+		user.Login = login.String
+	}
+	if isVerified.Valid {
+		user.IsVerified = isVerified.Bool
+	}
+	if schoolID.Valid {
+		user.SchoolID = int(schoolID.Int64)
+	}
+
+	// Вычисляем возраст
+	var ageValue int
+	if age.Valid {
+		ageValue = int(age.Int64)
+	} else {
+		ageValue = 0
+		if dateOfBirth.Valid && dateOfBirth.String != "" {
+			dob, err := time.Parse("2006-01-02", dateOfBirth.String)
+			if err == nil {
+				now := time.Now()
+				ageValue = now.Year() - dob.Year()
+				if now.Month() < dob.Month() || (now.Month() == dob.Month() && now.Day() < dob.Day()) {
+					ageValue--
+				}
+				_, updateErr := db.Exec("UPDATE users SET age = ? WHERE id = ?", ageValue, id)
+				if updateErr != nil {
+					log.Printf("Failed to update age in database: %v", updateErr)
+				}
+			}
+		}
+	}
+
+	// === ❗ Создаём структуру ответа ===
+	type UserResponse struct {
+		ID          int     `json:"id"`
+		FirstName   string  `json:"first_name"`
+		LastName    string  `json:"last_name"`
+		Age         int     `json:"age"`
+		DateOfBirth string  `json:"date_of_birth"`
+		Email       string  `json:"email"`
+		Role        string  `json:"role"`
+		AvatarURL   *string `json:"avatar_url"`
+		SchoolID    int     `json:"school_id"`
+		IsVerified  bool    `json:"is_verified"`
+	}
+	userData := UserResponse{
+		Age:         ageValue,
+		AvatarURL:   nil,
+		DateOfBirth: "",
+		Email:       user.Email,
+		FirstName:   user.FirstName,
+		LastName:    user.LastName,
+		Role:        user.Role,
+		ID:          user.ID,
+		SchoolID:    user.SchoolID,
+		IsVerified:  user.IsVerified,
+	}
+
+	if avatarURL.Valid {
+		userData.AvatarURL = &avatarURL.String
+	}
+	if dateOfBirth.Valid {
+		userData.DateOfBirth = dateOfBirth.String
+	}
+
+	// Возвращаем
+	return userData, true
 }

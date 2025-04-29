@@ -56,42 +56,41 @@ func IsPhoneNumber(input string) bool {
 	return phoneRegex.MatchString(strings.TrimSpace(input))
 }
 func GenerateToken(user models.User, expiration time.Duration) (string, error) {
-    secret := os.Getenv("SECRET")
-    if secret == "" {
-        return "", errors.New("SECRET environment variable is not set")
-    }
+	secret := os.Getenv("SECRET")
+	if secret == "" {
+		return "", errors.New("SECRET environment variable is not set")
+	}
 
-    if user.Email == "" && user.Phone == "" {
-        return "", errors.New("user must have either email or phone")
-    }
+	if user.Email == "" && user.Phone == "" {
+		return "", errors.New("user must have either email or phone")
+	}
 
-    // Create token with explicit expiration time
-    expirationTime := time.Now().Add(expiration)
-    
-    claims := jwt.MapClaims{
-        "iss":     "course",
-        "user_id": user.ID,
-        "role":    user.Role,
-        "exp":     expirationTime.Unix(),
-        "iat":     time.Now().Unix(), // Issued at time
-    }
+	// Create token with explicit expiration time
+	expirationTime := time.Now().Add(expiration)
 
-    if user.Email != "" {
-        claims["email"] = user.Email
-    } else if user.Phone != "" {
-        claims["phone"] = user.Phone
-    }
+	claims := jwt.MapClaims{
+		"iss":     "course",
+		"user_id": user.ID,
+		"role":    user.Role,
+		"exp":     expirationTime.Unix(),
+		"iat":     time.Now().Unix(), // Issued at time
+	}
 
-    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	if user.Email != "" {
+		claims["email"] = user.Email
+	} else if user.Phone != "" {
+		claims["phone"] = user.Phone
+	}
 
-    tokenString, err := token.SignedString([]byte(secret))
-    if err != nil {
-        return "", err
-    }
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
-    return tokenString, nil
+	tokenString, err := token.SignedString([]byte(secret))
+	if err != nil {
+		return "", err
+	}
+
+	return tokenString, nil
 }
-
 func GenerateVerificationToken(email string) (string, error) {
 	secret := os.Getenv("SECRET")
 	if secret == "" {
@@ -133,31 +132,73 @@ func ParseToken(tokenString string) (*jwt.Token, error) {
 
 	return token, nil
 }
-
-func VerifyToken(r *http.Request) (int, error) {
+func VerifyToken(r *http.Request) (*models.User, error) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
-		return 0, errors.New("Authorization header missing")
+		return nil, errors.New("Authorization header missing")
 	}
 
-	tokenString := strings.Split(authHeader, " ")[1]
+	parts := strings.Split(authHeader, " ")
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		return nil, errors.New("Invalid Authorization header format")
+	}
+
+	tokenString := parts[1]
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("Unexpected signing method")
 		}
 		return []byte(os.Getenv("SECRET")), nil
 	})
-
-	if err != nil {
-		return 0, err
+	if err != nil || !token.Valid {
+		return nil, errors.New("Invalid or expired token")
 	}
 
-	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-		userID := int(claims["user_id"].(float64))
-		return userID, nil
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, errors.New("Invalid token claims")
 	}
-	return 0, errors.New("Invalid token")
+
+	// ЛОГИРУЕМ ВСЕ CLAIMS
+	log.Println("Token claims:", claims)
+
+	// Извлекаем user_id
+	userIDFloat, ok := claims["user_id"].(float64)
+	if !ok {
+		log.Printf("user_id type: %T, value: %v", claims["user_id"], claims["user_id"])
+		return nil, errors.New("user_id not found in token")
+	}
+
+	// Проверка на наличие role в claims
+	log.Println("Checking for role in claims...")
+	if roleValue, exists := claims["role"]; exists {
+		log.Printf("Role exists in claims, type: %T, value: %v", roleValue, roleValue)
+
+		role, ok := roleValue.(string)
+		if !ok {
+			log.Printf("Role type assertion failed! Expected string, got: %T", roleValue)
+
+			// Попытка конвертации в строку
+			roleStr := fmt.Sprintf("%v", roleValue)
+			log.Printf("Converted role to string: '%s'", roleStr)
+
+			return &models.User{
+				ID:   int(userIDFloat),
+				Role: roleStr,
+			}, nil
+		} else {
+			log.Printf("Role successfully extracted as string: '%s'", role)
+			return &models.User{
+				ID:   int(userIDFloat),
+				Role: role,
+			}, nil
+		}
+	} else {
+		log.Println("⚠️ Role claim NOT FOUND in token!")
+		return nil, errors.New("role not found in token")
+	}
 }
+
 func GenerateRefreshToken(user models.User, expiration time.Duration) (string, error) {
 	secret := os.Getenv("SECRET")
 	if secret == "" {
@@ -452,20 +493,20 @@ func GetUserByID(db *sql.DB, userID int) (models.User, error) {
 	return user, nil
 }
 func IsTokenExpired(tokenString string) bool {
-    token, err := ParseToken(tokenString)
-    if err != nil {
-        return true
-    }
-    
-    claims, ok := token.Claims.(jwt.MapClaims)
-    if !ok {
-        return true
-    }
-    
-    exp, ok := claims["exp"].(float64)
-    if !ok {
-        return true
-    }
-    
-    return time.Now().Unix() > int64(exp)
+	token, err := ParseToken(tokenString)
+	if err != nil {
+		return true
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return true
+	}
+
+	exp, ok := claims["exp"].(float64)
+	if !ok {
+		return true
+	}
+
+	return time.Now().Unix() > int64(exp)
 }

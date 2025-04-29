@@ -16,16 +16,20 @@ import (
 
 type StudentController struct{}
 
-func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
+func (sc *StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Step 1: Verify the user's token and get userID
-		userID, err := utils.VerifyToken(r)
+		// Step 1: Verify the user's token and get user object
+		user, err := utils.VerifyToken(r)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
 			return
 		}
 
-		// Step 2: Get user role
+		// Extract userID from the returned User struct
+		userID := user.ID // Now correctly using the ID field from the pointer
+
+		// Step 2: Get user role - we already have the role from the token,
+		// but you might want to verify it from the database for extra security
 		var userRole string
 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
 		if err != nil {
@@ -78,11 +82,21 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 		// Step 9: Set role to student
 		student.Role = "student"
 
-		// Step 10: Insert the student into the database
-		query := `INSERT INTO Student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, password, role, login)
-		          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		// Step 10: Handle AvatarURL (set NULL if not provided)
+		var avatarURL sql.NullString
+		if student.AvatarURL != "" {
+			// Set the avatar URL if provided
+			avatarURL = sql.NullString{String: student.AvatarURL, Valid: true}
+		} else {
+			// Set it to NULL if not provided
+			avatarURL = sql.NullString{Valid: false}
+		}
 
-		result, err := db.Exec(query, student.FirstName, student.LastName, student.Patronymic, student.IIN, student.SchoolID, student.DateOfBirth, student.Grade, student.Letter, student.Gender, student.Phone, student.Email, student.Password, student.Role, student.Login)
+		// Step 11: Insert the student into the database
+		query := `INSERT INTO student (first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, password, role, login, avatar_url)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+		result, err := db.Exec(query, student.FirstName, student.LastName, student.Patronymic, student.IIN, student.SchoolID, student.DateOfBirth, student.Grade, student.Letter, student.Gender, student.Phone, student.Email, student.Password, student.Role, student.Login, avatarURL)
 		if err != nil {
 			log.Println("Error inserting student:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create student"})
@@ -98,9 +112,11 @@ func (sc StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 
 		student.ID = int(studentID)
 
+		// Send response with the student data
 		utils.ResponseJSON(w, student)
 	}
 }
+
 func (sc StudentController) CreateStudentAsSuperadmin(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Step 1: Verify the user's token and get userID

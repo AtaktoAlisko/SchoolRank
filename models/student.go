@@ -15,5 +15,6 @@ type Student struct {
 	Email       string `json:"email"`
 	Login       string `json:"login"`
 	Password    string `json:"password"`
-	Role        string `json:"role"`  
+	Role        string `json:"role"`
+	AvatarURL   string `json:"avatar_url,omitempty"`
 }

@@ -3,10 +3,13 @@ package controllers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"ranking-school/models"
 	"ranking-school/utils"
+	"strconv"
+	"time"
 )
 
 type SubjectOlympiadController struct{}
@@ -14,27 +17,75 @@ type SubjectOlympiadController struct{}
 // Метод для создания олимпиады по предмету
 func (c *SubjectOlympiadController) CreateOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var olympiad models.SubjectOlympiad
 		var error models.Error
 
-		// Декодируем запрос
-		err := json.NewDecoder(r.Body).Decode(&olympiad)
-		if err != nil {
-			error.Message = "Invalid request body."
-			utils.RespondWithError(w, http.StatusBadRequest, error)
+		// Verify user is a superadmin
+		user, err := utils.VerifyToken(r)
+		if err != nil || user.Role != "superadmin" {
+			error.Message = "Only superadmin can create olympiads."
+			utils.RespondWithError(w, http.StatusUnauthorized, error)
 			return
 		}
 
-		// Проверка обязательных полей
+		// Parse the multipart form with a reasonable size limit
+		err = r.ParseMultipartForm(10 << 20) // 10MB limit
+		if err != nil {
+			error.Message = "Error parsing form data"
+			utils.RespondWithError(w, http.StatusBadRequest, error)
+			log.Printf("Error parsing multipart form: %v", err)
+			return
+		}
+
+		// Get form values and convert types as needed
+		schoolAdminID, err := strconv.Atoi(r.FormValue("school_admin_id"))
+		if err != nil {
+			error.Message = "Invalid school_admin_id format"
+			utils.RespondWithError(w, http.StatusBadRequest, error)
+			log.Printf("Error converting school_admin_id: %v", err)
+			return
+		}
+
+		olympiad := models.SubjectOlympiad{
+			SubjectName:   r.FormValue("subject_name"),
+			EventName:     r.FormValue("event_name"),
+			Date:          r.FormValue("date"),
+			Duration:      r.FormValue("duration"),
+			Description:   r.FormValue("description"),
+			City:          r.FormValue("city"),
+			SchoolAdminID: schoolAdminID, // Now using the converted integer
+		}
+
+		// Validate required fields
 		if olympiad.SubjectName == "" || olympiad.EventName == "" || olympiad.Date == "" || olympiad.City == "" {
 			error.Message = "Subject name, event name, date, and city are required fields."
 			utils.RespondWithError(w, http.StatusBadRequest, error)
+			log.Printf("Missing required fields: %v", olympiad)
 			return
 		}
 
-		// Вставка новой олимпиады в базу данных
+		// Get the file from form data
+		file, _, err := r.FormFile("photo_url")
+		if err != nil {
+			log.Println("Error reading file:", err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Error reading file"})
+			return
+		}
+		defer file.Close()
+
+		// Generate unique filename and upload to S3
+		uniqueFileName := fmt.Sprintf("olympiad-%d-%d.jpg", time.Now().Unix())
+		photoURL, err := utils.UploadFileToS3(file, uniqueFileName, false)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to upload photo"})
+			log.Println("Error uploading file:", err)
+			return
+		}
+
+		olympiad.PhotoURL = photoURL
+
+		// Insert into database
 		query := `INSERT INTO subject_olympiads (subject_name, event_name, date, duration, description, photo_url, city, school_admin_id) 
-				  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 
 		_, err = db.Exec(query, olympiad.SubjectName, olympiad.EventName, olympiad.Date, olympiad.Duration, olympiad.Description, olympiad.PhotoURL, olympiad.City, olympiad.SchoolAdminID)
 		if err != nil {
@@ -47,17 +98,15 @@ func (c *SubjectOlympiadController) CreateOlympiad(db *sql.DB) http.HandlerFunc 
 	}
 }
 
-// Метод для регистрации студента на олимпиаду
 func (c *SubjectOlympiadController) RegisterStudentToOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var registrationData struct {
-			StudentID  int `json:"student_id"`  // ID студента
 			OlympiadID int `json:"olympiad_id"` // ID олимпиады
 		}
 
 		var error models.Error
 
-		// Декодируем запрос
+		// Декодируем запрос, исключая student_id, так как мы будем его получать из токена
 		err := json.NewDecoder(r.Body).Decode(&registrationData)
 		if err != nil {
 			error.Message = "Invalid request body."
@@ -65,14 +114,15 @@ func (c *SubjectOlympiadController) RegisterStudentToOlympiad(db *sql.DB) http.H
 			return
 		}
 
-		// Проверка, что студент существует
-		var studentExists bool
-		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ? AND role = 'student')", registrationData.StudentID).Scan(&studentExists)
-		if err != nil || !studentExists {
-			error.Message = "Student not found or incorrect role."
-			utils.RespondWithError(w, http.StatusBadRequest, error)
+		// Получаем userID (student_id) из токена
+		user, err := utils.VerifyToken(r)
+		if err != nil || user.Role != "student" {
+			error.Message = "Invalid token or not a student."
+			utils.RespondWithError(w, http.StatusUnauthorized, error)
 			return
 		}
+
+		studentID := user.ID // Получаем student_id из токена
 
 		// Проверка, что олимпиада существует
 		var olympiadExists bool
@@ -85,7 +135,7 @@ func (c *SubjectOlympiadController) RegisterStudentToOlympiad(db *sql.DB) http.H
 
 		// Проверка, что студент уже зарегистрирован на олимпиаду
 		var alreadyRegistered bool
-		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM student_olympiads WHERE student_id = ? AND olympiad_id = ?)", registrationData.StudentID, registrationData.OlympiadID).Scan(&alreadyRegistered)
+		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM student_olympiads WHERE student_id = ? AND olympiad_id = ?)", studentID, registrationData.OlympiadID).Scan(&alreadyRegistered)
 		if err != nil || alreadyRegistered {
 			error.Message = "Student is already registered for this olympiad."
 			utils.RespondWithError(w, http.StatusBadRequest, error)
@@ -94,7 +144,7 @@ func (c *SubjectOlympiadController) RegisterStudentToOlympiad(db *sql.DB) http.H
 
 		// Регистрируем студента на олимпиаду
 		query := `INSERT INTO student_olympiads (student_id, olympiad_id) VALUES (?, ?)`
-		_, err = db.Exec(query, registrationData.StudentID, registrationData.OlympiadID)
+		_, err = db.Exec(query, studentID, registrationData.OlympiadID)
 		if err != nil {
 			log.Println("Error registering student:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to register student"})
