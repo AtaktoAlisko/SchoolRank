@@ -128,13 +128,6 @@ func main() {
 	router.HandleFunc("/api/schools/{id}", schoolController.DeleteSchool(db)).Methods("DELETE")
 	router.HandleFunc("/api/schools", schoolController.GetAllSchools(db)).Methods("GET")
 
-	//scholadmin
-	router.HandleFunc("/api/school/update", schoolController.UpdateMySchool(db)).Methods("PUT")
-
-	// router.HandleFunc("/api/schools", schoolController.GetSchools(db)).Methods("GET")
-	// router.HandleFunc("/api/schools/{school_id}/director", schoolController.GetSchoolForDirector(db)).Methods("GET")
-	// router.HandleFunc("/api/schools/{school_id}", schoolController.DeleteSchool(db)).Methods("DELETE")
-
 	// =======================
 	// Работа с отзывами (Reviews)
 	// =======================
