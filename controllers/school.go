@@ -251,42 +251,43 @@ func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 			}
 		}
 
-		// Step 5: Parse form data
-		err = r.ParseMultipartForm(10 << 20) // 10MB
+		// Step 5: Parse the raw JSON body for other fields
+		var updateData map[string]interface{}
+		decoder := json.NewDecoder(r.Body)
+		err = decoder.Decode(&updateData)
 		if err != nil {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Failed to parse form"})
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid JSON data"})
 			return
 		}
 
 		// Create a new school object based on the existing school
 		updatedSchool := existingSchool
 
-		// Step 6: Only update fields that were provided in the form and are not empty
-		if name := r.FormValue("school_name"); name != "" {
+		// Step 6: Only update fields that were provided in the raw JSON body
+		if name, ok := updateData["school_name"].(string); ok {
 			updatedSchool.SchoolName = name
 		}
-		if login := r.FormValue("school_admin_login"); login != "" {
+		if login, ok := updateData["school_admin_login"].(string); ok {
 			updatedSchool.SchoolAdminLogin = login
 		}
-		if city := r.FormValue("city"); city != "" {
+		if city, ok := updateData["city"].(string); ok {
 			updatedSchool.City = city
 		}
-		if address := r.FormValue("school_address"); address != "" {
+		if address, ok := updateData["school_address"].(string); ok {
 			updatedSchool.SchoolAddress = address
 		}
-		if about := r.FormValue("about_school"); about != "" {
+		if about, ok := updateData["about_school"].(string); ok {
 			updatedSchool.AboutSchool = about
 		}
-		if email := r.FormValue("school_email"); email != "" {
+		if email, ok := updateData["school_email"].(string); ok {
 			updatedSchool.SchoolEmail = email
 		}
-		if phone := r.FormValue("school_phone"); phone != "" {
+		if phone, ok := updateData["school_phone"].(string); ok {
 			updatedSchool.SchoolPhone = phone
 		}
 
 		// Step 7: Handle specializations if provided
-		specializationsStr := r.FormValue("specializations")
-		if specializationsStr != "" {
+		if specializationsStr, ok := updateData["specializations"].(string); ok && specializationsStr != "" {
 			err = json.Unmarshal([]byte(specializationsStr), &updatedSchool.Specializations)
 			if err != nil {
 				updatedSchool.Specializations = strings.Split(specializationsStr, ",")
@@ -296,7 +297,7 @@ func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 			}
 		}
 
-		// Step 8: Handle photo upload (if present)
+		// Step 8: Handle photo upload (if present) through form data
 		file, _, err := r.FormFile("photo")
 		if err == nil {
 			defer file.Close()
@@ -360,6 +361,7 @@ func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 		})
 	}
 }
+
 func (sc SchoolController) DeleteSchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// 1. Проверка токена и роли

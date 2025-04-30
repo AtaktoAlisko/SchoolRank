@@ -11,6 +11,7 @@ type Student struct {
 	SchoolID    int    `json:"school_id"`
 	Letter      string `json:"letter"`
 	Gender      string `json:"gender"`
+	SchoolName  string `json:"school_name"`
 	Phone       string `json:"phone"`
 	Email       string `json:"email"`
 	Login       string `json:"login"`
