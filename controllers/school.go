@@ -519,3 +519,22 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, schools)
 	}
 }
+func (sc *SchoolController) GetTotalSchools(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Шаг 1: Выполняем запрос для получения общего количества школ
+		var totalSchools int
+		err := db.QueryRow("SELECT COUNT(*) FROM Schools").Scan(&totalSchools)
+		if err != nil {
+			log.Println("Error fetching total schools:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get total schools"})
+			return
+		}
+
+		// Шаг 2: Формируем ответ с количеством школ
+		response := map[string]interface{}{
+			"total_schools": totalSchools,
+		}
+
+		utils.ResponseJSON(w, response)
+	}
+}

@@ -341,6 +341,36 @@ func (c *StudentController) GetStudentsBySchool(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, students)
 	}
 }
+func (c *StudentController) GetTotalStudentsBySchool(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Извлекаем school_id из URL параметров
+		vars := mux.Vars(r)
+		schoolIDParam := vars["school_id"]
+		schoolID, err := strconv.Atoi(schoolIDParam) // Преобразуем school_id из строки в целое число
+		if err != nil {
+			log.Println("Error converting school_id:", err) // Логируем ошибку преобразования
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+			return
+		}
+
+		// Запрос к базе данных для получения количества студентов по school_id
+		var totalStudents int
+		err = db.QueryRow("SELECT COUNT(*) FROM student WHERE school_id = ?", schoolID).Scan(&totalStudents)
+		if err != nil {
+			log.Println("SQL Error:", err) // Логируем ошибку SQL запроса
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get total students"})
+			return
+		}
+
+		// Возвращаем количество студентов в ответе
+		response := map[string]interface{}{
+			"school_id":      schoolID,
+			"total_students": totalStudents,
+		}
+
+		utils.ResponseJSON(w, response)
+	}
+}
 
 func generateRandomString(n int) string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -736,7 +766,6 @@ func (sc *StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, updatedStudent)
 	}
 }
-
 func (sc *StudentController) DeleteStudent(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Извлекаем student_id из URL параметров

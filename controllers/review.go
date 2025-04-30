@@ -3,10 +3,13 @@ package controllers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"ranking-school/models"
 	"ranking-school/utils"
+	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 )
@@ -28,7 +31,6 @@ func (rc *ReviewController) CreateReview(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Check if user exists
 		// Check if user exists
 		var userExists bool
 		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)", review.UserID).Scan(&userExists)
@@ -83,7 +85,7 @@ func (rc *ReviewController) CreateReview(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Get the inserted ID
+		// Get the inserted ID (using the correct column 'id')
 		reviewID, err := result.LastInsertId()
 		if err != nil {
 			log.Println("Error getting last insert ID:", err)
@@ -94,7 +96,7 @@ func (rc *ReviewController) CreateReview(db *sql.DB) http.HandlerFunc {
 		// Create response with the new review ID
 		response := map[string]interface{}{
 			"message":   "Review created successfully",
-			"review_id": reviewID,
+			"review_id": reviewID, // Use 'review_id' instead of 'id'
 		}
 
 		utils.ResponseJSON(w, response)
@@ -150,5 +152,212 @@ func (rc *ReviewController) GetAverageRating(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, map[string]interface{}{
 			"average_rating": averageRating,
 		})
+	}
+}
+
+func (rc *ReviewController) GetAllReviews(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Get all reviews first
+		reviewsQuery := `
+			SELECT 
+				id, 
+				school_id, 
+				user_id, 
+				rating, 
+				comment, 
+				created_at
+			FROM Reviews
+		`
+		rows, err := db.Query(reviewsQuery)
+		if err != nil {
+			log.Println("SQL Error (Reviews):", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get reviews"})
+			return
+		}
+		defer rows.Close()
+
+		// Create a slice to hold the reviews
+		var reviews []models.Review
+
+		// Map to store school IDs that we need to fetch names for
+		schoolIDs := make(map[int]bool)
+
+		for rows.Next() {
+			var review models.Review
+
+			// Scan the row into the Review struct (without school_name yet)
+			err := rows.Scan(&review.ID, &review.SchoolID, &review.UserID, &review.Rating,
+				&review.Comment, &review.CreatedAt)
+			if err != nil {
+				log.Println("Scan Error:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse reviews"})
+				return
+			}
+
+			// Keep track of school IDs
+			schoolIDs[review.SchoolID] = true
+
+			// Set empty school name for now
+			review.SchoolName = ""
+
+			// Append the review to the slice
+			reviews = append(reviews, review)
+		}
+
+		// Check for errors after processing all rows
+		if err := rows.Err(); err != nil {
+			log.Println("Rows Error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing reviews"})
+			return
+		}
+
+		// Step 2: Get school names for all the school IDs we have
+		if len(schoolIDs) > 0 {
+			// Create a slice of school IDs for the query
+			var ids []int
+			for id := range schoolIDs {
+				ids = append(ids, id)
+			}
+
+			// Create placeholders for the SQL query
+			placeholders := make([]string, len(ids))
+			args := make([]interface{}, len(ids))
+			for i, id := range ids {
+				placeholders[i] = "?"
+				args[i] = id
+			}
+
+			// Construct the query with placeholders
+			schoolsQuery := fmt.Sprintf(`
+				SELECT 
+					school_id, 
+					school_name
+				FROM Schools
+				WHERE school_id IN (%s)
+			`, strings.Join(placeholders, ","))
+
+			// Execute the query
+			schoolRows, err := db.Query(schoolsQuery, args...)
+			if err != nil {
+				log.Println("SQL Error (Schools):", err)
+				// Continue without school names
+			} else {
+				defer schoolRows.Close()
+
+				// Create a map of school IDs to names
+				schoolNames := make(map[int]string)
+
+				for schoolRows.Next() {
+					var schoolID int
+					var schoolName string
+
+					err := schoolRows.Scan(&schoolID, &schoolName)
+					if err != nil {
+						log.Println("Scan Error (Schools):", err)
+						continue
+					}
+
+					// Store the school name
+					schoolNames[schoolID] = schoolName
+				}
+
+				// Update the reviews with school names
+				for i := range reviews {
+					if name, ok := schoolNames[reviews[i].SchoolID]; ok {
+						reviews[i].SchoolName = name
+					}
+				}
+			}
+		}
+
+		// Return the list of reviews with school names
+		utils.ResponseJSON(w, reviews)
+	}
+}
+func (rc *ReviewController) GetReviewBySchoolID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Get the school ID from the URL parameters
+		vars := mux.Vars(r)
+		schoolID := vars["school_id"]
+
+		// Convert the school ID to integer
+		schoolIDInt, err := strconv.Atoi(schoolID)
+		if err != nil {
+			log.Println("Invalid school ID:", err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+			return
+		}
+
+		// Step 2: Get reviews for the specific school
+		reviewsQuery := `
+			SELECT 
+				id, 
+				school_id, 
+				user_id, 
+				rating, 
+				comment, 
+				created_at
+			FROM Reviews
+			WHERE school_id = ?
+		`
+		rows, err := db.Query(reviewsQuery, schoolIDInt)
+		if err != nil {
+			log.Println("SQL Error (Reviews):", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get reviews"})
+			return
+		}
+		defer rows.Close()
+
+		// Create a slice to hold the reviews
+		var reviews []models.Review
+
+		// Step 3: Scan reviews into the slice
+		for rows.Next() {
+			var review models.Review
+
+			// Scan the row into the Review struct
+			err := rows.Scan(&review.ID, &review.SchoolID, &review.UserID, &review.Rating,
+				&review.Comment, &review.CreatedAt)
+			if err != nil {
+				log.Println("Scan Error:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse reviews"})
+				return
+			}
+
+			// Set empty school name for now
+			review.SchoolName = ""
+
+			// Append the review to the slice
+			reviews = append(reviews, review)
+		}
+
+		// Check for errors after processing all rows
+		if err := rows.Err(); err != nil {
+			log.Println("Rows Error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing reviews"})
+			return
+		}
+
+		// Step 4: Get the school name for the school ID
+		var schoolName string
+		schoolQuery := `
+			SELECT school_name
+			FROM Schools
+			WHERE school_id = ?
+		`
+
+		err = db.QueryRow(schoolQuery, schoolIDInt).Scan(&schoolName)
+		if err != nil {
+			log.Println("SQL Error (Schools):", err)
+			// Continue without school name
+		}
+
+		// Step 5: Update the reviews with the school name
+		for i := range reviews {
+			reviews[i].SchoolName = schoolName
+		}
+
+		// Return the list of reviews with school names
+		utils.ResponseJSON(w, reviews)
 	}
 }

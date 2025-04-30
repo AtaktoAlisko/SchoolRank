@@ -93,10 +93,10 @@ func main() {
 	// =======================
 	router.HandleFunc("/api/users/me", controller.GetMe(db)).Methods("GET")
 	router.HandleFunc("/api/users", controller.GetAllUsers(db)).Methods("GET")
+	router.HandleFunc("/api/users/total", controller.GetTotalUsersWithRoleCount(db)).Methods("GET")
 	router.HandleFunc("/api/users", controller.CreateUser(db)).Methods("POST")
 	router.HandleFunc("/api/users/{id}", controller.UpdateUser(db)).Methods("PUT")
 	router.HandleFunc("/api/users/me", controller.EditProfile(db)).Methods("PUT")
-	router.HandleFunc("/api/users/me", controller.TokenVerifyMiddleware(controller.EditProfile(db))).Methods("PUT")
 	router.HandleFunc("/api/users/me/avatar", controller.UploadAvatar(db)).Methods("POST")
 	router.HandleFunc("/api/users/me/avatar", controller.UpdateAvatar(db)).Methods("PUT")
 	router.HandleFunc("/api/users/me/avatar", controller.DeleteAvatar(db)).Methods("DELETE")
@@ -127,11 +127,14 @@ func main() {
 	router.HandleFunc("/api/schools/{id}", schoolController.UpdateSchool(db)).Methods("PUT")
 	router.HandleFunc("/api/schools/{id}", schoolController.DeleteSchool(db)).Methods("DELETE")
 	router.HandleFunc("/api/schools", schoolController.GetAllSchools(db)).Methods("GET")
+	router.HandleFunc("/api/schools/total", schoolController.GetTotalSchools(db)).Methods("GET")
 
-	// =======================
+	// =======================updated_at
 	// Работа с отзывами (Reviews)
 	// =======================
 	router.HandleFunc("/api/reviews", reviewController.CreateReview(db)).Methods("POST")
+	router.HandleFunc("/api/reviews", reviewController.GetAllReviews(db)).Methods("GET")
+	router.HandleFunc("/api/reviews/{school_id}", reviewController.GetReviewBySchoolID(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/reviews", reviewController.GetReviewsBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/reviews/average-rating", reviewController.GetAverageRating(db)).Methods("GET")
 
@@ -153,6 +156,7 @@ func main() {
 	// =======================
 	router.HandleFunc("/api/students", studentController.CreateStudent(db)).Methods("POST")
 	router.HandleFunc("/api/students", studentController.GetAllStudents(db)).Methods("GET")
+	router.HandleFunc("/api/schools/{school_id}/total-students", studentController.GetTotalStudentsBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/students/superadmin/{student_id}", studentController.SuperadminUpdateStudent(db)).Methods("PUT")
 	router.HandleFunc("/api/students/{student_id}", studentController.UpdateStudent(db)).Methods("PUT") //Нужно испроавить id гылп
 	router.HandleFunc("/api/students/superadmin/{student_id}", studentController.SuperadminDeleteStudent(db)).Methods("DELETE")

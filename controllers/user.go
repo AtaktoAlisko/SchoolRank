@@ -2508,3 +2508,64 @@ func (c *Controller) getUserData(db *sql.DB, id int) (interface{}, bool) {
 	// Возвращаем
 	return userData, true
 }
+
+func (c *Controller) GetTotalUsersWithRoleCount(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Query to get total number of users and the count per role
+		query := `
+			SELECT role, COUNT(*) as count
+			FROM users
+			GROUP BY role
+		`
+
+		// Step 2: Execute the query to get the counts for each role
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println("Error querying total users by role:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user counts by role"})
+			return
+		}
+		defer rows.Close()
+
+		// Step 3: Prepare a map to hold the counts for each role
+		roleCounts := make(map[string]int)
+
+		// Step 4: Iterate over the result set and populate the map
+		for rows.Next() {
+			var role string
+			var count int
+			err := rows.Scan(&role, &count)
+			if err != nil {
+				log.Println("Error scanning result:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error scanning user count by role"})
+				return
+			}
+			roleCounts[role] = count
+		}
+
+		// Step 5: Handle errors from iterating over rows
+		if err := rows.Err(); err != nil {
+			log.Println("Error processing rows:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing user count by role"})
+			return
+		}
+
+		// Step 6: Query to get total number of users (regardless of role)
+		var totalUsers int
+		err = db.QueryRow("SELECT COUNT(*) FROM users").Scan(&totalUsers)
+		if err != nil {
+			log.Println("Error fetching total user count:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching total user count"})
+			return
+		}
+
+		// Step 7: Create a response with the total count and the breakdown by role
+		response := map[string]interface{}{
+			"total_users": totalUsers,
+			"role_counts": roleCounts,
+		}
+
+		// Step 8: Send the response
+		utils.ResponseJSON(w, response)
+	}
+}
