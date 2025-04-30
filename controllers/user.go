@@ -1228,6 +1228,7 @@ func (c *Controller) EditProfile(db *sql.DB) http.HandlerFunc {
 }
 func (c Controller) UpdatePassword(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Structure to capture the request data
 		var requestData struct {
 			CurrentPassword string `json:"current_password"`
 			NewPassword     string `json:"new_password"`
@@ -1237,57 +1238,80 @@ func (c Controller) UpdatePassword(db *sql.DB) http.HandlerFunc {
 		// Decode the request body into the password change struct
 		err := json.NewDecoder(r.Body).Decode(&requestData)
 		if err != nil {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body."})
+			// If there is an error in decoding, respond with JSON error
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"message": "Invalid request body."})
 			return
 		}
 
 		// Verify the token to get the user ID
 		userID, err := utils.VerifyToken(r)
 		if err != nil {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			// If token verification fails, respond with JSON error
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{"message": err.Error()})
 			return
 		}
 
-		// Check if new password matches confirm password
+		// Check if the new password matches the confirm password
 		if requestData.NewPassword != requestData.ConfirmPassword {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "New password and confirm password do not match."})
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"message": "New password and confirm password do not match."})
 			return
 		}
 
-		// Get the current password from the database
+		// Retrieve the current hashed password from the database
 		var hashedPassword string
 		query := "SELECT password FROM users WHERE id = ?"
 		err = db.QueryRow(query, userID).Scan(&hashedPassword)
 		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error retrieving user password."})
+			// If there is an issue with retrieving the password, respond with JSON error
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"message": "Error retrieving user password."})
 			return
 		}
 
-		// Compare current password with the stored hashed password
+		// Compare the current password with the stored hashed password
 		err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(requestData.CurrentPassword))
 		if err != nil {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Incorrect current password."})
+			// If the current password does not match, respond with JSON error
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{"message": "Incorrect current password."})
 			return
 		}
 
 		// Hash the new password
 		hashedNewPassword, err := bcrypt.GenerateFromPassword([]byte(requestData.NewPassword), bcrypt.DefaultCost)
 		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error hashing the new password."})
+			// If there is an error hashing the new password, respond with JSON error
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"message": "Error hashing the new password."})
 			return
 		}
 
 		// Update the password in the database
 		_, err = db.Exec("UPDATE users SET password = ? WHERE id = ?", hashedNewPassword, userID)
 		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error updating password."})
+			// If there is an error updating the password, respond with JSON error
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"message": "Error updating password."})
 			return
 		}
 
-		// Send success response
-		utils.ResponseJSON(w, map[string]string{"message": "Password updated successfully."})
+		// Send a success response with JSON formatted message
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Password updated successfully."})
 	}
 }
+
 func (c *Controller) TokenVerifyMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var errorObject models.Error
