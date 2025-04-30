@@ -784,7 +784,7 @@ func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
 		user.Role = role
 
 		// Generate access token with 15 minutes expiration
-		accessToken, err := utils.GenerateToken(user, 1*time.Minute)
+		accessToken, err := utils.GenerateToken(user, 15*time.Minute)
 		if err != nil {
 			error.Message = "Server error."
 			utils.RespondWithError(w, http.StatusInternalServerError, error)
@@ -1366,7 +1366,7 @@ func (c *Controller) RefreshTokenHandler(db *sql.DB) http.HandlerFunc {
 			}
 
 			// Generate new access token with 15-minute expiration
-			accessToken, err := utils.GenerateToken(user, 1*time.Minute)
+			accessToken, err := utils.GenerateToken(user, 15*time.Minute)
 			if err != nil {
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to generate access token"})
 				return
@@ -2203,7 +2203,7 @@ func (c *Controller) VerifyResetCode(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Check if OTP has expired (15 minutes)
-		if time.Now().Sub(createdAt).Minutes() > 1 {
+		if time.Now().Sub(createdAt).Minutes() > 15 {
 			error.Message = "OTP has expired. Please request a new one."
 			utils.RespondWithError(w, http.StatusUnauthorized, error)
 			return
