@@ -1226,8 +1226,6 @@ func (c *Controller) EditProfile(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
-
-
 func (c Controller) UpdatePassword(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var requestData struct {
@@ -1966,15 +1964,12 @@ func (c Controller) ChangeUserRole(db *sql.DB) http.HandlerFunc {
 }
 func (c Controller) UploadAvatar(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Получаем userID из токенаs
-		user, err := utils.VerifyToken(r)
+		// Получаем userID из токена
+		userID, err := utils.VerifyToken(r) // Возвращает только userID (int)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
 			return
 		}
-
-		// Извлекаем userID из структуры
-		userID := user.ID
 
 		// Чтение файла аватара
 		file, _, err := r.FormFile("avatar")
@@ -2013,14 +2008,11 @@ func (c Controller) UploadAvatar(db *sql.DB) http.HandlerFunc {
 func (c Controller) UpdateAvatar(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Получаем userID из токена
-		user, err := utils.VerifyToken(r)
+		userID, err := utils.VerifyToken(r) // Возвращает только userID (int)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
 			return
 		}
-
-		// Извлекаем userID из структуры User
-		userID := user.ID // Используем только ID из структуры
 
 		// Логируем userID для отладки
 		log.Println("UserID from token:", userID)
@@ -2081,6 +2073,7 @@ func (c Controller) UpdateAvatar(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, map[string]string{"message": "Avatar updated successfully", "avatar_url": newAvatarURL})
 	}
 }
+
 func (c Controller) DeleteAvatar(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Получаем userID из токена

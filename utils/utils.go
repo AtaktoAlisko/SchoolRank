@@ -132,15 +132,15 @@ func ParseToken(tokenString string) (*jwt.Token, error) {
 
 	return token, nil
 }
-func VerifyToken(r *http.Request) (*models.User, error) {
+func VerifyToken(r *http.Request) (int, error) { // Return userID as an integer
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
-		return nil, errors.New("Authorization header missing")
+		return 0, errors.New("Authorization header missing")
 	}
 
 	parts := strings.Split(authHeader, " ")
 	if len(parts) != 2 || parts[0] != "Bearer" {
-		return nil, errors.New("Invalid Authorization header format")
+		return 0, errors.New("Invalid Authorization header format")
 	}
 
 	tokenString := parts[1]
@@ -151,52 +151,21 @@ func VerifyToken(r *http.Request) (*models.User, error) {
 		return []byte(os.Getenv("SECRET")), nil
 	})
 	if err != nil || !token.Valid {
-		return nil, errors.New("Invalid or expired token")
+		return 0, errors.New("Invalid or expired token")
 	}
 
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
-		return nil, errors.New("Invalid token claims")
+		return 0, errors.New("Invalid token claims")
 	}
 
-	// ЛОГИРУЕМ ВСЕ CLAIMS
-	log.Println("Token claims:", claims)
-
-	// Извлекаем user_id
+	// Extract userID
 	userIDFloat, ok := claims["user_id"].(float64)
 	if !ok {
-		log.Printf("user_id type: %T, value: %v", claims["user_id"], claims["user_id"])
-		return nil, errors.New("user_id not found in token")
+		return 0, errors.New("user_id not found in token")
 	}
 
-	// Проверка на наличие role в claims
-	log.Println("Checking for role in claims...")
-	if roleValue, exists := claims["role"]; exists {
-		log.Printf("Role exists in claims, type: %T, value: %v", roleValue, roleValue)
-
-		role, ok := roleValue.(string)
-		if !ok {
-			log.Printf("Role type assertion failed! Expected string, got: %T", roleValue)
-
-			// Попытка конвертации в строку
-			roleStr := fmt.Sprintf("%v", roleValue)
-			log.Printf("Converted role to string: '%s'", roleStr)
-
-			return &models.User{
-				ID:   int(userIDFloat),
-				Role: roleStr,
-			}, nil
-		} else {
-			log.Printf("Role successfully extracted as string: '%s'", role)
-			return &models.User{
-				ID:   int(userIDFloat),
-				Role: role,
-			}, nil
-		}
-	} else {
-		log.Println("⚠️ Role claim NOT FOUND in token!")
-		return nil, errors.New("role not found in token")
-	}
+	return int(userIDFloat), nil // Return the userID (int), not the whole struct
 }
 
 func GenerateRefreshToken(user models.User, expiration time.Duration) (string, error) {

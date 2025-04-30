@@ -18,15 +18,12 @@ type StudentController struct{}
 
 func (sc *StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Step 1: Verify the user's token and get user object
-		user, err := utils.VerifyToken(r)
+		// Step 1: Verify the user's token and get user ID
+		userID, err := utils.VerifyToken(r) // Return userID directly, not user struct
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
 			return
 		}
-
-		// Extract userID from the returned User struct
-		userID := user.ID // Now correctly using the ID field from the pointer
 
 		// Step 2: Get user role - we already have the role from the token,
 		// but you might want to verify it from the database for extra security
@@ -215,7 +212,7 @@ func generateRandomString(n int) string {
 func (sc StudentController) GetStudents(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Step 1: Query the database for student details, including the email, login, and password
-		rows, err := db.Query("SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, login, password, role FROM Student")
+		rows, err := db.Query("SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email, login, password, role FROM student")
 		if err != nil {
 			log.Println("SQL Error:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get students"})
@@ -292,21 +289,22 @@ func (sc StudentController) GetStudents(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, students)
 	}
 }
-func (sc StudentController) GetStudentsBySchool(db *sql.DB) http.HandlerFunc {
+func (c *StudentController) GetStudentsBySchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Извлекаем school_id из URL параметров
 		vars := mux.Vars(r)
 		schoolIDParam := vars["school_id"]
 		schoolID, err := strconv.Atoi(schoolIDParam) // Преобразуем school_id из строки в целое число
 		if err != nil {
+			log.Println("Error converting school_id:", err) // Логируем ошибку преобразования
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
 			return
 		}
 
 		// Шаг 1: Запрос к базе данных для получения студентов по school_id
-		rows, err := db.Query("SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email FROM Student WHERE school_id = ?", schoolID)
+		rows, err := db.Query("SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email FROM student WHERE school_id = ?", schoolID)
 		if err != nil {
-			log.Println("SQL Error:", err)
+			log.Println("SQL Error:", err) // Логируем ошибку SQL запроса
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get students"})
 			return
 		}
@@ -325,7 +323,7 @@ func (sc StudentController) GetStudentsBySchool(db *sql.DB) http.HandlerFunc {
 
 			// Шаг 4: Сканирование строки в объект student
 			if err := rows.Scan(&student.ID, &firstName, &lastName, &patronymic, &iin, &schoolID, &dateOfBirth, &grade, &letter, &gender, &phone, &email); err != nil {
-				log.Println("Scan Error:", err)
+				log.Println("Scan Error:", err) // Логируем ошибку сканирования
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse students"})
 				return
 			}
@@ -371,7 +369,7 @@ func (sc StudentController) GetStudentsBySchool(db *sql.DB) http.HandlerFunc {
 
 		// Шаг 7: Проверяем на ошибки при обработке строк
 		if err := rows.Err(); err != nil {
-			log.Println("Rows Error:", err)
+			log.Println("Rows Error:", err) // Логируем ошибку обработки строк
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing students"})
 			return
 		}
@@ -380,6 +378,7 @@ func (sc StudentController) GetStudentsBySchool(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, students)
 	}
 }
+
 func (sc StudentController) GetStudentsBySchoolAndGrade(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Извлекаем параметры school_id и grade из URL

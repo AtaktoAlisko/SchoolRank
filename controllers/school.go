@@ -16,7 +16,7 @@ import (
 
 type SchoolController struct{}
 
-func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
+func (sc *SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Шаг 1: Проверка токена
 		requesterID, err := utils.VerifyToken(r)
@@ -60,12 +60,9 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 		// Обработка специализаций как массива
 		specializationsStr := r.FormValue("specializations")
 		if specializationsStr != "" {
-			// Преобразование строки JSON в массив строк
 			err = json.Unmarshal([]byte(specializationsStr), &school.Specializations)
 			if err != nil {
-				// Если не удалось распарсить JSON, пробуем разделить по запятой
 				school.Specializations = strings.Split(specializationsStr, ",")
-				// Удаляем лишние пробелы
 				for i := range school.Specializations {
 					school.Specializations[i] = strings.TrimSpace(school.Specializations[i])
 				}
@@ -82,8 +79,6 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 		err = db.QueryRow("SELECT id FROM users WHERE email = ? AND role = 'schooladmin'", school.SchoolAdminLogin).Scan(&schoolAdminID)
 		if err != nil {
 			log.Println("School admin not found:", err)
-
-			// Получение списка всех пользователей с ролью schooladmin
 			rows, err := db.Query("SELECT id, email FROM users WHERE role = 'schooladmin'")
 			if err != nil {
 				log.Println("Error fetching schooladmin users:", err)
@@ -92,7 +87,6 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 			}
 			defer rows.Close()
 
-			// Формируем список пользователей с ролью "schooladmin"
 			var admins []string
 			for rows.Next() {
 				var adminEmail string
@@ -104,13 +98,11 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 				admins = append(admins, adminEmail)
 			}
 
-			// Если список пустой, значит нет schooladmin
 			if len(admins) == 0 {
 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "No schooladmins found, please create a user with 'schooladmin' role"})
 				return
 			}
 
-			// Вернуть список всех пользователей с ролью schooladmin в формате JSON
 			utils.ResponseJSON(w, map[string]interface{}{
 				"message":               "School admin not found by provided email.",
 				"existing_schooladmins": admins,
@@ -122,7 +114,6 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 		var existingSchoolID int
 		err = db.QueryRow("SELECT school_id FROM Schools WHERE school_admin_login = ?", school.SchoolAdminLogin).Scan(&existingSchoolID)
 		if err == nil {
-			// Если уже есть школа, не добавляем новую
 			log.Println("Admin already has a school, not adding a new one.")
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Admin already has a school."})
 			return
@@ -137,7 +128,7 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 		if err == nil {
 			defer file.Close()
 			uniqueFileName := fmt.Sprintf("school-%d-%d.jpg", requesterID, time.Now().Unix())
-			photoURL, err := utils.UploadFileToS3(file, uniqueFileName, false) // Обновленный вызов функции
+			photoURL, err := utils.UploadFileToS3(file, uniqueFileName, false)
 			if err != nil {
 				log.Println("S3 upload failed:", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Photo upload failed"})
@@ -168,6 +159,14 @@ func (sc SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 
 		schoolID, _ := result.LastInsertId()
 		school.SchoolID = int(schoolID)
+
+		// Шаг 7: Обновление user записи с добавлением school_id
+		_, err = db.Exec("UPDATE users SET school_id = ? WHERE id = ?", school.SchoolID, schoolAdminID)
+		if err != nil {
+			log.Println("Error updating school_id for admin:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update school_id for admin"})
+			return
+		}
 
 		utils.ResponseJSON(w, school)
 	}

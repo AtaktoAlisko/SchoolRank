@@ -19,15 +19,24 @@ func (c *SubjectOlympiadController) CreateOlympiad(db *sql.DB) http.HandlerFunc 
 	return func(w http.ResponseWriter, r *http.Request) {
 		var error models.Error
 
-		// Verify user is a superadmin
-		user, err := utils.VerifyToken(r)
-		if err != nil || user.Role != "superadmin" {
+		// Step 1: Verify user is a superadmin
+		userID, err := utils.VerifyToken(r) // Возвращает только userID (int)
+		if err != nil {
+			error.Message = "Invalid token or not a superadmin."
+			utils.RespondWithError(w, http.StatusUnauthorized, error)
+			return
+		}
+
+		// Получаем роль пользователя из базы данных, используя userID
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil || userRole != "superadmin" {
 			error.Message = "Only superadmin can create olympiads."
 			utils.RespondWithError(w, http.StatusUnauthorized, error)
 			return
 		}
 
-		// Parse the multipart form with a reasonable size limit
+		// Step 2: Parse the multipart form with a reasonable size limit
 		err = r.ParseMultipartForm(10 << 20) // 10MB limit
 		if err != nil {
 			error.Message = "Error parsing form data"
@@ -97,7 +106,6 @@ func (c *SubjectOlympiadController) CreateOlympiad(db *sql.DB) http.HandlerFunc 
 		utils.ResponseJSON(w, olympiad)
 	}
 }
-
 func (c *SubjectOlympiadController) RegisterStudentToOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var registrationData struct {
@@ -115,14 +123,12 @@ func (c *SubjectOlympiadController) RegisterStudentToOlympiad(db *sql.DB) http.H
 		}
 
 		// Получаем userID (student_id) из токена
-		user, err := utils.VerifyToken(r)
-		if err != nil || user.Role != "student" {
+		userID, err := utils.VerifyToken(r) // Теперь вернулся только userID (тип int)
+		if err != nil {
 			error.Message = "Invalid token or not a student."
 			utils.RespondWithError(w, http.StatusUnauthorized, error)
 			return
 		}
-
-		studentID := user.ID // Получаем student_id из токена
 
 		// Проверка, что олимпиада существует
 		var olympiadExists bool
@@ -135,7 +141,7 @@ func (c *SubjectOlympiadController) RegisterStudentToOlympiad(db *sql.DB) http.H
 
 		// Проверка, что студент уже зарегистрирован на олимпиаду
 		var alreadyRegistered bool
-		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM student_olympiads WHERE student_id = ? AND olympiad_id = ?)", studentID, registrationData.OlympiadID).Scan(&alreadyRegistered)
+		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM student_olympiads WHERE student_id = ? AND olympiad_id = ?)", userID, registrationData.OlympiadID).Scan(&alreadyRegistered)
 		if err != nil || alreadyRegistered {
 			error.Message = "Student is already registered for this olympiad."
 			utils.RespondWithError(w, http.StatusBadRequest, error)
@@ -144,7 +150,7 @@ func (c *SubjectOlympiadController) RegisterStudentToOlympiad(db *sql.DB) http.H
 
 		// Регистрируем студента на олимпиаду
 		query := `INSERT INTO student_olympiads (student_id, olympiad_id) VALUES (?, ?)`
-		_, err = db.Exec(query, studentID, registrationData.OlympiadID)
+		_, err = db.Exec(query, userID, registrationData.OlympiadID)
 		if err != nil {
 			log.Println("Error registering student:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to register student"})
