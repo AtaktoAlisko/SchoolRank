@@ -626,7 +626,7 @@ func (sc StudentController) GetStudentsByGradeAndLetter(db *sql.DB) http.Handler
 		utils.ResponseJSON(w, students)
 	}
 }
-func (sc StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
+func (sc *StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract student_id from URL parameters
 		vars := mux.Vars(r)
@@ -658,15 +658,27 @@ func (sc StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Step 3: Ensure the user is authorized (schooladmin)
-		if userRole != "schooladmin" {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to update a student"})
-			return
+		// Step 3: Ensure the user is authorized (superadmin or schooladmin)
+		if userRole != "superadmin" {
+			// For schooladmin, check that the student belongs to the same school
+			var studentSchoolID int
+			err = db.QueryRow("SELECT school_id FROM student WHERE student_id = ?", studentID).Scan(&studentSchoolID)
+			if err != nil {
+				log.Println("Error fetching student school ID:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch student details"})
+				return
+			}
+			var userSchoolID int
+			err = db.QueryRow("SELECT school_id FROM users WHERE id = ?", userID).Scan(&userSchoolID)
+			if err != nil || userSchoolID != studentSchoolID {
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only update students from your own school"})
+				return
+			}
 		}
 
 		// Step 4: Check if the student exists
 		var existingStudent models.Student
-		err = db.QueryRow("SELECT student_id FROM Student WHERE student_id = ?", studentID).Scan(&existingStudent.ID)
+		err = db.QueryRow("SELECT student_id FROM student WHERE student_id = ?", studentID).Scan(&existingStudent.ID)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found"})
@@ -685,7 +697,7 @@ func (sc StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Step 6: Prepare and execute the update query
-		query := `UPDATE Student 
+		query := `UPDATE student 
                   SET first_name = ?, last_name = ?, patronymic = ?, iin = ?, date_of_birth = ?, 
                   grade = ?, school_id = ?, letter = ?, gender = ?, phone = ?, email = ? 
                   WHERE student_id = ?`
@@ -705,7 +717,7 @@ func (sc StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 		// Step 7: Fetch the updated student to return in the response
 		query = `SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, 
                 grade, letter, gender, phone, email, role, login 
-                FROM Student WHERE student_id = ?`
+                FROM student WHERE student_id = ?`
 
 		err = db.QueryRow(query, studentID).Scan(
 			&updatedStudent.ID, &updatedStudent.FirstName, &updatedStudent.LastName,
@@ -724,6 +736,7 @@ func (sc StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, updatedStudent)
 	}
 }
+
 func (sc *StudentController) DeleteStudent(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Извлекаем student_id из URL параметров

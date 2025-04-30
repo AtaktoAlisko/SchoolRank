@@ -420,12 +420,10 @@ func (sc SchoolController) DeleteSchool(db *sql.DB) http.HandlerFunc {
 		})
 	}
 }
-
 func atoi(s string) int {
 	i, _ := strconv.Atoi(s)
 	return i
 }
-
 func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Шаг 1: Выполнение запроса для получения всех школ, включая поле specializations
