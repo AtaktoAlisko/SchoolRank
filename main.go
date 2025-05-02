@@ -67,12 +67,9 @@ func main() {
 	untTypeController := controllers.UNTTypeController{}
 	studentController := controllers.StudentController{}
 	reviewController := controllers.ReviewController{}
-	cityOlympiadController := controllers.CityOlympiadController{}
-	regionalOlympiadController := controllers.RegionalOlympiadController{}
-	republicanOlympiadController := controllers.RepublicanOlympiadController{}
-	TotalOlympiadRatingController := controllers.TotalOlympiadRatingController{}
 	contactController := &controllers.ContactUsController{}
 	SubjectOlympiadController := controllers.SubjectOlympiadController{}
+	olympiadController := &controllers.OlympiadController{}
 
 	router := mux.NewRouter()
 
@@ -178,36 +175,34 @@ func main() {
 	// =======================
 	// Работа с Second Types
 	// =======================
+	
 	router.HandleFunc("/api/second-types", typeController.GetSecondTypes(db)).Methods("GET")
 	router.HandleFunc("/api/second-types", typeController.CreateSecondType(db)).Methods("POST")
 	router.HandleFunc("/api/schools/{school_id}/second-types", typeController.GetSecondTypesBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/second-types/average-rating", typeController.GetAverageRatingSecondBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/{school_id}/combined-average-rating", untScoreController.GetCombinedAverageRating(db)).Methods("GET")
 
+    // =======================
+	// Crud для олимпиад
 	// =======================
-	// Олимпиады: городские, областные, республиканские
-	// =======================
-	router.HandleFunc("/api/city-olympiads", cityOlympiadController.CreateCityOlympiad(db)).Methods("POST")
-	router.HandleFunc("/api/city_olympiad", cityOlympiadController.GetCityOlympiad(db)).Methods("GET")
-	router.HandleFunc("/api/city-olympiads/average-rating", cityOlympiadController.GetAverageCityOlympiadScore(db)).Methods("GET")
-	router.HandleFunc("/api/city-olympiads/{olympiad_id}", cityOlympiadController.DeleteCityOlympiad(db)).Methods("DELETE") //Нужно исправить по id
-
-	router.HandleFunc("/api/regional-olympiads", regionalOlympiadController.CreateRegionalOlympiad(db)).Methods("POST")
-	router.HandleFunc("/api/regional_olympiad", regionalOlympiadController.GetRegionalOlympiad(db)).Methods("GET")
-	router.HandleFunc("/api/regional-olympiads/average-rating", regionalOlympiadController.GetAverageRegionalOlympiadScore(db)).Methods("GET")
-	router.HandleFunc("//api/regional-olympiads/{olympiad_id}", regionalOlympiadController.DeleteRegionalOlympiad(db)).Methods("DELETE") //Нужно исправить по id
-
-	router.HandleFunc("/api/republican-olympiads", republicanOlympiadController.CreateRepublicanOlympiad(db)).Methods("POST")
-	router.HandleFunc("/api/republican_olympiad", republicanOlympiadController.GetRepublicanOlympiad(db)).Methods("GET")
-	router.HandleFunc("/api/republican-olympiads/average-rating", republicanOlympiadController.GetAverageRepublicanOlympiadScore(db)).Methods("GET")
-	router.HandleFunc("/api/republican-olympiads/{olympiad_id}", republicanOlympiadController.DeleteRepublicanOlympiad(db)).Methods("DELETE") //Нужно исправить по id
+	router.HandleFunc("/api/olympiads", olympiadController.CreateOlympiad(db)).Methods("POST")
+	router.HandleFunc("/api/olympiads", olympiadController.GetOlympiad(db)).Methods("GET")
+	router.HandleFunc("/api/olympiads/{olympiad_id}", olympiadController.DeleteOlympiad(db)).Methods("DELETE")
+	router.HandleFunc("/api/olympiads/{olympiad_id}", olympiadController.UpdateOlympiad(db)).Methods("PUT")
 
 	// =======================
 	// Итоговый рейтинг по олимппиадам
 	// =======================
-	router.HandleFunc("/api/olympiads/total-rating", TotalOlympiadRatingController.GetTotalOlympiadRating(db)).Methods("GET")
+	router.HandleFunc("/api/city-olympiad-rating/{school_id}", olympiadController.CalculateCityOlympiadRating(db)).Methods("GET")
+	router.HandleFunc("/api/regional-olympiad-rating/{school_id}", olympiadController.CalculateRegionalOlympiadRating(db)).Methods("GET")
+	router.HandleFunc("/api/republican-olympiad-rating/{school_id}", olympiadController.CalculateRepublicanOlympiadRating(db)).Methods("GET")
+	router.HandleFunc("/api/total-olympiad-rating/{school_id}", olympiadController.CalculateTotalOlympiadRating(db)).Methods("GET")
+	router.HandleFunc("/api/olympiads/school/{school_id}", olympiadController.GetOlympiadBySchoolId(db)).Methods("GET")
 
-	router.HandleFunc("/api/olympiads/create", SubjectOlympiadController.CreateOlympiad(db)).Methods("POST")
+
+
+	// router.HandleFunc("/api/olympiads/total-rating", TotalOlympiadRatingController.GetTotalOlympiadRating(db)).Methods("GET")
+	router.HandleFunc("/api/olympiads/create", SubjectOlympiadController.CreateSubjectOlympiad(db)).Methods("POST")
 	router.HandleFunc("/api/olympiads/register", SubjectOlympiadController.RegisterStudentToOlympiad(db)).Methods("POST")
 
 	// =======================

@@ -371,7 +371,6 @@ func (c *StudentController) GetTotalStudentsBySchool(db *sql.DB) http.HandlerFun
 		utils.ResponseJSON(w, response)
 	}
 }
-
 func generateRandomString(n int) string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	// generateRandomString generates a random string of length n

@@ -15,7 +15,7 @@ import (
 type SubjectOlympiadController struct{}
 
 // Метод для создания олимпиады по предмету
-func (c *SubjectOlympiadController) CreateOlympiad(db *sql.DB) http.HandlerFunc {
+func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var error models.Error
 

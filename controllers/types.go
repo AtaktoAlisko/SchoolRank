@@ -56,11 +56,26 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Шаг 5: Прочитать данные FirstType из тела запроса
+		// Шаг 5: Проверить, существует ли student_id в таблице student
+		var studentExists bool
 		var firstType models.FirstType
 		if err := json.NewDecoder(r.Body).Decode(&firstType); err != nil {
 			log.Printf("Ошибка при декодировании тела запроса: %v", err)
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Некорректный формат запроса"})
+			return
+		}
+
+		// Проверка существования студента в таблице student
+		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM student WHERE student_id = ?)", firstType.StudentID).Scan(&studentExists)
+		if err != nil {
+			log.Printf("Ошибка при проверке существования студента: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Не удалось проверить наличие студента"})
+			return
+		}
+
+		if !studentExists {
+			log.Printf("Студент с id %d не существует", firstType.StudentID)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Студент не найден в нашей системе"})
 			return
 		}
 
