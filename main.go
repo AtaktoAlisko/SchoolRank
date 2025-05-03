@@ -153,13 +153,12 @@ func main() {
 	// =======================
 	router.HandleFunc("/api/students", studentController.CreateStudent(db)).Methods("POST")
 	router.HandleFunc("/api/students", studentController.GetAllStudents(db)).Methods("GET")
-	router.HandleFunc("/api/students/{id}", studentController.EditStudent(db)).Methods("PUT")
+	router.HandleFunc("/api/students/{student_id}", studentController.UpdateStudent(db)).Methods("PUT")
 
 	router.HandleFunc("/api/schools/{school_id}/total-students", studentController.GetTotalStudentsBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/students/superadmin/{student_id}", studentController.SuperadminUpdateStudent(db)).Methods("PUT")
-	router.HandleFunc("/api/students/{student_id}", studentController.UpdateStudent(db)).Methods("PUT") //Нужно испроавить id гылп
 	router.HandleFunc("/api/students/superadmin/{student_id}", studentController.SuperadminDeleteStudent(db)).Methods("DELETE")
-	router.HandleFunc("/api/students/{student_id}", studentController.DeleteStudent(db)).Methods("DELETE") //Тоже нужно исправить
+	router.HandleFunc("/api/students/{student_id}", studentController.DeleteStudent(db)).Methods("DELETE")
 	router.HandleFunc("/api/schools/{school_id}/students", studentController.GetStudentsBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/students/{grade}", studentController.GetStudentsBySchoolAndGrade(db)).Methods("GET")
 	router.HandleFunc("/api/students/grade/{grade}/letter/{letter}", studentController.GetStudentsByGradeAndLetter(db)).Methods("GET")

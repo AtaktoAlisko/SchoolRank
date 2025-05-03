@@ -858,7 +858,7 @@ func (sc *StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Step 1: Verify the user's token and get userID (similar to CreateStudent)
+		// Step 1: Verify the user's token and get userID
 		userID, err := utils.VerifyToken(r)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
@@ -875,8 +875,14 @@ func (sc *StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Step 3: Ensure the user is authorized (superadmin or schooladmin)
-		if userRole != "superadmin" {
-			// For schooladmin, check that the student belongs to the same school
+		// Superadmin can update any student from any school
+		if userRole != "superadmin" && userRole != "schooladmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to update a student"})
+			return
+		}
+
+		// If user is a schooladmin, check that the student belongs to the same school
+		if userRole == "schooladmin" {
 			var studentSchoolID int
 			err = db.QueryRow("SELECT school_id FROM student WHERE student_id = ?", studentID).Scan(&studentSchoolID)
 			if err != nil {
@@ -886,11 +892,18 @@ func (sc *StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 			}
 			var userSchoolID int
 			err = db.QueryRow("SELECT school_id FROM users WHERE id = ?", userID).Scan(&userSchoolID)
-			if err != nil || userSchoolID != studentSchoolID {
+			if err != nil {
+				log.Println("Error fetching user school ID:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+				return
+			}
+
+			if userSchoolID != studentSchoolID {
 				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only update students from your own school"})
 				return
 			}
 		}
+		// For superadmin, no additional checks needed - they can update any student
 
 		// Step 4: Check if the student exists
 		var existingStudent models.Student

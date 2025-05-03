@@ -161,7 +161,6 @@ func (c *SubjectOlympiadController) RegisterStudentToOlympiad(db *sql.DB) http.H
 		utils.ResponseJSON(w, map[string]string{"message": "Student successfully registered for the olympiad."})
 	}
 }
-
 // Метод для получения всех олимпиад для студентов
 func (c *SubjectOlympiadController) GetAllOlympiadsForStudent(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
