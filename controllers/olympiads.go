@@ -63,27 +63,23 @@ func (oc *OlympiadController) CreateOlympiad(db *sql.DB) http.HandlerFunc {
 		case 3:
 			olympiad.Score = 20
 		default:
-			olympiad.Score = 0 // Для всех других мест 0 баллов
+			olympiad.Score = 0
 		}
 
-		// 7. Присваиваем уровень олимпиады в зависимости от типа (city, region, republican)
+		// 7. Присваиваем уровень олимпиады
 		var level string
 		switch olympiad.Level {
-		case "city":
-			level = "city"
-		case "region":
-			level = "region"
-		case "republican":
-			level = "republican"
+		case "city", "region", "republican":
+			level = olympiad.Level
 		default:
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid level"})
 			return
 		}
 
-		// 8. Вставка новой записи в таблицу Olympiads с добавлением school_id и level
-		query := `INSERT INTO Olympiads (student_id, olympiad_place, score, school_id, level) 
-                  VALUES (?, ?, ?, ?, ?)`
-		_, err = db.Exec(query, olympiad.StudentID, olympiad.OlympiadPlace, olympiad.Score, directorSchoolID, level)
+		// 8. Вставляем запись с именем олимпиады
+		query := `INSERT INTO Olympiads (student_id, olympiad_place, score, school_id, level, olympiad_name) 
+                  VALUES (?, ?, ?, ?, ?, ?)`
+		_, err = db.Exec(query, olympiad.StudentID, olympiad.OlympiadPlace, olympiad.Score, directorSchoolID, level, olympiad.OlympiadName)
 		if err != nil {
 			log.Printf("Error inserting Olympiad: %v", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create Olympiad record"})
@@ -105,7 +101,7 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 		if studentID != "" {
 			query = `SELECT 
 						Olympiads.olympiad_id, Olympiads.student_id, Olympiads.olympiad_place, Olympiads.score, 
-						Olympiads.school_id, Olympiads.level, 
+						Olympiads.school_id, Olympiads.level, Olympiads.olympiad_name,
 						student.first_name, student.last_name, student.patronymic, 
 						student.grade, student.letter
 					FROM Olympiads
@@ -115,7 +111,7 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 		} else if level != "" {
 			query = `SELECT 
 						Olympiads.olympiad_id, Olympiads.student_id, Olympiads.olympiad_place, Olympiads.score, 
-						Olympiads.school_id, Olympiads.level, 
+						Olympiads.school_id, Olympiads.level, Olympiads.olympiad_name,
 						student.first_name, student.last_name, student.patronymic,
 						student.grade, student.letter
 					FROM Olympiads
@@ -125,7 +121,7 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 		} else {
 			query = `SELECT 
 						Olympiads.olympiad_id, Olympiads.student_id, Olympiads.olympiad_place, Olympiads.score, 
-						Olympiads.school_id, Olympiads.level, 
+						Olympiads.school_id, Olympiads.level, Olympiads.olympiad_name,
 						student.first_name, student.last_name, student.patronymic,
 						student.grade, student.letter
 					FROM Olympiads
@@ -144,6 +140,7 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 
 		for rows.Next() {
 			var olympiad models.Olympiads
+			var olympiadName sql.NullString // Use sql.NullString to handle NULL values
 
 			err := rows.Scan(
 				&olympiad.OlympiadID,
@@ -152,6 +149,7 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 				&olympiad.Score,
 				&olympiad.SchoolID,
 				&olympiad.Level,
+				&olympiadName, // Scan into NullString
 				&olympiad.FirstName,
 				&olympiad.LastName,
 				&olympiad.Patronymic,
@@ -162,6 +160,13 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 				log.Printf("Error scanning Olympiad record: %v", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing Olympiad data"})
 				return
+			}
+
+			// Convert NullString to string
+			if olympiadName.Valid {
+				olympiad.OlympiadName = olympiadName.String
+			} else {
+				olympiad.OlympiadName = "" // Empty string for NULL values
 			}
 
 			olympiads = append(olympiads, olympiad)
@@ -368,10 +373,12 @@ func (oc *OlympiadController) UpdateOlympiad(db *sql.DB) http.HandlerFunc {
 			}
 		}
 
+		// 11. Включаем olympiad_name в SQL запрос для обновления
 		query := `UPDATE Olympiads 
-				 SET student_id = ?, olympiad_place = ?, score = ?, level = ?, school_id = ?
+				 SET student_id = ?, olympiad_place = ?, score = ?, level = ?, school_id = ?, olympiad_name = ?
 				 WHERE olympiad_id = ?`
-		_, err = db.Exec(query, olympiad.StudentID, olympiad.OlympiadPlace, olympiad.Score, level, schoolIDToSave, olympiadID)
+		_, err = db.Exec(query, olympiad.StudentID, olympiad.OlympiadPlace, olympiad.Score, level, schoolIDToSave,
+			olympiad.OlympiadName, olympiadID)
 		if err != nil {
 			log.Printf("Error updating Olympiad: %v", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update Olympiad record"})

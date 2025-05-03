@@ -2,6 +2,7 @@ package models
 
 type Olympiads struct {
 	OlympiadID    int    `json:"olympiad_id"`
+	OlympiadName  string `json:"olympiad_name"`
 	StudentID     int    `json:"student_id"`
 	OlympiadPlace int    `json:"olympiad_place"`
 	Score         int    `json:"score"`
