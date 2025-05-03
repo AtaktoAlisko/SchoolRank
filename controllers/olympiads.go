@@ -412,9 +412,10 @@ func (oc *OlympiadController) GetOlympiadBySchoolId(db *sql.DB) http.HandlerFunc
 		}
 
 		// 3. Получаем список олимпиад для указанной школы
-		// Присоединяем данные о студентах, чтобы получить их имена
+		// Присоединяем данные о студентах, чтобы получить их имена и добавляем olympiad_name
 		query := `
-			SELECT o.olympiad_id, o.student_id, s.first_name, s.last_name, o.olympiad_place, o.score, o.level, o.school_id
+			SELECT o.olympiad_id, o.student_id, s.first_name, s.last_name, o.olympiad_place, 
+			       o.score, o.level, o.school_id, o.olympiad_name
 			FROM Olympiads o
 			JOIN student s ON o.student_id = s.student_id
 			WHERE o.school_id = ?
@@ -438,12 +439,15 @@ func (oc *OlympiadController) GetOlympiadBySchoolId(db *sql.DB) http.HandlerFunc
 			Score         int    `json:"score"`
 			Level         string `json:"level"`
 			SchoolID      int    `json:"school_id"`
+			OlympiadName  string `json:"olympiad_name"` // Добавляем поле olympiad_name
 		}
 
 		// 5. Считываем данные из результата запроса
 		olympiads := []OlympiadWithStudent{}
 		for rows.Next() {
 			var olympiad OlympiadWithStudent
+			var olympiadName sql.NullString // Используем NullString для обработки NULL значений
+
 			err := rows.Scan(
 				&olympiad.OlympiadID,
 				&olympiad.StudentID,
@@ -453,12 +457,21 @@ func (oc *OlympiadController) GetOlympiadBySchoolId(db *sql.DB) http.HandlerFunc
 				&olympiad.Score,
 				&olympiad.Level,
 				&olympiad.SchoolID,
+				&olympiadName, // Сканируем в NullString
 			)
 			if err != nil {
 				log.Printf("Error scanning olympiad row: %v", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing olympiad data"})
 				return
 			}
+
+			// Преобразуем NullString в обычную строку
+			if olympiadName.Valid {
+				olympiad.OlympiadName = olympiadName.String
+			} else {
+				olympiad.OlympiadName = "" // Пустая строка для NULL значений
+			}
+
 			olympiads = append(olympiads, olympiad)
 		}
 
