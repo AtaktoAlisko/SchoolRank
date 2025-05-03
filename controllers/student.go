@@ -766,7 +766,7 @@ func (sc StudentController) GetStudentsByGradeAndLetter(db *sql.DB) http.Handler
 		}
 
 		// Шаг 1: Запрос к базе данных для получения студентов по grade и letter
-		rows, err := db.Query("SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email FROM Student WHERE grade = ? AND letter = ?", grade, letterParam)
+		rows, err := db.Query("SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email FROM student WHERE grade = ? AND letter = ?", grade, letterParam)
 		if err != nil {
 			log.Println("SQL Error:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get students"})
