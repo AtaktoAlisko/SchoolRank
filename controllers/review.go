@@ -102,7 +102,6 @@ func (rc *ReviewController) CreateReview(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
-
 func (rc *ReviewController) GetReviewsBySchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Получаем school_id из параметров запроса
@@ -133,7 +132,6 @@ func (rc *ReviewController) GetReviewsBySchool(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, reviews)
 	}
 }
-
 func (rc *ReviewController) GetAverageRating(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Получаем school_id из параметров запроса
@@ -154,7 +152,6 @@ func (rc *ReviewController) GetAverageRating(db *sql.DB) http.HandlerFunc {
 		})
 	}
 }
-
 func (rc *ReviewController) GetAllReviews(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Step 1: Get all reviews first

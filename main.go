@@ -120,7 +120,6 @@ func main() {
 
 	//superadmin
 	router.HandleFunc("/api/schools", schoolController.CreateSchool(db)).Methods("POST")
-	// router.HandleFunc("/api/schools/{id}", schoolController.GetSchool(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{id}", schoolController.UpdateSchool(db)).Methods("PUT")
 	router.HandleFunc("/api/schools/{id}", schoolController.DeleteSchool(db)).Methods("DELETE")
 	router.HandleFunc("/api/schools", schoolController.GetAllSchools(db)).Methods("GET")
@@ -156,8 +155,6 @@ func main() {
 	router.HandleFunc("/api/students/{student_id}", studentController.UpdateStudent(db)).Methods("PUT")
 
 	router.HandleFunc("/api/schools/{school_id}/total-students", studentController.GetTotalStudentsBySchool(db)).Methods("GET")
-	router.HandleFunc("/api/students/superadmin/{student_id}", studentController.SuperadminUpdateStudent(db)).Methods("PUT")
-	router.HandleFunc("/api/students/superadmin/{student_id}", studentController.SuperadminDeleteStudent(db)).Methods("DELETE")
 	router.HandleFunc("/api/students/{student_id}", studentController.DeleteStudent(db)).Methods("DELETE")
 	router.HandleFunc("/api/schools/{school_id}/students", studentController.GetStudentsBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/students/{grade}", studentController.GetStudentsBySchoolAndGrade(db)).Methods("GET")

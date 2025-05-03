@@ -95,37 +95,41 @@ func (oc *OlympiadController) CreateOlympiad(db *sql.DB) http.HandlerFunc {
 }
 func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Извлекаем параметры запроса (например, student_id или level)
-		studentID := r.URL.Query().Get("student_id") // Пример: ?student_id=123
-		level := r.URL.Query().Get("level")          // Пример: ?level=city
+		studentID := r.URL.Query().Get("student_id")
+		level := r.URL.Query().Get("level")
 
-		// 1. Формируем SQL-запрос в зависимости от переданных параметров
 		var query string
 		var rows *sql.Rows
 		var err error
 
 		if studentID != "" {
-			// Если передан student_id, ищем олимпиады для конкретного студента
-			query = `SELECT Olympiads.olympiad_id, Olympiads.student_id, Olympiads.olympiad_place, Olympiads.score, 
-						Olympiads.school_id, Olympiads.level, student.first_name, student.last_name, student.patronymic
-					  FROM Olympiads
-					  JOIN student ON Olympiads.student_id = student.student_id
-					  WHERE Olympiads.student_id = ?`
+			query = `SELECT 
+						Olympiads.olympiad_id, Olympiads.student_id, Olympiads.olympiad_place, Olympiads.score, 
+						Olympiads.school_id, Olympiads.level, 
+						student.first_name, student.last_name, student.patronymic, 
+						student.grade, student.letter
+					FROM Olympiads
+					JOIN student ON Olympiads.student_id = student.student_id
+					WHERE Olympiads.student_id = ?`
 			rows, err = db.Query(query, studentID)
 		} else if level != "" {
-			// Если передан level, ищем олимпиады по уровню
-			query = `SELECT Olympiads.olympiad_id, Olympiads.student_id, Olympiads.olympiad_place, Olympiads.score, 
-						Olympiads.school_id, Olympiads.level, student.first_name, student.last_name, student.patronymic
-					  FROM Olympiads
-					  JOIN student ON Olympiads.student_id = student.student_id
-					  WHERE Olympiads.level = ?`
+			query = `SELECT 
+						Olympiads.olympiad_id, Olympiads.student_id, Olympiads.olympiad_place, Olympiads.score, 
+						Olympiads.school_id, Olympiads.level, 
+						student.first_name, student.last_name, student.patronymic,
+						student.grade, student.letter
+					FROM Olympiads
+					JOIN student ON Olympiads.student_id = student.student_id
+					WHERE Olympiads.level = ?`
 			rows, err = db.Query(query, level)
 		} else {
-			// Если не передан ни один параметр, выводим все олимпиады для всех школ
-			query = `SELECT Olympiads.olympiad_id, Olympiads.student_id, Olympiads.olympiad_place, Olympiads.score, 
-						Olympiads.school_id, Olympiads.level, student.first_name, student.last_name, student.patronymic
-					  FROM Olympiads
-					  JOIN student ON Olympiads.student_id = student.student_id`
+			query = `SELECT 
+						Olympiads.olympiad_id, Olympiads.student_id, Olympiads.olympiad_place, Olympiads.score, 
+						Olympiads.school_id, Olympiads.level, 
+						student.first_name, student.last_name, student.patronymic,
+						student.grade, student.letter
+					FROM Olympiads
+					JOIN student ON Olympiads.student_id = student.student_id`
 			rows, err = db.Query(query)
 		}
 
@@ -136,26 +140,37 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		// 2. Формируем срез для хранения результатов
 		var olympiads []models.Olympiads
 
-		// 3. Чтение данных из строки и добавление в срез
 		for rows.Next() {
 			var olympiad models.Olympiads
-			err := rows.Scan(&olympiad.OlympiadID, &olympiad.StudentID, &olympiad.OlympiadPlace, &olympiad.Score,
-				&olympiad.SchoolID, &olympiad.Level, &olympiad.FirstName, &olympiad.LastName, &olympiad.Patronymic)
+
+			err := rows.Scan(
+				&olympiad.OlympiadID,
+				&olympiad.StudentID,
+				&olympiad.OlympiadPlace,
+				&olympiad.Score,
+				&olympiad.SchoolID,
+				&olympiad.Level,
+				&olympiad.FirstName,
+				&olympiad.LastName,
+				&olympiad.Patronymic,
+				&olympiad.Grade,
+				&olympiad.Letter,
+			)
 			if err != nil {
 				log.Printf("Error scanning Olympiad record: %v", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing Olympiad data"})
 				return
 			}
+
 			olympiads = append(olympiads, olympiad)
 		}
 
-		// 4. Возвращаем найденные олимпиады
 		utils.ResponseJSON(w, olympiads)
 	}
 }
+
 func (oc *OlympiadController) DeleteOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// 1. Извлекаем параметры запроса

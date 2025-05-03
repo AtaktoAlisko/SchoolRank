@@ -10,4 +10,6 @@ type Olympiads struct {
 	FirstName     string `json:"first_name"`
 	LastName      string `json:"last_name"`
 	Patronymic    string `json:"patronymic"`
+	Grade         int    `json:"grade"`
+	Letter        string `json:"letter"`
 }
