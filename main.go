@@ -149,10 +149,12 @@ func main() {
 	router.HandleFunc("/api/schools/{school_id}/unt-types", typeController.GetUNTTypesBySchool(db)).Methods("GET")
 
 	// =======================
-	// Работа со студентами
+	// CRUD студентов
 	// =======================
 	router.HandleFunc("/api/students", studentController.CreateStudent(db)).Methods("POST")
 	router.HandleFunc("/api/students", studentController.GetAllStudents(db)).Methods("GET")
+	router.HandleFunc("/api/students/{id}", studentController.EditStudent(db)).Methods("PUT")
+
 	router.HandleFunc("/api/schools/{school_id}/total-students", studentController.GetTotalStudentsBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/students/superadmin/{student_id}", studentController.SuperadminUpdateStudent(db)).Methods("PUT")
 	router.HandleFunc("/api/students/{student_id}", studentController.UpdateStudent(db)).Methods("PUT") //Нужно испроавить id гылп
@@ -175,14 +177,14 @@ func main() {
 	// =======================
 	// Работа с Second Types
 	// =======================
-	
+
 	router.HandleFunc("/api/second-types", typeController.GetSecondTypes(db)).Methods("GET")
 	router.HandleFunc("/api/second-types", typeController.CreateSecondType(db)).Methods("POST")
 	router.HandleFunc("/api/schools/{school_id}/second-types", typeController.GetSecondTypesBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/second-types/average-rating", typeController.GetAverageRatingSecondBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/{school_id}/combined-average-rating", untScoreController.GetCombinedAverageRating(db)).Methods("GET")
 
-    // =======================
+	// =======================
 	// Crud для олимпиад
 	// =======================
 	router.HandleFunc("/api/olympiads", olympiadController.CreateOlympiad(db)).Methods("POST")
@@ -198,8 +200,6 @@ func main() {
 	router.HandleFunc("/api/republican-olympiad-rating/{school_id}", olympiadController.CalculateRepublicanOlympiadRating(db)).Methods("GET")
 	router.HandleFunc("/api/total-olympiad-rating/{school_id}", olympiadController.CalculateTotalOlympiadRating(db)).Methods("GET")
 	router.HandleFunc("/api/olympiads/school/{school_id}", olympiadController.GetOlympiadBySchoolId(db)).Methods("GET")
-
-
 
 	// router.HandleFunc("/api/olympiads/total-rating", TotalOlympiadRatingController.GetTotalOlympiadRating(db)).Methods("GET")
 	router.HandleFunc("/api/olympiads/create", SubjectOlympiadController.CreateSubjectOlympiad(db)).Methods("POST")
