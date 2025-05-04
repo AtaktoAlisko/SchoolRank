@@ -17,22 +17,25 @@ type OlympiadController struct {
 
 func (oc *OlympiadController) CreateOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// 1. Проверяем токен и получаем userID
 		userID, err := utils.VerifyToken(r)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
 			return
 		}
 
-		// 2. Получаем school_id из данных пользователя (директора)
-		var directorSchoolID int
-		err = db.QueryRow("SELECT school_id FROM users WHERE id = ?", userID).Scan(&directorSchoolID)
+		var schoolID sql.NullInt64
+		var role string
+		err = db.QueryRow("SELECT school_id, role FROM users WHERE id = ?", userID).Scan(&schoolID, &role)
 		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch user school"})
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch user info"})
 			return
 		}
 
-		// 3. Декодируем тело запроса
+		if role != "schooladmin" && role != "superadmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Access denied"})
+			return
+		}
+
 		var olympiad models.Olympiads
 		if err := json.NewDecoder(r.Body).Decode(&olympiad); err != nil {
 			log.Printf("Error decoding request body: %v", err)
@@ -40,7 +43,7 @@ func (oc *OlympiadController) CreateOlympiad(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// 4. Проверяем, существует ли студент с таким student_id
+		// Получаем school_id студента
 		var studentSchoolID int
 		err = db.QueryRow("SELECT school_id FROM student WHERE student_id = ?", olympiad.StudentID).Scan(&studentSchoolID)
 		if err != nil {
@@ -48,13 +51,15 @@ func (oc *OlympiadController) CreateOlympiad(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// 5. Проверяем, что студент принадлежит той же школе, что и директор
-		if studentSchoolID != directorSchoolID {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Student does not belong to your school"})
-			return
+		// Если пользователь schooladmin, проверяем совпадение школ
+		if role == "schooladmin" {
+			if !schoolID.Valid || int(schoolID.Int64) != studentSchoolID {
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Student does not belong to your school"})
+				return
+			}
 		}
 
-		// 6. Присваиваем баллы в зависимости от места
+		// Назначаем баллы по месту
 		switch olympiad.OlympiadPlace {
 		case 1:
 			olympiad.Score = 50
@@ -66,20 +71,19 @@ func (oc *OlympiadController) CreateOlympiad(db *sql.DB) http.HandlerFunc {
 			olympiad.Score = 0
 		}
 
-		// 7. Присваиваем уровень олимпиады
-		var level string
+		// Проверяем уровень олимпиады
 		switch olympiad.Level {
 		case "city", "region", "republican":
-			level = olympiad.Level
+			// валидный уровень
 		default:
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid level"})
 			return
 		}
 
-		// 8. Вставляем запись с именем олимпиады
+		// Вставка олимпиады от имени ученика (и его школы)
 		query := `INSERT INTO Olympiads (student_id, olympiad_place, score, school_id, level, olympiad_name) 
                   VALUES (?, ?, ?, ?, ?, ?)`
-		_, err = db.Exec(query, olympiad.StudentID, olympiad.OlympiadPlace, olympiad.Score, directorSchoolID, level, olympiad.OlympiadName)
+		_, err = db.Exec(query, olympiad.StudentID, olympiad.OlympiadPlace, olympiad.Score, studentSchoolID, olympiad.Level, olympiad.OlympiadName)
 		if err != nil {
 			log.Printf("Error inserting Olympiad: %v", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create Olympiad record"})

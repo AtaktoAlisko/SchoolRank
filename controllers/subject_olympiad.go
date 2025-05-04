@@ -19,24 +19,30 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 	return func(w http.ResponseWriter, r *http.Request) {
 		var error models.Error
 
-		// Step 1: Verify user is a superadmin
-		userID, err := utils.VerifyToken(r) // Возвращает только userID (int)
+		// Step 1: Verify user token and get user ID
+		userID, err := utils.VerifyToken(r)
 		if err != nil {
-			error.Message = "Invalid token or not a superadmin."
+			error.Message = "Invalid token."
 			utils.RespondWithError(w, http.StatusUnauthorized, error)
 			return
 		}
 
-		// Получаем роль пользователя из базы данных, используя userID
+		// Step 2: Get user role from DB
 		var userRole string
 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
-		if err != nil || userRole != "superadmin" {
-			error.Message = "Only superadmin can create olympiads."
-			utils.RespondWithError(w, http.StatusUnauthorized, error)
+		if err != nil {
+			log.Println("Error fetching user role:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
 			return
 		}
 
-		// Step 2: Parse the multipart form with a reasonable size limit
+		// Step 3: Check if the user is a superadmin or schooladmin
+		if userRole != "superadmin" && userRole != "schooladmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create an olympiad"})
+			return
+		}
+
+		// Step 4: Parse multipart form
 		err = r.ParseMultipartForm(10 << 20) // 10MB limit
 		if err != nil {
 			error.Message = "Error parsing form data"
@@ -45,7 +51,7 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 			return
 		}
 
-		// Get form values and convert types as needed
+		// Step 5: Parse form fields
 		schoolAdminID, err := strconv.Atoi(r.FormValue("school_admin_id"))
 		if err != nil {
 			error.Message = "Invalid school_admin_id format"
@@ -61,10 +67,9 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 			Duration:      r.FormValue("duration"),
 			Description:   r.FormValue("description"),
 			City:          r.FormValue("city"),
-			SchoolAdminID: schoolAdminID, // Now using the converted integer
+			SchoolAdminID: schoolAdminID,
 		}
 
-		// Validate required fields
 		if olympiad.SubjectName == "" || olympiad.EventName == "" || olympiad.Date == "" || olympiad.City == "" {
 			error.Message = "Subject name, event name, date, and city are required fields."
 			utils.RespondWithError(w, http.StatusBadRequest, error)
@@ -72,7 +77,7 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 			return
 		}
 
-		// Get the file from form data
+		// Step 6: File upload
 		file, _, err := r.FormFile("photo_url")
 		if err != nil {
 			log.Println("Error reading file:", err)
@@ -81,8 +86,7 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 		}
 		defer file.Close()
 
-		// Generate unique filename and upload to S3
-		uniqueFileName := fmt.Sprintf("olympiad-%d-%d.jpg", time.Now().Unix())
+		uniqueFileName := fmt.Sprintf("olympiad-%d.jpg", time.Now().Unix())
 		photoURL, err := utils.UploadFileToS3(file, uniqueFileName, false)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to upload photo"})
@@ -92,7 +96,7 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 
 		olympiad.PhotoURL = photoURL
 
-		// Insert into database
+		// Step 7: Insert into DB
 		query := `INSERT INTO subject_olympiads (subject_name, event_name, date, duration, description, photo_url, city, school_admin_id) 
                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 
@@ -106,6 +110,7 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 		utils.ResponseJSON(w, olympiad)
 	}
 }
+
 func (c *SubjectOlympiadController) RegisterStudentToOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var registrationData struct {
@@ -161,6 +166,7 @@ func (c *SubjectOlympiadController) RegisterStudentToOlympiad(db *sql.DB) http.H
 		utils.ResponseJSON(w, map[string]string{"message": "Student successfully registered for the olympiad."})
 	}
 }
+
 // Метод для получения всех олимпиад для студентов
 func (c *SubjectOlympiadController) GetAllOlympiadsForStudent(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
