@@ -179,7 +179,6 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, olympiads)
 	}
 }
-
 func (oc *OlympiadController) DeleteOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// 1. Извлекаем параметры запроса
@@ -258,7 +257,7 @@ func (oc *OlympiadController) UpdateOlympiad(db *sql.DB) http.HandlerFunc {
 		}
 
 		// 2. Получаем school_id и role из данных пользователя
-		var userSchoolID int
+		var userSchoolID sql.NullInt64
 		var userRole string
 		err = db.QueryRow("SELECT school_id, role FROM users WHERE id = ?", userID).Scan(&userSchoolID, &userRole)
 		if err != nil {
@@ -292,7 +291,6 @@ func (oc *OlympiadController) UpdateOlympiad(db *sql.DB) http.HandlerFunc {
 		// 5. Проверяем, существует ли олимпиада с таким ID
 		var existingOlympiadSchoolID int
 		var studentID int
-		// Используем olympiad_id вместо id как имя столбца
 		err = db.QueryRow("SELECT school_id, student_id FROM Olympiads WHERE olympiad_id = ?", olympiadID).Scan(&existingOlympiadSchoolID, &studentID)
 		if err != nil {
 			if err == sql.ErrNoRows {
@@ -305,13 +303,14 @@ func (oc *OlympiadController) UpdateOlympiad(db *sql.DB) http.HandlerFunc {
 		}
 
 		// 6. Проверяем права доступа пользователя к этой записи
-		// Если пользователь не superadmin, то он может редактировать только записи своей школы
-		if userRole != "superadmin" && existingOlympiadSchoolID != userSchoolID {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You don't have permission to update this olympiad record"})
-			return
+		if userRole != "superadmin" {
+			if !userSchoolID.Valid || existingOlympiadSchoolID != int(userSchoolID.Int64) {
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You don't have permission to update this olympiad record"})
+				return
+			}
 		}
 
-		// 7. Если в запросе указан student_id и он отличается от текущего, проверяем его принадлежность к школе
+		// 7. Проверяем student_id, если указан и отличается
 		if olympiad.StudentID != 0 && olympiad.StudentID != studentID {
 			var studentSchoolID int
 			err = db.QueryRow("SELECT school_id FROM student WHERE student_id = ?", olympiad.StudentID).Scan(&studentSchoolID)
@@ -325,17 +324,15 @@ func (oc *OlympiadController) UpdateOlympiad(db *sql.DB) http.HandlerFunc {
 				return
 			}
 
-			// Superadmin может менять на любого студента, остальные - только на студента из своей школы
-			if userRole != "superadmin" && studentSchoolID != userSchoolID {
+			if userRole != "superadmin" && (!userSchoolID.Valid || studentSchoolID != int(userSchoolID.Int64)) {
 				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Student does not belong to your school"})
 				return
 			}
 		} else if olympiad.StudentID == 0 {
-			// Если student_id не указан, используем существующий
 			olympiad.StudentID = studentID
 		}
 
-		// 8. Присваиваем баллы в зависимости от места
+		// 8. Присваиваем баллы
 		switch olympiad.OlympiadPlace {
 		case 1:
 			olympiad.Score = 50
@@ -344,31 +341,24 @@ func (oc *OlympiadController) UpdateOlympiad(db *sql.DB) http.HandlerFunc {
 		case 3:
 			olympiad.Score = 20
 		default:
-			olympiad.Score = 0 // Для всех других мест 0 баллов
+			olympiad.Score = 0
 		}
 
-		// 9. Проверяем и присваиваем уровень олимпиады
+		// 9. Проверяем уровень олимпиады
 		var level string
 		switch olympiad.Level {
-		case "city":
-			level = "city"
-		case "region":
-			level = "region"
-		case "republican":
-			level = "republican"
+		case "city", "region", "republican":
+			level = olympiad.Level
 		default:
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid level"})
 			return
 		}
 
-		// 10. Обновляем запись в таблице Olympiads
-		// Если пользователь не superadmin, сохраняем школу студента как школу олимпиады
+		// 10. Получаем school_id, который нужно сохранить
 		var schoolIDToSave int
 		if userRole == "superadmin" && olympiad.SchoolID != 0 {
-			// Суперадмин может изменить school_id
 			schoolIDToSave = olympiad.SchoolID
 		} else {
-			// Для всех других случаев сохраняем школу в зависимости от student_id
 			err = db.QueryRow("SELECT school_id FROM student WHERE student_id = ?", olympiad.StudentID).Scan(&schoolIDToSave)
 			if err != nil {
 				log.Printf("Error getting student school: %v", err)
@@ -377,10 +367,10 @@ func (oc *OlympiadController) UpdateOlympiad(db *sql.DB) http.HandlerFunc {
 			}
 		}
 
-		// 11. Включаем olympiad_name в SQL запрос для обновления
+		// 11. Обновляем запись
 		query := `UPDATE Olympiads 
-				 SET student_id = ?, olympiad_place = ?, score = ?, level = ?, school_id = ?, olympiad_name = ?
-				 WHERE olympiad_id = ?`
+				  SET student_id = ?, olympiad_place = ?, score = ?, level = ?, school_id = ?, olympiad_name = ?
+				  WHERE olympiad_id = ?`
 		_, err = db.Exec(query, olympiad.StudentID, olympiad.OlympiadPlace, olympiad.Score, level, schoolIDToSave,
 			olympiad.OlympiadName, olympiadID)
 		if err != nil {
@@ -392,6 +382,7 @@ func (oc *OlympiadController) UpdateOlympiad(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, "Olympiad record updated successfully")
 	}
 }
+
 func (oc *OlympiadController) GetOlympiadBySchoolId(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// 1. Получаем school_id из URL параметров
