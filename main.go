@@ -162,6 +162,13 @@ func main() {
 	// Роут для получения данных о студенте
 	router.HandleFunc("/api/schools/{school_id}/students/{student_id}", studentController.GetStudentData(db)).Methods("GET")
 
+
+	router.HandleFunc("/api/student-filters", studentController.GetStudentFilters(db)).Methods("GET")
+	router.HandleFunc("/api/grades", studentController.GetAvailableGrades(db)).Methods("GET")
+	router.HandleFunc("/api/letters", studentController.GetAvailableLetters(db)).Methods("GET")
+	router.HandleFunc("/api/filtered-students", studentController.GetFilteredStudents(db)).Methods("GET")
+	
+
 	// =======================
 	// Работа с First Types
 	// =======================

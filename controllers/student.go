@@ -10,6 +10,7 @@ import (
 	"ranking-school/models"
 	"ranking-school/utils"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 )
@@ -1206,5 +1207,386 @@ func (sc StudentController) SuperadminDeleteStudent(db *sql.DB) http.HandlerFunc
 
 		// Step 6: Respond with a success message
 		utils.ResponseJSON(w, map[string]string{"message": "Student deleted successfully"})
+	}
+}
+func (sfc *StudentController) GetStudentFilters(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify the user's token and get user ID
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		// Step 2: Get user role from the database
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil {
+			log.Println("Error fetching user role:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
+
+		response := map[string]interface{}{
+			"role": userRole,
+		}
+
+		// Step 3: Add school list for superadmin
+		if userRole == "superadmin" {
+			// Fetch all schools for superadmin
+			rows, err := db.Query("SELECT school_id, school_name FROM Schools")
+			if err != nil {
+				log.Println("Error fetching schools:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch schools"})
+				return
+			}
+			defer rows.Close()
+
+			var schools []map[string]interface{}
+			for rows.Next() {
+				var schoolID int
+				var schoolName string
+				if err := rows.Scan(&schoolID, &schoolName); err != nil {
+					log.Println("Error scanning school data:", err)
+					continue
+				}
+				schools = append(schools, map[string]interface{}{
+					"id":   schoolID,
+					"name": schoolName,
+				})
+			}
+			response["schools"] = schools
+		} else if userRole == "schooladmin" {
+			// For schooladmin, get their associated school
+			var userEmail string
+			err = db.QueryRow("SELECT email FROM users WHERE id = ?", userID).Scan(&userEmail)
+			if err != nil {
+				log.Println("Error fetching user email:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user email"})
+				return
+			}
+
+			var schoolID int
+			var schoolName string
+			err = db.QueryRow("SELECT school_id, school_name FROM Schools WHERE school_admin_login = ?", userEmail).Scan(&schoolID, &schoolName)
+			if err != nil {
+				log.Println("Error fetching school:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching school details"})
+				return
+			}
+
+			response["school"] = map[string]interface{}{
+				"id":   schoolID,
+				"name": schoolName,
+			}
+		}
+
+		utils.ResponseJSON(w, response)
+	}
+}
+// GetAvailableGrades returns available grades for a specific school
+func (sfc *StudentController) GetAvailableGrades(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify the user's token and get user ID
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		// Step 2: Get user role
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil {
+			log.Println("Error fetching user role:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
+
+		var schoolID int
+
+		// Step 3: Determine school ID based on role
+		if userRole == "superadmin" {
+			// Get school_id from query parameters
+			schoolIDParam := r.URL.Query().Get("schoolId")
+			if schoolIDParam == "" {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School ID is required for superadmin"})
+				return
+			}
+
+			var err error
+			schoolID, err = strconv.Atoi(schoolIDParam)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+				return
+			}
+		} else if userRole == "schooladmin" {
+			// Get school ID associated with this schooladmin
+			var userEmail string
+			err = db.QueryRow("SELECT email FROM users WHERE id = ?", userID).Scan(&userEmail)
+			if err != nil {
+				log.Println("Error fetching user email:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user email"})
+				return
+			}
+
+			err = db.QueryRow("SELECT school_id FROM Schools WHERE school_admin_login = ?", userEmail).Scan(&schoolID)
+			if err != nil {
+				log.Println("Error fetching school ID:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching school details"})
+				return
+			}
+		} else {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Unauthorized access"})
+			return
+		}
+
+		// Step 4: Get distinct grades for the school
+		rows, err := db.Query("SELECT DISTINCT grade FROM student WHERE school_id = ? AND grade IS NOT NULL ORDER BY grade", schoolID)
+		if err != nil {
+			log.Println("Error fetching grades:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch grade data"})
+			return
+		}
+		defer rows.Close()
+
+		var grades []int
+		for rows.Next() {
+			var grade int
+			if err := rows.Scan(&grade); err != nil {
+				log.Println("Error scanning grade:", err)
+				continue
+			}
+			grades = append(grades, grade)
+		}
+
+		response := map[string]interface{}{
+			"school_id": schoolID,
+			"grades":    grades,
+		}
+
+		utils.ResponseJSON(w, response)
+	}
+}
+// GetAvailableLetters returns letters available for a specific grade in a school
+func (sfc *StudentController) GetAvailableLetters(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify the user's token and get user ID
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		// Step 2: Get user role
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil {
+			log.Println("Error fetching user role:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
+
+		var schoolID int
+
+		// Step 3: Determine school ID based on role
+		if userRole == "superadmin" {
+			// Get school_id from query parameters
+			schoolIDParam := r.URL.Query().Get("schoolId")
+			if schoolIDParam == "" {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School ID is required for superadmin"})
+				return
+			}
+
+			var err error
+			schoolID, err = strconv.Atoi(schoolIDParam)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+				return
+			}
+		} else if userRole == "schooladmin" {
+			// Get school ID associated with this schooladmin
+			var userEmail string
+			err = db.QueryRow("SELECT email FROM users WHERE id = ?", userID).Scan(&userEmail)
+			if err != nil {
+				log.Println("Error fetching user email:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user email"})
+				return
+			}
+
+			err = db.QueryRow("SELECT school_id FROM Schools WHERE school_admin_login = ?", userEmail).Scan(&schoolID)
+			if err != nil {
+				log.Println("Error fetching school ID:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching school details"})
+				return
+			}
+		} else {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Unauthorized access"})
+			return
+		}
+
+		// Step 4: Get grade from query parameters
+		gradeParam := r.URL.Query().Get("grade")
+		if gradeParam == "" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Grade is required"})
+			return
+		}
+
+		grade, err := strconv.Atoi(gradeParam)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade"})
+			return
+		}
+
+		// Step 5: Get distinct letters for the school and grade
+		rows, err := db.Query("SELECT DISTINCT letter FROM student WHERE school_id = ? AND grade = ? AND letter IS NOT NULL AND letter != '' ORDER BY letter", schoolID, grade)
+		if err != nil {
+			log.Println("Error fetching letters:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch letter data"})
+			return
+		}
+		defer rows.Close()
+
+		var letters []string
+		for rows.Next() {
+			var letter string
+			if err := rows.Scan(&letter); err != nil {
+				log.Println("Error scanning letter:", err)
+				continue
+			}
+			letters = append(letters, letter)
+		}
+
+		response := map[string]interface{}{
+			"school_id": schoolID,
+			"grade":     grade,
+			"letters":   letters,
+		}
+
+		utils.ResponseJSON(w, response)
+	}
+}
+// GetFilteredStudents returns students filtered by school, grade, and letter
+func (sfc *StudentController) GetFilteredStudents(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil {
+			log.Println("Error fetching user role:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
+
+		var schoolID int
+		if userRole == "superadmin" {
+			schoolIDParam := r.URL.Query().Get("schoolId")
+			if schoolIDParam == "" {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School ID is required for superadmin"})
+				return
+			}
+			schoolID, err = strconv.Atoi(schoolIDParam)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+				return
+			}
+		} else if userRole == "schooladmin" {
+			var userEmail string
+			err = db.QueryRow("SELECT email FROM users WHERE id = ?", userID).Scan(&userEmail)
+			if err != nil {
+				log.Println("Error fetching user email:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user email"})
+				return
+			}
+			err = db.QueryRow("SELECT school_id FROM Schools WHERE school_admin_login = ?", userEmail).Scan(&schoolID)
+			if err != nil {
+				log.Println("Error fetching school ID:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching school details"})
+				return
+			}
+		} else {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Unauthorized access"})
+			return
+		}
+
+		gradeParam := r.URL.Query().Get("grade")
+		if gradeParam == "" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Grade is required"})
+			return
+		}
+		grade, err := strconv.Atoi(gradeParam)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade"})
+			return
+		}
+
+		letter := strings.ToUpper(r.URL.Query().Get("letter"))
+		if letter == "" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Letter is required"})
+			return
+		}
+
+		// Debug: print unicode codepoints
+		for i, r := range letter {
+			log.Printf("letter[%d] = %q | Unicode: U+%04X", i, r, r)
+		}
+
+		log.Printf("Fetching students with schoolID=%d, grade=%d, letter=%s", schoolID, grade, letter)
+
+		rows, err := db.Query(`
+			SELECT student_id, first_name, last_name, patronymic, letter
+			FROM student
+			WHERE school_id = ? AND grade = ?
+		`, schoolID, grade)
+		if err != nil {
+			log.Println("Error querying students:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database query failed"})
+			return
+		}
+		defer rows.Close()
+
+		var students []models.Student
+		for rows.Next() {
+			var student models.Student
+			var patronymic sql.NullString
+			var dbLetter string
+
+			if err := rows.Scan(&student.ID, &student.FirstName, &student.LastName, &patronymic, &dbLetter); err != nil {
+				log.Println("Error scanning row:", err)
+				continue
+			}
+
+			log.Printf("Found student: %s %s (%s), letter in DB: %q", student.FirstName, student.LastName, student.ID, dbLetter)
+
+			if patronymic.Valid {
+				student.Patronymic = patronymic.String
+			}
+
+			// Compare letters explicitly
+			if strings.ToUpper(strings.TrimSpace(dbLetter)) == letter {
+				students = append(students, student)
+			}
+		}
+
+		if err := rows.Err(); err != nil {
+			log.Println("Error after iterating rows:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing rows"})
+			return
+		}
+
+		if len(students) == 0 {
+			utils.ResponseJSON(w, map[string]interface{}{
+				"message":  "No students found matching these criteria",
+				"students": []models.Student{},
+			})
+			return
+		}
+
+		utils.ResponseJSON(w, students)
 	}
 }
