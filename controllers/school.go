@@ -129,7 +129,9 @@ func (sc *SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 		if err == nil {
 			defer file.Close()
 			uniqueFileName := fmt.Sprintf("school-%d-%d.jpg", requesterID, time.Now().Unix())
-			photoURL, err := utils.UploadFileToS3(file, uniqueFileName, false)
+
+			// Обновлено: передаем строку "schoolphoto" вместо false
+			photoURL, err := utils.UploadFileToS3(file, uniqueFileName, "schoolphoto")
 			if err != nil {
 				log.Println("S3 upload failed:", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Photo upload failed"})
@@ -303,7 +305,9 @@ func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 			log.Println("Photo file received")
 
 			uniqueFileName := fmt.Sprintf("school-%d-%d.jpg", schoolID, time.Now().Unix())
-			photoURL, err := utils.UploadFileToS3(file, uniqueFileName, false)
+
+			// Обновлено: передаем строку "schoolphoto" вместо false
+			photoURL, err := utils.UploadFileToS3(file, uniqueFileName, "schoolphoto")
 
 			if err != nil {
 				log.Println("S3 upload failed:", err)
@@ -533,6 +537,64 @@ func (sc *SchoolController) GetTotalSchools(db *sql.DB) http.HandlerFunc {
 		// Шаг 2: Формируем ответ с количеством школ
 		response := map[string]interface{}{
 			"total_schools": totalSchools,
+		}
+
+		utils.ResponseJSON(w, response)
+	}
+}
+func (sc SchoolController) GetAllStudents(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		query := `
+			SELECT s.student_id, s.first_name, s.school_id, sch.school_name
+			FROM student s
+			JOIN Schools sch ON s.school_id = sch.school_id
+		`
+
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println("Error fetching students:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve students"})
+			return
+		}
+		defer rows.Close()
+
+		type StudentWithSchool struct {
+			StudentID   int    `json:"student_id"`
+			StudentName string `json:"student_name"`
+			SchoolID    int    `json:"school_id"`
+			SchoolName  string `json:"school_name"`
+		}
+
+		var students []StudentWithSchool
+		for rows.Next() {
+			var s StudentWithSchool
+			err := rows.Scan(&s.StudentID, &s.StudentName, &s.SchoolID, &s.SchoolName)
+			if err != nil {
+				log.Println("Error scanning student data:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error scanning student data"})
+				return
+			}
+			students = append(students, s)
+		}
+
+		if err = rows.Err(); err != nil {
+			log.Println("Error during iteration:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error during iteration"})
+			return
+		}
+
+		// Вернуть также общее количество школ
+		var totalSchools int
+		err = db.QueryRow(`SELECT COUNT(*) FROM Schools`).Scan(&totalSchools)
+		if err != nil {
+			log.Println("Error counting schools:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to count schools"})
+			return
+		}
+
+		response := map[string]interface{}{
+			"total_schools": totalSchools,
+			"students":      students,
 		}
 
 		utils.ResponseJSON(w, response)

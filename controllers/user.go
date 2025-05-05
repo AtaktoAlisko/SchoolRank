@@ -2007,8 +2007,8 @@ func (c Controller) UploadAvatar(db *sql.DB) http.HandlerFunc {
 		// Генерация уникального имени файла для аватара
 		uniqueFileName := fmt.Sprintf("avatar-%d-%d.jpg", userID, time.Now().Unix())
 
-		// Загружаем файл в S3
-		photoURL, err := utils.UploadFileToS3(file, uniqueFileName, true) // передаем true для использования второго набора ключей (для аватарки)
+		// Fix: Changed boolean true to string "avatar"
+		photoURL, err := utils.UploadFileToS3(file, uniqueFileName, "avatar") // передаем "avatar" для использования второго набора ключей
 		if err != nil {
 			log.Println("Error uploading file:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to upload avatar"})
@@ -2028,6 +2028,7 @@ func (c Controller) UploadAvatar(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, map[string]string{"message": "Avatar uploaded successfully", "avatar_url": photoURL})
 	}
 }
+
 func (c Controller) UpdateAvatar(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Получаем userID из токена
@@ -2075,8 +2076,8 @@ func (c Controller) UpdateAvatar(db *sql.DB) http.HandlerFunc {
 		// Генерация уникального имени файла для аватара
 		uniqueFileName := fmt.Sprintf("avatar-%d-%d.jpg", userID, time.Now().Unix())
 
-		// Загружаем новый файл в S3 с третьим аргументом `true` для аватарок
-		newAvatarURL, err := utils.UploadFileToS3(file, uniqueFileName, true) // Передаем true, чтобы использовать второй набор ключей для аватарок
+		// Fix: Changed boolean true to string "avatar"
+		newAvatarURL, err := utils.UploadFileToS3(file, uniqueFileName, "avatar") // Передаем "avatar", чтобы использовать второй набор ключей для аватарок
 		if err != nil {
 			log.Println("Error uploading new avatar:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to upload new avatar"})

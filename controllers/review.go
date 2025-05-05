@@ -154,18 +154,34 @@ func (rc *ReviewController) GetAverageRating(db *sql.DB) http.HandlerFunc {
 }
 func (rc *ReviewController) GetAllReviews(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Step 1: Get all reviews first
-		reviewsQuery := `
-			SELECT 
-				id, 
-				school_id, 
-				user_id, 
-				rating, 
-				comment, 
-				created_at
-			FROM Reviews
-		`
-		rows, err := db.Query(reviewsQuery)
+		// Check if a school_id parameter was provided
+		schoolIDParam := r.URL.Query().Get("school_id")
+
+		var reviewsQuery string
+		var args []interface{}
+
+		// Modify query based on whether school_id filter is provided
+		if schoolIDParam != "" {
+			schoolID, err := strconv.Atoi(schoolIDParam)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school_id parameter"})
+				return
+			}
+			reviewsQuery = `SELECT id, school_id, user_id, rating, comment, created_at FROM Reviews WHERE school_id = ?`
+			args = append(args, schoolID)
+		} else {
+			reviewsQuery = `SELECT id, school_id, user_id, rating, comment, created_at FROM Reviews`
+		}
+
+		// Execute the query with any arguments
+		var rows *sql.Rows
+		var err error
+		if len(args) > 0 {
+			rows, err = db.Query(reviewsQuery, args...)
+		} else {
+			rows, err = db.Query(reviewsQuery)
+		}
+
 		if err != nil {
 			log.Println("SQL Error (Reviews):", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get reviews"})
@@ -181,10 +197,8 @@ func (rc *ReviewController) GetAllReviews(db *sql.DB) http.HandlerFunc {
 
 		for rows.Next() {
 			var review models.Review
-
 			// Scan the row into the Review struct (without school_name yet)
-			err := rows.Scan(&review.ID, &review.SchoolID, &review.UserID, &review.Rating,
-				&review.Comment, &review.CreatedAt)
+			err := rows.Scan(&review.ID, &review.SchoolID, &review.UserID, &review.Rating, &review.Comment, &review.CreatedAt)
 			if err != nil {
 				log.Println("Scan Error:", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse reviews"})
@@ -225,13 +239,7 @@ func (rc *ReviewController) GetAllReviews(db *sql.DB) http.HandlerFunc {
 			}
 
 			// Construct the query with placeholders
-			schoolsQuery := fmt.Sprintf(`
-				SELECT 
-					school_id, 
-					school_name
-				FROM Schools
-				WHERE school_id IN (%s)
-			`, strings.Join(placeholders, ","))
+			schoolsQuery := fmt.Sprintf(`SELECT school_id, school_name FROM Schools WHERE school_id IN (%s)`, strings.Join(placeholders, ","))
 
 			// Execute the query
 			schoolRows, err := db.Query(schoolsQuery, args...)
@@ -243,17 +251,14 @@ func (rc *ReviewController) GetAllReviews(db *sql.DB) http.HandlerFunc {
 
 				// Create a map of school IDs to names
 				schoolNames := make(map[int]string)
-
 				for schoolRows.Next() {
 					var schoolID int
 					var schoolName string
-
 					err := schoolRows.Scan(&schoolID, &schoolName)
 					if err != nil {
 						log.Println("Scan Error (Schools):", err)
 						continue
 					}
-
 					// Store the school name
 					schoolNames[schoolID] = schoolName
 				}

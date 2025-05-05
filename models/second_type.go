@@ -10,4 +10,5 @@ type SecondType struct {
 	Type                        string `json:"type"`
 	StudentID                   int    `json:"student_id"` // Теперь обычный int
 	StudentTypeID               int    `json:"student_type_id"`
+	DocumentURL                 string `json:"document_url,omitempty"`
 }

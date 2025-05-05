@@ -1284,6 +1284,7 @@ func (sfc *StudentController) GetStudentFilters(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
+
 // GetAvailableGrades returns available grades for a specific school
 func (sfc *StudentController) GetAvailableGrades(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -1368,6 +1369,7 @@ func (sfc *StudentController) GetAvailableGrades(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
+
 // GetAvailableLetters returns letters available for a specific grade in a school
 func (sfc *StudentController) GetAvailableLetters(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -1466,6 +1468,7 @@ func (sfc *StudentController) GetAvailableLetters(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
+
 // GetFilteredStudents returns students filtered by school, grade, and letter
 func (sfc *StudentController) GetFilteredStudents(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

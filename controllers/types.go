@@ -3,13 +3,18 @@ package controllers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
+	"mime/multipart"
 	"net/http"
+	"path/filepath"
 	"ranking-school/models"
 	"ranking-school/utils"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 )
 
@@ -56,16 +61,64 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Шаг 5: Проверить, существует ли student_id в таблице student
-		var studentExists bool
-		var firstType models.FirstType
-		if err := json.NewDecoder(r.Body).Decode(&firstType); err != nil {
-			log.Printf("Ошибка при декодировании тела запроса: %v", err)
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Некорректный формат запроса"})
+		// Изменения: Обработка multipart/form-data вместо JSON
+		if r.Header.Get("Content-Type") == "" {
+			r.Header.Set("Content-Type", "multipart/form-data")
+		}
+
+		err = r.ParseMultipartForm(10 << 20) // Максимальный размер 10MB
+		if err != nil {
+			log.Printf("Ошибка при парсинге multipart/form-data: %v", err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Ошибка при обработке данных формы: " + err.Error()})
 			return
 		}
 
-		// Проверка существования студента в таблице student
+		// Отладочная информация
+		log.Printf("Получены поля формы: %v", r.MultipartForm.Value)
+		for k, v := range r.MultipartForm.File {
+			log.Printf("Файл в форме: поле=%s, имя=%s", k, v[0].Filename)
+		}
+
+		// Получаем данные из формы
+		firstType := models.FirstType{
+			FirstSubject:  r.FormValue("first_subject"),
+			SecondSubject: r.FormValue("second_subject"),
+			Type:          r.FormValue("type"),
+		}
+
+		// Конвертация числовых значений
+		firstSubjectScore, err := strconv.Atoi(r.FormValue("first_subject_score"))
+		if err == nil {
+			firstType.FirstSubjectScore = firstSubjectScore
+		}
+
+		secondSubjectScore, err := strconv.Atoi(r.FormValue("second_subject_score"))
+		if err == nil {
+			firstType.SecondSubjectScore = secondSubjectScore
+		}
+
+		historyOfKazakhstan, err := strconv.Atoi(r.FormValue("history_of_kazakhstan"))
+		if err == nil {
+			firstType.HistoryOfKazakhstan = historyOfKazakhstan
+		}
+
+		mathematicalLiteracy, err := strconv.Atoi(r.FormValue("mathematical_literacy"))
+		if err == nil {
+			firstType.MathematicalLiteracy = mathematicalLiteracy
+		}
+
+		readingLiteracy, err := strconv.Atoi(r.FormValue("reading_literacy"))
+		if err == nil {
+			firstType.ReadingLiteracy = readingLiteracy
+		}
+
+		studentID, err := strconv.Atoi(r.FormValue("student_id"))
+		if err == nil {
+			firstType.StudentID = studentID
+		}
+
+		// Шаг 5: Проверить, существует ли student_id в таблице student
+		var studentExists bool
 		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM student WHERE student_id = ?)", firstType.StudentID).Scan(&studentExists)
 		if err != nil {
 			log.Printf("Ошибка при проверке существования студента: %v", err)
@@ -87,14 +140,74 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Шаг 7: Вычислить total_score
+		// Обработка загрузки файла
+		var documentURL string
+
+		// Проверяем, был ли передан document_url как поле формы
+		if urlFromForm := r.FormValue("document_url"); urlFromForm != "" {
+			// Если пользователь предоставил URL вручную, используем его
+			documentURL = urlFromForm
+			log.Printf("Использую предоставленный URL документа: %s", documentURL)
+		} else {
+			// Логируем все файлы в запросе для отладки
+			log.Printf("Ищем файл для загрузки...")
+			for k, v := range r.MultipartForm.File {
+				log.Printf("Файл в форме: поле=%s, имя=%s", k, v[0].Filename)
+			}
+
+			// Пробуем получить загруженный файл из всех возможных полей
+			var file multipart.File
+			var handler *multipart.FileHeader
+			var err error
+
+			// Список возможных имен полей файла
+			fileFieldNames := []string{"document", "file", "document_file", "uploaded_file"}
+
+			// Пробуем все возможные названия полей
+			for _, fieldName := range fileFieldNames {
+				file, handler, err = r.FormFile(fieldName)
+				if err == nil {
+					log.Printf("Найден файл в поле '%s': %s", fieldName, handler.Filename)
+					break // Если файл найден, выходим из цикла
+				}
+			}
+
+			if err != nil {
+				// Если файл не загружен и нет URL, оставляем пустую строку
+				log.Printf("Файл не был загружен: %v. Продолжаем без документа.", err)
+				documentURL = ""
+			} else {
+				defer file.Close()
+
+				// Создаем уникальное имя файла
+				fileExt := filepath.Ext(handler.Filename)
+				fileName := fmt.Sprintf("%d_%s%s", time.Now().UnixNano(), uuid.New().String(), fileExt)
+
+				log.Printf("Подготовка к загрузке файла в S3 с именем %s", fileName)
+
+				// Загружаем файл в S3 бакет для олимпиадных документов
+				url, err := utils.UploadFileToS3(file, fileName, "olympiaddoc")
+				if err != nil {
+					log.Printf("Ошибка при загрузке файла в S3: %v", err)
+					utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Ошибка при загрузке файла в облачное хранилище: " + err.Error()})
+					return
+				}
+
+				documentURL = url
+				log.Printf("Файл успешно загружен в S3: %s", documentURL)
+			}
+		}
+
+		// Шаг 8: Вычислить total_score
 		totalScore := firstType.FirstSubjectScore + firstType.SecondSubjectScore + firstType.HistoryOfKazakhstan +
 			firstType.MathematicalLiteracy + firstType.ReadingLiteracy
 
-		// Шаг 8: Вставить данные FirstType в базу данных с использованием school_id из токена
-		query := `INSERT INTO First_Type (first_subject, first_subject_score, second_subject, second_subject_score, 
-                      history_of_kazakhstan, mathematical_literacy, reading_literacy, type, student_id, school_id, total_score) 
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		// Шаг 9: Вставить данные FirstType в базу данных с использованием school_id из токена
+		query := `INSERT INTO First_Type (
+			first_subject, first_subject_score, second_subject, second_subject_score, 
+			history_of_kazakhstan, mathematical_literacy, reading_literacy, type, student_id, 
+			school_id, total_score, document_url
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 		result, err := db.Exec(query,
 			firstType.FirstSubject,
@@ -106,8 +219,10 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 			firstType.ReadingLiteracy,
 			firstType.Type,
 			firstType.StudentID,
-			userSchoolID.Int64, // Добавляем school_id из токена
-			totalScore)         // Добавляем вычисленный total_score
+			userSchoolID.Int64,
+			totalScore,
+			documentURL,
+		)
 
 		if err != nil {
 			log.Printf("Ошибка SQL: %v", err)
@@ -131,10 +246,11 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 		// Получить ID только что вставленной записи
 		newID, _ := result.LastInsertId()
 
-		// Шаг 9: Вернуть сообщение об успешном создании
+		// Шаг 10: Вернуть сообщение об успешном создании
 		utils.ResponseJSON(w, map[string]interface{}{
-			"message": "First Type создан успешно",
-			"id":      newID,
+			"message":      "First Type создан успешно",
+			"id":           newID,
+			"document_url": documentURL,
 		})
 	}
 }
@@ -309,7 +425,7 @@ func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Рассчитываем total_score_creative с учетом всех компонентов
+		// Вычисляем общий балл
 		totalScoreCreative := 0
 		if secondType.HistoryOfKazakhstanCreative != nil {
 			totalScoreCreative += *secondType.HistoryOfKazakhstanCreative
@@ -324,12 +440,16 @@ func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
 			totalScoreCreative += *secondType.CreativeExam2
 		}
 
-		// Устанавливаем type как 'type-2' для второго типа
-		secondType.Type = "type-2" // Добавляем тип
+		// Устанавливаем тип
+		secondType.Type = "type-2"
+		secondType.TotalScoreCreative = &totalScoreCreative
 
-		// Вставляем Second Type в таблицу базы данных с привязкой к школе и total_score_creative
-		query := `INSERT INTO Second_Type (history_of_kazakhstan_creative, reading_literacy_creative, creative_exam1, creative_exam2, school_id, total_score_creative, type, student_id) 
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+		// Вставка с document_url
+		query := `INSERT INTO Second_Type (
+			history_of_kazakhstan_creative, reading_literacy_creative, creative_exam1, 
+			creative_exam2, school_id, total_score_creative, type, student_id, document_url
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
 		_, err = db.Exec(query,
 			secondType.HistoryOfKazakhstanCreative,
 			secondType.ReadingLiteracyCreative,
@@ -338,22 +458,22 @@ func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
 			userSchoolID.Int64,
 			totalScoreCreative,
 			secondType.Type,
-			secondType.StudentID) // Добавляем student_id
-
+			secondType.StudentID,
+			secondType.DocumentURL, // <= добавлено
+		)
 		if err != nil {
 			log.Println("SQL Error:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create Second Type"})
 			return
 		}
 
-		// Возвращаем объект второго типа с вычисленным баллом
-		secondType.TotalScoreCreative = &totalScoreCreative
 		utils.ResponseJSON(w, map[string]interface{}{
 			"message":     "Second Type created successfully",
 			"second_type": secondType,
 		})
 	}
 }
+
 func (c *TypeController) GetSecondTypes(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := `

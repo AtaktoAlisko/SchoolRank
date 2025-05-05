@@ -123,6 +123,7 @@ func main() {
 	router.HandleFunc("/api/schools/{id}", schoolController.UpdateSchool(db)).Methods("PUT")
 	router.HandleFunc("/api/schools/{id}", schoolController.DeleteSchool(db)).Methods("DELETE")
 	router.HandleFunc("/api/schools", schoolController.GetAllSchools(db)).Methods("GET")
+	router.HandleFunc("/api/schools/student", schoolController.GetAllStudents(db)).Methods("GET")
 	router.HandleFunc("/api/schools/total", schoolController.GetTotalSchools(db)).Methods("GET")
 
 	// =======================updated_at
@@ -162,12 +163,10 @@ func main() {
 	// Роут для получения данных о студенте
 	router.HandleFunc("/api/schools/{school_id}/students/{student_id}", studentController.GetStudentData(db)).Methods("GET")
 
-
 	router.HandleFunc("/api/student-filters", studentController.GetStudentFilters(db)).Methods("GET")
 	router.HandleFunc("/api/grades", studentController.GetAvailableGrades(db)).Methods("GET")
 	router.HandleFunc("/api/letters", studentController.GetAvailableLetters(db)).Methods("GET")
 	router.HandleFunc("/api/filtered-students", studentController.GetFilteredStudents(db)).Methods("GET")
-	
 
 	// =======================
 	// Работа с First Types

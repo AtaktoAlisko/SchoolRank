@@ -87,7 +87,8 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 		defer file.Close()
 
 		uniqueFileName := fmt.Sprintf("olympiad-%d.jpg", time.Now().Unix())
-		photoURL, err := utils.UploadFileToS3(file, uniqueFileName, false)
+		// Fix: Pass "schoolphoto" as the fileType parameter instead of boolean false
+		photoURL, err := utils.UploadFileToS3(file, uniqueFileName, "schoolphoto")
 		if err != nil {
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to upload photo"})
 			log.Println("Error uploading file:", err)

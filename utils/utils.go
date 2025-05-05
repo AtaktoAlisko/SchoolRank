@@ -132,7 +132,7 @@ func ParseToken(tokenString string) (*jwt.Token, error) {
 
 	return token, nil
 }
-func VerifyToken(r *http.Request) (int, error) { // Return userID as an integer
+func VerifyToken(r *http.Request) (int, error) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
 		return 0, errors.New("Authorization header missing")
@@ -167,7 +167,6 @@ func VerifyToken(r *http.Request) (int, error) { // Return userID as an integer
 
 	return int(userIDFloat), nil // Return the userID (int), not the whole struct
 }
-
 func GenerateRefreshToken(user models.User, expiration time.Duration) (string, error) {
 	secret := os.Getenv("SECRET")
 	if secret == "" {
@@ -281,26 +280,33 @@ func NullableValue(value interface{}) interface{} {
 	}
 	return value
 }
-func UploadFileToS3(file multipart.File, fileName string, isAvatar bool) (string, error) {
+func UploadFileToS3(file multipart.File, fileName string, fileType string) (string, error) {
 	var accessKey, secretKey, region, bucketName string
 
-	// Если это аватар, используем второй набор ключей и бакет для аватаров
-	if isAvatar {
+	// Выбираем набор ключей и бакет в зависимости от типа файла
+	switch fileType {
+	case "avatar":
 		accessKey = os.Getenv("AWS_ACCESS_KEY2_ID")
 		secretKey = os.Getenv("AWS_SECRET_ACCESS2_KEY")
 		region = os.Getenv("AWS_REGION2")
 		bucketName = "avatarschoolrank" // Бакет для аватаров
-	} else {
-		// Для школьных фото используем первый набор ключей и бакет для фото
+	case "schoolphoto":
 		accessKey = os.Getenv("AWS_ACCESS_KEY_ID")
 		secretKey = os.Getenv("AWS_SECRET_ACCESS_KEY")
 		region = os.Getenv("AWS_REGION")
 		bucketName = "schoolrank-schoolphotos" // Бакет для школьных фото
+	case "olympiaddoc":
+		accessKey = os.Getenv("AWS_ACCESS_KEY3_ID")
+		secretKey = os.Getenv("AWS_SECRET_ACCESS3_KEY")
+		region = os.Getenv("AWS_REGION3")
+		bucketName = "olympiaddocument" // Бакет для документов олимпиад
+	default:
+		return "", fmt.Errorf("unknown file type: %s", fileType)
 	}
 
 	// Проверяем, что ключи и регион заданы
 	if accessKey == "" || secretKey == "" || region == "" {
-		return "", fmt.Errorf("AWS credentials or region not set in environment")
+		return "", fmt.Errorf("AWS credentials or region not set in environment for %s", fileType)
 	}
 
 	// Создаем сессию с AWS
@@ -478,4 +484,11 @@ func IsTokenExpired(tokenString string) bool {
 	}
 
 	return time.Now().Unix() > int64(exp)
+}
+func UploadFileToS3Compat(file multipart.File, fileName string, isAvatar bool) (string, error) {
+	fileType := "schoolphoto"
+	if isAvatar {
+		fileType = "avatar"
+	}
+	return UploadFileToS3(file, fileName, fileType)
 }
