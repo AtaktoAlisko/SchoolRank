@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"mime/multipart"
 	"net/http"
 	"path/filepath"
 	"ranking-school/models"
@@ -61,11 +60,17 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Изменения: Обработка multipart/form-data вместо JSON
-		if r.Header.Get("Content-Type") == "" {
-			r.Header.Set("Content-Type", "multipart/form-data")
+		// ИСПРАВЛЕНИЕ: Проверяем Content-Type и устанавливаем его, если необходимо
+		contentType := r.Header.Get("Content-Type")
+		log.Printf("Исходный Content-Type: %s", contentType)
+
+		// Если Content-Type не содержит multipart/form-data, устанавливаем его
+		if !strings.Contains(contentType, "multipart/form-data") {
+			log.Println("Content-Type не определен как multipart/form-data, устанавливаем...")
+			// Не меняем заголовок здесь, это может не сработать после отправки запроса
 		}
 
+		// Парсим форму перед доступом к данным
 		err = r.ParseMultipartForm(10 << 20) // Максимальный размер 10MB
 		if err != nil {
 			log.Printf("Ошибка при парсинге multipart/form-data: %v", err)
@@ -75,8 +80,16 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 
 		// Отладочная информация
 		log.Printf("Получены поля формы: %v", r.MultipartForm.Value)
-		for k, v := range r.MultipartForm.File {
-			log.Printf("Файл в форме: поле=%s, имя=%s", k, v[0].Filename)
+		if r.MultipartForm.File != nil {
+			for k, v := range r.MultipartForm.File {
+				if len(v) > 0 {
+					log.Printf("Файл в форме: поле=%s, имя=%s, размер=%d", k, v[0].Filename, v[0].Size)
+				} else {
+					log.Printf("Файл в форме: поле=%s, пустой список файлов", k)
+				}
+			}
+		} else {
+			log.Println("MultipartForm.File является nil, файлы не были загружены")
 		}
 
 		// Получаем данные из формы
@@ -84,6 +97,22 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 			FirstSubject:  r.FormValue("first_subject"),
 			SecondSubject: r.FormValue("second_subject"),
 			Type:          r.FormValue("type"),
+			Date:          r.FormValue("date"), // Добавляем получение даты из формы
+		}
+
+		// Проверка наличия даты
+		if firstType.Date == "" {
+			log.Println("Дата не указана")
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Необходимо указать дату сдачи ЕНТ"})
+			return
+		}
+
+		// Проверка формата даты (опционально)
+		_, err = time.Parse("2006-01-02", firstType.Date)
+		if err != nil {
+			log.Printf("Некорректный формат даты: %v", err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Некорректный формат даты. Используйте формат ГГГГ-ММ-ДД"})
+			return
 		}
 
 		// Конвертация числовых значений
@@ -135,7 +164,8 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 		// Шаг 6: Проверить обязательные поля
 		if firstType.FirstSubject == "" || firstType.SecondSubject == "" ||
 			firstType.FirstSubjectScore < 0 || firstType.SecondSubjectScore < 0 ||
-			firstType.HistoryOfKazakhstan < 0 || firstType.StudentID <= 0 {
+			firstType.HistoryOfKazakhstan < 0 || firstType.StudentID <= 0 ||
+			firstType.Date == "" {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Некорректные или отсутствующие обязательные поля"})
 			return
 		}
@@ -149,34 +179,56 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 			documentURL = urlFromForm
 			log.Printf("Использую предоставленный URL документа: %s", documentURL)
 		} else {
-			// Логируем все файлы в запросе для отладки
-			log.Printf("Ищем файл для загрузки...")
-			for k, v := range r.MultipartForm.File {
-				log.Printf("Файл в форме: поле=%s, имя=%s", k, v[0].Filename)
-			}
+			// ИСПРАВЛЕНИЕ: Улучшенная обработка файла
+			// Попытка найти файл по конкретному имени поля
+			file, handler, err := r.FormFile("document")
 
-			// Пробуем получить загруженный файл из всех возможных полей
-			var file multipart.File
-			var handler *multipart.FileHeader
-			var err error
+			// Если не найден, проверяем другие возможные имена полей
+			if err != nil {
+				log.Printf("Не найден файл в поле 'document', пробуем альтернативные: %v", err)
 
-			// Список возможных имен полей файла
-			fileFieldNames := []string{"document", "file", "document_file", "uploaded_file"}
+				// Список возможных имен полей файла
+				fileFieldNames := []string{"file", "document_file", "uploaded_file"}
 
-			// Пробуем все возможные названия полей
-			for _, fieldName := range fileFieldNames {
-				file, handler, err = r.FormFile(fieldName)
-				if err == nil {
-					log.Printf("Найден файл в поле '%s': %s", fieldName, handler.Filename)
-					break // Если файл найден, выходим из цикла
+				// Пробуем все возможные названия полей
+				for _, fieldName := range fileFieldNames {
+					file, handler, err = r.FormFile(fieldName)
+					if err == nil {
+						log.Printf("Файл найден в поле '%s': %s", fieldName, handler.Filename)
+						break // Если файл найден, выходим из цикла
+					}
 				}
+			} else {
+				log.Printf("Файл найден в поле 'document': %s", handler.Filename)
 			}
 
 			if err != nil {
-				// Если файл не загружен и нет URL, оставляем пустую строку
-				log.Printf("Файл не был загружен: %v. Продолжаем без документа.", err)
-				documentURL = ""
-			} else {
+				// ИСПРАВЛЕНИЕ: Проверяем все ключи формы напрямую
+				foundFile := false
+				if r.MultipartForm != nil && r.MultipartForm.File != nil {
+					for fieldName, fileHeaders := range r.MultipartForm.File {
+						if len(fileHeaders) > 0 {
+							log.Printf("Нашли файл в неожиданном поле '%s': %s", fieldName, fileHeaders[0].Filename)
+							file, err = fileHeaders[0].Open()
+							if err == nil {
+								handler = fileHeaders[0]
+								foundFile = true
+								break
+							} else {
+								log.Printf("Ошибка при открытии файла из поля '%s': %v", fieldName, err)
+							}
+						}
+					}
+				}
+
+				if !foundFile {
+					log.Printf("Файл не был загружен или не может быть прочитан: %v. Продолжаем без документа.", err)
+					documentURL = ""
+				}
+			}
+
+			// Если файл найден, загружаем его в S3
+			if err == nil && file != nil && handler != nil {
 				defer file.Close()
 
 				// Создаем уникальное имя файла
@@ -206,8 +258,8 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 		query := `INSERT INTO First_Type (
 			first_subject, first_subject_score, second_subject, second_subject_score, 
 			history_of_kazakhstan, mathematical_literacy, reading_literacy, type, student_id, 
-			school_id, total_score, document_url
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			school_id, total_score, document_url, date
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 		result, err := db.Exec(query,
 			firstType.FirstSubject,
@@ -222,6 +274,7 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 			userSchoolID.Int64,
 			totalScore,
 			documentURL,
+			firstType.Date,
 		)
 
 		if err != nil {
@@ -251,6 +304,7 @@ func (c *TypeController) CreateFirstType(db *sql.DB) http.HandlerFunc {
 			"message":      "First Type создан успешно",
 			"id":           newID,
 			"document_url": documentURL,
+			"date":         firstType.Date,
 		})
 	}
 }
@@ -402,13 +456,6 @@ func (c *TypeController) GetFirstTypesBySchool(db *sql.DB) http.HandlerFunc {
 }
 func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var secondType models.SecondType
-		if err := json.NewDecoder(r.Body).Decode(&secondType); err != nil {
-			log.Println("Error decoding the request:", err)
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request"})
-			return
-		}
-
 		// Получаем userID из токена
 		userID, err := utils.VerifyToken(r)
 		if err != nil {
@@ -416,12 +463,245 @@ func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Проверка роли пользователя
+		// Проверка роли пользователя и school_id
 		var userRole string
 		var userSchoolID sql.NullInt64
 		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
-		if err != nil || userRole != "schooladmin" || !userSchoolID.Valid {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create second type"})
+		if err != nil {
+			log.Println("Ошибка при получении роли пользователя или school_id:", err)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Не удалось получить роль или school_id пользователя"})
+			return
+		}
+
+		// Проверяем, что пользователь — schooladmin и у него есть валидный school_id
+		if userRole != "schooladmin" || !userSchoolID.Valid || userSchoolID.Int64 == 0 {
+			log.Printf("Пользователь %d имеет некорректную роль или school_id: роль=%s, school_id=%v", userID, userRole, userSchoolID)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "У вас нет прав на создание Second Type"})
+			return
+		}
+
+		// Проверяем, существует ли школа в таблице Schools
+		var schoolExists bool
+		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM Schools WHERE school_id = ?)", userSchoolID.Int64).Scan(&schoolExists)
+		if err != nil {
+			log.Printf("Ошибка при проверке существования школы: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Не удалось проверить наличие школы"})
+			return
+		}
+
+		if !schoolExists {
+			log.Printf("Школа с id %d не существует", userSchoolID.Int64)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Школа не найдена в нашей системе"})
+			return
+		}
+
+		// Проверяем Content-Type запроса и обрабатываем соответственно
+		contentType := r.Header.Get("Content-Type")
+		log.Printf("Получен запрос с Content-Type: %s", contentType)
+
+		var secondType models.SecondType
+
+		if strings.Contains(contentType, "multipart/form-data") {
+			// Обработка multipart/form-data запроса
+			err = r.ParseMultipartForm(10 << 20) // Максимальный размер 10MB
+			if err != nil {
+				log.Printf("Ошибка при парсинге multipart/form-data: %v", err)
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Ошибка при обработке данных формы: " + err.Error()})
+				return
+			}
+
+			// Отладочная информация о полученных данных формы
+			log.Printf("Получены поля формы: %v", r.MultipartForm.Value)
+			if r.MultipartForm.File != nil {
+				for k, v := range r.MultipartForm.File {
+					if len(v) > 0 {
+						log.Printf("Файл в форме: поле=%s, имя=%s, размер=%d", k, v[0].Filename, v[0].Size)
+					} else {
+						log.Printf("Файл в форме: поле=%s, пустой список файлов", k)
+					}
+				}
+			} else {
+				log.Println("MultipartForm.File является nil, файлы не были загружены")
+			}
+
+			// Заполняем данные из формы
+			secondType.Type = "type-2"
+			secondType.StudentID, _ = strconv.Atoi(r.FormValue("student_id"))
+			secondType.Date = r.FormValue("date") // Получаем дату из формы
+
+			// Проверка наличия даты
+			if secondType.Date == "" {
+				log.Println("Дата не указана")
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Необходимо указать дату сдачи творческого экзамена"})
+				return
+			}
+
+			// Проверка формата даты
+			_, err = time.Parse("2006-01-02", secondType.Date)
+			if err != nil {
+				log.Printf("Некорректный формат даты: %v", err)
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Некорректный формат даты. Используйте формат ГГГГ-ММ-ДД"})
+				return
+			}
+
+			// История Казахстана (творческий)
+			if historyValue := r.FormValue("history_of_kazakhstan_creative"); historyValue != "" {
+				historyScore, err := strconv.Atoi(historyValue)
+				if err == nil {
+					secondType.HistoryOfKazakhstanCreative = &historyScore
+				}
+			}
+
+			// Читательская грамотность (творческий)
+			if readingValue := r.FormValue("reading_literacy_creative"); readingValue != "" {
+				readingScore, err := strconv.Atoi(readingValue)
+				if err == nil {
+					secondType.ReadingLiteracyCreative = &readingScore
+				}
+			}
+
+			// Творческий экзамен 1
+			if creativeExam1Value := r.FormValue("creative_exam1"); creativeExam1Value != "" {
+				creativeExam1Score, err := strconv.Atoi(creativeExam1Value)
+				if err == nil {
+					secondType.CreativeExam1 = &creativeExam1Score
+				}
+			}
+
+			// Творческий экзамен 2
+			if creativeExam2Value := r.FormValue("creative_exam2"); creativeExam2Value != "" {
+				creativeExam2Score, err := strconv.Atoi(creativeExam2Value)
+				if err == nil {
+					secondType.CreativeExam2 = &creativeExam2Score
+				}
+			}
+
+			// Обработка загрузки файла
+			var documentURL string
+
+			// Проверяем, был ли передан document_url как поле формы
+			if urlFromForm := r.FormValue("document_url"); urlFromForm != "" {
+				documentURL = urlFromForm
+				log.Printf("Использую предоставленный URL документа: %s", documentURL)
+			} else {
+				// Попытка найти файл по конкретному имени поля
+				file, handler, err := r.FormFile("document")
+
+				// Если не найден, проверяем другие возможные имена полей
+				if err != nil {
+					log.Printf("Не найден файл в поле 'document', пробуем альтернативные: %v", err)
+
+					// Список возможных имен полей файла
+					fileFieldNames := []string{"file", "document_file", "uploaded_file"}
+
+					// Пробуем все возможные названия полей
+					for _, fieldName := range fileFieldNames {
+						file, handler, err = r.FormFile(fieldName)
+						if err == nil {
+							log.Printf("Файл найден в поле '%s': %s", fieldName, handler.Filename)
+							break // Если файл найден, выходим из цикла
+						}
+					}
+				} else {
+					log.Printf("Файл найден в поле 'document': %s", handler.Filename)
+				}
+
+				if err != nil {
+					// Проверяем все ключи формы напрямую
+					foundFile := false
+					if r.MultipartForm != nil && r.MultipartForm.File != nil {
+						for fieldName, fileHeaders := range r.MultipartForm.File {
+							if len(fileHeaders) > 0 {
+								log.Printf("Нашли файл в неожиданном поле '%s': %s", fieldName, fileHeaders[0].Filename)
+								file, err = fileHeaders[0].Open()
+								if err == nil {
+									handler = fileHeaders[0]
+									foundFile = true
+									break
+								} else {
+									log.Printf("Ошибка при открытии файла из поля '%s': %v", fieldName, err)
+								}
+							}
+						}
+					}
+
+					if !foundFile {
+						log.Printf("Файл не был загружен или не может быть прочитан: %v. Продолжаем без документа.", err)
+						documentURL = ""
+					}
+				}
+
+				// Если файл найден, загружаем его в S3
+				if err == nil && file != nil && handler != nil {
+					defer file.Close()
+
+					// Создаем уникальное имя файла
+					fileExt := filepath.Ext(handler.Filename)
+					fileName := fmt.Sprintf("%d_%s%s", time.Now().UnixNano(), uuid.New().String(), fileExt)
+
+					log.Printf("Подготовка к загрузке файла в S3 с именем %s", fileName)
+
+					// Загружаем файл в S3 бакет для олимпиадных документов
+					url, err := utils.UploadFileToS3(file, fileName, "olympiaddoc")
+					if err != nil {
+						log.Printf("Ошибка при загрузке файла в S3: %v", err)
+						utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Ошибка при загрузке файла в облачное хранилище: " + err.Error()})
+						return
+					}
+
+					documentURL = url
+					log.Printf("Файл успешно загружен в S3: %s", documentURL)
+				}
+			}
+
+			secondType.DocumentURL = documentURL
+		} else {
+			// Обработка application/json запроса
+			if err := json.NewDecoder(r.Body).Decode(&secondType); err != nil {
+				log.Println("Ошибка декодирования запроса:", err)
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Некорректный запрос"})
+				return
+			}
+
+			// Проверяем наличие даты для JSON запроса
+			if secondType.Date == "" {
+				log.Println("Дата не указана в JSON запросе")
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Необходимо указать дату сдачи творческого экзамена"})
+				return
+			}
+
+			// Проверка формата даты для JSON запроса
+			_, err = time.Parse("2006-01-02", secondType.Date)
+			if err != nil {
+				log.Printf("Некорректный формат даты в JSON запросе: %v", err)
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Некорректный формат даты. Используйте формат ГГГГ-ММ-ДД"})
+				return
+			}
+
+			// Проверяем, что тип был установлен, иначе устанавливаем default
+			if secondType.Type == "" {
+				secondType.Type = "type-2"
+			}
+		}
+
+		// Проверяем, существует ли student_id в таблице student
+		if secondType.StudentID <= 0 {
+			log.Printf("ID студента не указан или некорректен: %d", secondType.StudentID)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "ID студента не указан или некорректен"})
+			return
+		}
+
+		var studentExists bool
+		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM student WHERE student_id = ?)", secondType.StudentID).Scan(&studentExists)
+		if err != nil {
+			log.Printf("Ошибка при проверке существования студента: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Не удалось проверить наличие студента"})
+			return
+		}
+
+		if !studentExists {
+			log.Printf("Студент с id %d не существует", secondType.StudentID)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Студент не найден в нашей системе"})
 			return
 		}
 
@@ -440,17 +720,15 @@ func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
 			totalScoreCreative += *secondType.CreativeExam2
 		}
 
-		// Устанавливаем тип
-		secondType.Type = "type-2"
 		secondType.TotalScoreCreative = &totalScoreCreative
 
-		// Вставка с document_url
+		// Вставка с document_url и date
 		query := `INSERT INTO Second_Type (
 			history_of_kazakhstan_creative, reading_literacy_creative, creative_exam1, 
-			creative_exam2, school_id, total_score_creative, type, student_id, document_url
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			creative_exam2, school_id, total_score_creative, type, student_id, document_url, date
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
-		_, err = db.Exec(query,
+		result, err := db.Exec(query,
 			secondType.HistoryOfKazakhstanCreative,
 			secondType.ReadingLiteracyCreative,
 			secondType.CreativeExam1,
@@ -459,21 +737,40 @@ func (c *TypeController) CreateSecondType(db *sql.DB) http.HandlerFunc {
 			totalScoreCreative,
 			secondType.Type,
 			secondType.StudentID,
-			secondType.DocumentURL, // <= добавлено
+			secondType.DocumentURL,
+			secondType.Date,
 		)
 		if err != nil {
-			log.Println("SQL Error:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create Second Type"})
+			log.Println("Ошибка SQL:", err)
+
+			// Специфическая проверка на нарушение внешнего ключа
+			if strings.Contains(err.Error(), "foreign key constraint fails") {
+				if strings.Contains(err.Error(), "FK_School") {
+					utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Некорректный или отсутствующий school_id в таблице Schools"})
+					return
+				} else if strings.Contains(err.Error(), "student_id") {
+					utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Некорректный или отсутствующий student_id"})
+					return
+				}
+			}
+
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Не удалось создать Second Type"})
 			return
 		}
 
+		// Получить ID только что вставленной записи
+		newID, _ := result.LastInsertId()
+		secondType.ID = int(newID)
+
 		utils.ResponseJSON(w, map[string]interface{}{
-			"message":     "Second Type created successfully",
-			"second_type": secondType,
+			"message":      "Second Type создан успешно",
+			"id":           newID,
+			"second_type":  secondType,
+			"document_url": secondType.DocumentURL,
+			"date":         secondType.Date,
 		})
 	}
 }
-
 func (c *TypeController) GetSecondTypes(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := `

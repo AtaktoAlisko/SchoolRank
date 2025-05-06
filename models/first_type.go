@@ -15,4 +15,5 @@ type FirstType struct {
 	SchoolID             int    `json:"school_id"`
 	StudentTypeID        int    `json:"student_type_id"`
 	DocumentURL          string `json:"document_url,omitempty"`
+	Date                 string `json:"date"`
 }
