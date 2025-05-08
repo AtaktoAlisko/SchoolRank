@@ -1486,9 +1486,12 @@ func (sfc *StudentController) GetFilteredStudents(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Extract path variables using gorilla/mux
+		vars := mux.Vars(r)
+
 		var schoolID int
 		if userRole == "superadmin" {
-			schoolIDParam := r.URL.Query().Get("schoolId")
+			schoolIDParam := vars["schoolId"]
 			if schoolIDParam == "" {
 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School ID is required for superadmin"})
 				return
@@ -1512,12 +1515,19 @@ func (sfc *StudentController) GetFilteredStudents(db *sql.DB) http.HandlerFunc {
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching school details"})
 				return
 			}
+
+			// For school admin, verify they're accessing their own school
+			pathSchoolID, err := strconv.Atoi(vars["schoolId"])
+			if err != nil || pathSchoolID != schoolID {
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Unauthorized access to this school"})
+				return
+			}
 		} else {
 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Unauthorized access"})
 			return
 		}
 
-		gradeParam := r.URL.Query().Get("grade")
+		gradeParam := vars["grade"]
 		if gradeParam == "" {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Grade is required"})
 			return
@@ -1528,7 +1538,7 @@ func (sfc *StudentController) GetFilteredStudents(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		letter := strings.ToUpper(r.URL.Query().Get("letter"))
+		letter := strings.ToUpper(vars["letter"])
 		if letter == "" {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Letter is required"})
 			return
