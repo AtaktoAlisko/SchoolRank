@@ -160,7 +160,7 @@ func main() {
 	router.HandleFunc("/api/students/{student_id}", studentController.DeleteStudent(db)).Methods("DELETE")
 	router.HandleFunc("/api/schools/{school_id}/students", studentController.GetStudentsBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/students/grades", studentController.GetAvailableGradesBySchool(db)).Methods("GET")
-	router.HandleFunc("/api/students/grade/{grade}/letter", studentController.GetAvailableLettersByGrade(db)).Methods("GET")
+	router.HandleFunc("/students/letters/{school_id}/{grade}", studentController.GetAvailableLettersByGrade(db)).Methods("GET")
 	// Роут для получения данных о студенте
 	router.HandleFunc("/api/schools/{school_id}/students/{student_id}", studentController.GetStudentData(db)).Methods("GET")
 
@@ -205,10 +205,10 @@ func main() {
 	router.HandleFunc("/api/olympiads/school/{school_id}", olympiadController.GetOlympiadBySchoolId(db)).Methods("GET")
 
 	router.HandleFunc("/api/subject-olympiads/create", SubjectOlympiadController.CreateSubjectOlympiad(db)).Methods("POST")
-	router.HandleFunc("/api/subject-olympiads", SubjectOlympiadController.GetAllSubjectOlympiads(db)).Methods("GET")
-	router.HandleFunc("/api/subject-olympiads//{id}", SubjectOlympiadController.GetSubjectOlympiad(db)).Methods("GET")
-	router.HandleFunc("/api/subject-olympiads//{id}", SubjectOlympiadController.UpdateSubjectOlympiad(db)).Methods("PUT")
-	router.HandleFunc("/api/subject-olympiads//{id}", SubjectOlympiadController.DeleteSubjectOlympiad(db)).Methods("DELETE")
+	// router.HandleFunc("/api/subject-olympiads", SubjectOlympiadController.GetAllSubjectOlympiads(db)).Methods("GET")
+	// router.HandleFunc("/api/subject-olympiads//{id}", SubjectOlympiadController.GetSubjectOlympiad(db)).Methods("GET")
+	// router.HandleFunc("/api/subject-olympiads//{id}", SubjectOlympiadController.UpdateSubjectOlympiad(db)).Methods("PUT")
+	// router.HandleFunc("/api/subject-olympiads//{id}", SubjectOlympiadController.DeleteSubjectOlympiad(db)).Methods("DELETE")
 
 	// =======================
 	// Контактная информация
