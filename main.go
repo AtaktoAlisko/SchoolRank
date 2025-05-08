@@ -206,7 +206,7 @@ func main() {
 
 	// router.HandleFunc("/api/olympiads/total-rating", TotalOlympiadRatingController.GetTotalOlympiadRating(db)).Methods("GET")
 	router.HandleFunc("/api/olympiads/create", SubjectOlympiadController.CreateSubjectOlympiad(db)).Methods("POST")
-	router.HandleFunc("/api/olympiads/register", SubjectOlympiadController.RegisterStudentToOlympiad(db)).Methods("POST")
+	// router.HandleFunc("/api/olympiads/register", SubjectOlympiadController.RegisterStudentToOlympiad(db)).Methods("POST")
 
 	// =======================
 	// Контактная информация

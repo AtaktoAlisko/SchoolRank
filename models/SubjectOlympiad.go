@@ -1,13 +1,15 @@
 package models
 
 type SubjectOlympiad struct {
-	ID            int    `json:"id"`
-	SubjectName   string `json:"subject_name"`    // Название предмета
-	EventName     string `json:"event_name"`      // Название события (олимпиады)
-	Date          string `json:"date"`            // Дата проведения олимпиады
-	Duration      string `json:"duration"`        // Продолжительность
-	Description   string `json:"description"`     // Описание события
-	SchoolAdminID int    `json:"school_admin_id"` // ID школьного администратора
-	PhotoURL      string `json:"photo_url"`       // URL фотографии олимпиады
-	City          string `json:"city"`            // Город проведения олимпиады
+	ID           int    `json:"id"`
+	OlympiadName string `json:"subject_name"`  // Название предмета
+	StartDate    string `json:"date"`          // Дата проведения олимпиады
+	Description  string `json:"description"`   // Описание события
+	PhotoURL     string `json:"photo_url"`     // URL фотографии олимпиады
+	City         string `json:"city"`          // Город проведения олимпиады
+	SchoolID     int    `json:"school_id"`     // ID школы
+	EndDate      string `json:"end_date"`      // Дата окончания олимпиады
+	Level        string `json:"level"`         // Уровень олимпиады
+	OlympiadType string `json:"olympiad_name"` // Название олимпиады
+	Limit        int    `json:"limit"`         // Лимит участников
 }

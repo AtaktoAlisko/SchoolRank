@@ -317,7 +317,12 @@ func (oc *OlympiadController) UpdateOlympiad(db *sql.DB) http.HandlerFunc {
 		}
 
 		// 4. Декодируем тело запроса
-		var olympiad models.Olympiads
+		var olympiad struct {
+			models.Olympiads
+			Grade  int    `json:"grade"`
+			Letter string `json:"letter"`
+		}
+
 		if err := json.NewDecoder(r.Body).Decode(&olympiad); err != nil {
 			log.Printf("Error decoding request body: %v", err)
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
@@ -357,24 +362,70 @@ func (oc *OlympiadController) UpdateOlympiad(db *sql.DB) http.HandlerFunc {
 
 		// 7. Проверяем student_id, если указан и отличается
 		if olympiad.StudentID != 0 && olympiad.StudentID != studentID {
+			// Проверяем существует ли студент
 			var studentSchoolID int
+			studentExists := false
 			err = db.QueryRow("SELECT school_id FROM student WHERE student_id = ?", olympiad.StudentID).Scan(&studentSchoolID)
-			if err != nil {
-				if err == sql.ErrNoRows {
-					utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found"})
-				} else {
-					log.Printf("Error checking student school: %v", err)
-					utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking student school"})
-				}
-				return
+			if err == nil {
+				studentExists = true
 			}
 
-			if userRole != "superadmin" && (!userSchoolID.Valid || studentSchoolID != int(userSchoolID.Int64)) {
+			// Если студент не существует, создаем его
+			if !studentExists {
+				if olympiad.Grade <= 0 || olympiad.Letter == "" {
+					utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Grade and letter are required for new student"})
+					return
+				}
+
+				// Используем school_id текущего пользователя для нового студента
+				if !userSchoolID.Valid {
+					utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School ID is required for new student"})
+					return
+				}
+
+				studentSchoolID = int(userSchoolID.Int64)
+
+				// Создаем нового студента
+				_, err = db.Exec("INSERT INTO student (student_id, school_id, grade, letter) VALUES (?, ?, ?, ?)",
+					olympiad.StudentID, studentSchoolID, olympiad.Grade, olympiad.Letter)
+				if err != nil {
+					utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create student"})
+					return
+				}
+			} else if userRole != "superadmin" && (!userSchoolID.Valid || studentSchoolID != int(userSchoolID.Int64)) {
 				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Student does not belong to your school"})
 				return
 			}
 		} else if olympiad.StudentID == 0 {
 			olympiad.StudentID = studentID
+		}
+
+		// Обновляем информацию о студенте, если предоставлены grade и letter
+		if olympiad.Grade > 0 || olympiad.Letter != "" {
+			updateQuery := "UPDATE student SET"
+			params := []interface{}{}
+
+			if olympiad.Grade > 0 {
+				updateQuery += " grade = ?"
+				params = append(params, olympiad.Grade)
+			}
+
+			if olympiad.Letter != "" {
+				if len(params) > 0 {
+					updateQuery += ","
+				}
+				updateQuery += " letter = ?"
+				params = append(params, olympiad.Letter)
+			}
+
+			updateQuery += " WHERE student_id = ?"
+			params = append(params, olympiad.StudentID)
+
+			_, err = db.Exec(updateQuery, params...)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update student info"})
+				return
+			}
 		}
 
 		// 8. Присваиваем баллы
