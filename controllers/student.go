@@ -529,6 +529,82 @@ func (c *StudentController) GetStudentsBySchool(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, students)
 	}
 }
+func (sc StudentController) GetAvailableLettersByGrade(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Extract grade from URL
+		vars := mux.Vars(r)
+		gradeParam := vars["grade"]
+
+		// Convert grade to required type
+		grade, err := strconv.Atoi(gradeParam)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade"})
+			return
+		}
+
+		// Check if grade exists
+		var exists bool
+		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM student WHERE grade = ? LIMIT 1)", grade).Scan(&exists)
+		if err != nil {
+			log.Println("SQL Error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+			return
+		}
+
+		// If grade doesn't exist, return 404
+		if !exists {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No students found in this grade"})
+			return
+		}
+
+		// Query to get distinct letters that exist for this grade
+		rows, err := db.Query("SELECT DISTINCT letter FROM student WHERE grade = ? ORDER BY letter", grade)
+		if err != nil {
+			log.Println("SQL Error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get letters"})
+			return
+		}
+		defer rows.Close()
+
+		// Create a slice to store letters
+		var letters []string
+
+		for rows.Next() {
+			var letter sql.NullString
+			if err := rows.Scan(&letter); err != nil {
+				log.Println("Scan Error:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse letters"})
+				return
+			}
+
+			// Only add valid letters
+			if letter.Valid && letter.String != "" {
+				letters = append(letters, letter.String)
+			}
+		}
+
+		// Check for errors in processing rows
+		if err := rows.Err(); err != nil {
+			log.Println("Rows Error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing letters"})
+			return
+		}
+
+		// Create a response structure that includes available letters
+		type LettersResponse struct {
+			AvailableLetters []string `json:"available_letters"`
+			Grade            int      `json:"grade"`
+		}
+
+		response := LettersResponse{
+			AvailableLetters: letters,
+			Grade:            grade,
+		}
+
+		// Return the list of available letters
+		utils.ResponseJSON(w, response)
+	}
+}
 func (c *StudentController) GetTotalStudentsBySchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Извлекаем school_id из URL параметров
