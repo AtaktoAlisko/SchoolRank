@@ -204,9 +204,11 @@ func main() {
 	router.HandleFunc("/api/total-olympiad-rating/{school_id}", olympiadController.CalculateTotalOlympiadRating(db)).Methods("GET")
 	router.HandleFunc("/api/olympiads/school/{school_id}", olympiadController.GetOlympiadBySchoolId(db)).Methods("GET")
 
-	// router.HandleFunc("/api/olympiads/total-rating", TotalOlympiadRatingController.GetTotalOlympiadRating(db)).Methods("GET")
 	router.HandleFunc("/api/olympiads/create", SubjectOlympiadController.CreateSubjectOlympiad(db)).Methods("POST")
-	// router.HandleFunc("/api/olympiads/register", SubjectOlympiadController.RegisterStudentToOlympiad(db)).Methods("POST")
+	router.HandleFunc("/api/olympiads", SubjectOlympiadController.GetAllSubjectOlympiads(db)).Methods("GET")
+	router.HandleFunc("/api/olympiads/{id}", SubjectOlympiadController.GetSubjectOlympiad(db)).Methods("GET")
+	router.HandleFunc("/api/olympiads/{id}", SubjectOlympiadController.UpdateSubjectOlympiad(db)).Methods("PUT")
+	router.HandleFunc("/api/olympiads/{id}", SubjectOlympiadController.DeleteSubjectOlympiad(db)).Methods("DELETE")
 
 	// =======================
 	// Контактная информация
