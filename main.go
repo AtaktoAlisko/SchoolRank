@@ -125,6 +125,7 @@ func main() {
 	router.HandleFunc("/api/schools", schoolController.GetAllSchools(db)).Methods("GET")
 	router.HandleFunc("/api/schools/student", schoolController.GetAllStudents(db)).Methods("GET")
 	router.HandleFunc("/api/schools/total", schoolController.GetTotalSchools(db)).Methods("GET")
+	router.HandleFunc("/api/schools/{id}", schoolController.GetSchoolByID(db)).Methods("GET")
 
 	// =======================updated_at
 	// Работа с отзывами (Reviews)

@@ -37,6 +37,19 @@ func (oc *OlympiadController) CreateOlympiad(db *sql.DB) http.HandlerFunc {
 		place, _ := strconv.Atoi(r.FormValue("olympiad_place"))
 		level := r.FormValue("level")
 		name := r.FormValue("olympiad_name")
+		date := r.FormValue("date") // Get date from form data
+
+		// Validate date format (YYYY-MM-DD)
+		if date != "" {
+			_, err := time.Parse("2006-01-02", date)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid date format. Use YYYY-MM-DD"})
+				return
+			}
+		} else {
+			// Default to current date if not provided
+			date = time.Now().Format("2006-01-02")
+		}
 
 		var score int
 		switch place {
@@ -93,10 +106,10 @@ func (oc *OlympiadController) CreateOlympiad(db *sql.DB) http.HandlerFunc {
 			documentURL = ""
 		}
 
-		// Вставка в БД
-		query := `INSERT INTO Olympiads (student_id, olympiad_place, score, school_id, level, olympiad_name, document_url)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)`
-		_, err = db.Exec(query, studentID, place, score, studentSchoolID, level, name, documentURL)
+		// Вставка в БД с учетом поля date
+		query := `INSERT INTO Olympiads (student_id, olympiad_place, score, school_id, level, olympiad_name, document_url, date) 
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+		_, err = db.Exec(query, studentID, place, score, studentSchoolID, level, name, documentURL, date)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to insert olympiad"})
 			return
@@ -118,6 +131,7 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 			query = `SELECT 
 						Olympiads.olympiad_id, Olympiads.student_id, Olympiads.olympiad_place, Olympiads.score, 
 						Olympiads.school_id, Olympiads.level, Olympiads.olympiad_name, Olympiads.document_url,
+						Olympiads.date, 
 						student.first_name, student.last_name, student.patronymic, 
 						student.grade, student.letter
 					FROM Olympiads
@@ -128,6 +142,7 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 			query = `SELECT 
 						Olympiads.olympiad_id, Olympiads.student_id, Olympiads.olympiad_place, Olympiads.score, 
 						Olympiads.school_id, Olympiads.level, Olympiads.olympiad_name, Olympiads.document_url,
+						Olympiads.date,
 						student.first_name, student.last_name, student.patronymic,
 						student.grade, student.letter
 					FROM Olympiads
@@ -138,6 +153,7 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 			query = `SELECT 
 						Olympiads.olympiad_id, Olympiads.student_id, Olympiads.olympiad_place, Olympiads.score, 
 						Olympiads.school_id, Olympiads.level, Olympiads.olympiad_name, Olympiads.document_url,
+						Olympiads.date,
 						student.first_name, student.last_name, student.patronymic,
 						student.grade, student.letter
 					FROM Olympiads
@@ -158,6 +174,7 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 			var olympiad models.Olympiads
 			var olympiadName sql.NullString
 			var documentURL sql.NullString
+			var date sql.NullString
 
 			err := rows.Scan(
 				&olympiad.OlympiadID,
@@ -168,6 +185,7 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 				&olympiad.Level,
 				&olympiadName,
 				&documentURL,
+				&date,
 				&olympiad.FirstName,
 				&olympiad.LastName,
 				&olympiad.Patronymic,
@@ -185,6 +203,9 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 			}
 			if documentURL.Valid {
 				olympiad.DocumentURL = documentURL.String
+			}
+			if date.Valid {
+				olympiad.Date = date.String
 			}
 
 			olympiads = append(olympiads, olympiad)
@@ -303,6 +324,15 @@ func (oc *OlympiadController) UpdateOlympiad(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Validate date format if provided
+		if olympiad.Date != "" {
+			_, err := time.Parse("2006-01-02", olympiad.Date)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid date format. Use YYYY-MM-DD"})
+				return
+			}
+		}
+
 		// 5. Проверяем, существует ли олимпиада с таким ID
 		var existingOlympiadSchoolID int
 		var studentID int
@@ -382,12 +412,12 @@ func (oc *OlympiadController) UpdateOlympiad(db *sql.DB) http.HandlerFunc {
 			}
 		}
 
-		// 11. Обновляем запись
+		// 11. Обновляем запись с учетом поля date
 		query := `UPDATE Olympiads 
-		  SET student_id = ?, olympiad_place = ?, score = ?, level = ?, school_id = ?, olympiad_name = ?, document_url = ?
+		  SET student_id = ?, olympiad_place = ?, score = ?, level = ?, school_id = ?, olympiad_name = ?, document_url = ?, date = ?
 		  WHERE olympiad_id = ?`
 		_, err = db.Exec(query, olympiad.StudentID, olympiad.OlympiadPlace, olympiad.Score, level, schoolIDToSave,
-			olympiad.OlympiadName, olympiad.DocumentURL, olympiadID)
+			olympiad.OlympiadName, olympiad.DocumentURL, olympiad.Date, olympiadID)
 		if err != nil {
 			log.Printf("Error updating Olympiad: %v", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update Olympiad record"})
@@ -502,7 +532,6 @@ func (oc *OlympiadController) GetOlympiadBySchoolId(db *sql.DB) http.HandlerFunc
 		utils.ResponseJSON(w, olympiads)
 	}
 }
-
 func (oc *OlympiadController) CalculateCityOlympiadRating(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Извлекаем school_id из параметров URL

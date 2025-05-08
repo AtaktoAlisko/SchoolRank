@@ -600,3 +600,95 @@ func (sc SchoolController) GetAllStudents(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
+func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Get school ID from URL
+		vars := mux.Vars(r)
+		idStr, ok := vars["id"]
+		if !ok {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School ID not provided"})
+			return
+		}
+
+		// Clean the ID string - trim any whitespace or newline characters
+		idStr = strings.TrimSpace(idStr)
+		log.Printf("ID parameter after trimming: '%s'", idStr)
+
+		schoolID, err := strconv.Atoi(idStr)
+		if err != nil {
+			log.Printf("Error converting ID to int: %v", err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+			return
+		}
+
+		// Query to fetch the school by ID
+		var school models.School
+		var specializationsJSON string
+		query := `
+			SELECT 
+				school_id, 
+				school_name, 
+				school_address, 
+				city, 
+				about_school, 
+				photo_url, 
+				school_email, 
+				school_phone, 
+				school_admin_login, 
+				specializations 
+			FROM Schools 
+			WHERE school_id = ?`
+
+		err = db.QueryRow(query, schoolID).Scan(
+			&school.SchoolID,
+			&school.SchoolName,
+			&school.SchoolAddress,
+			&school.City,
+			&school.AboutSchool,
+			&school.PhotoURL,
+			&school.SchoolEmail,
+			&school.SchoolPhone,
+			&school.SchoolAdminLogin,
+			&specializationsJSON,
+		)
+
+		if err != nil {
+			if err == sql.ErrNoRows {
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "School not found"})
+			} else {
+				log.Println("Error fetching school data:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching school data"})
+			}
+			return
+		}
+
+		// Parse specializations from JSON
+		if specializationsJSON != "" {
+			err = json.Unmarshal([]byte(specializationsJSON), &school.Specializations)
+			if err != nil {
+				log.Println("Error unmarshaling specializations:", err)
+				// If there's an error parsing JSON, initialize as empty array
+				school.Specializations = []string{}
+			}
+		} else {
+			school.Specializations = []string{} // Empty array if no specializations
+		}
+
+		// Get total number of students for this school
+		var totalStudents int
+		err = db.QueryRow("SELECT COUNT(*) FROM student WHERE school_id = ?", schoolID).Scan(&totalStudents)
+		if err != nil {
+			log.Println("Error counting students:", err)
+			// Continue even if we can't count students
+			totalStudents = 0
+		}
+
+		// Return response with school data and student count
+		response := map[string]interface{}{
+			"school":         school,
+			"total_students": totalStudents,
+		}
+
+		utils.ResponseJSON(w, response)
+	}
+}
