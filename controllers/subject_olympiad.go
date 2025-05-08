@@ -15,7 +15,6 @@ import (
 
 type SubjectOlympiadController struct{}
 
-// Метод для создания олимпиады по предмету
 func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var error models.Error
@@ -150,6 +149,82 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 		}
 
 		utils.ResponseJSON(w, olympiad)
+	}
+}
+func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var error models.Error
+
+		// Step 1: Verify user token
+		_, err := utils.VerifyToken(r)
+		if err != nil {
+			error.Message = "Invalid token."
+			utils.RespondWithError(w, http.StatusUnauthorized, error)
+			return
+		}
+
+		// Step 2: Get olympiad ID from URL params
+		params := mux.Vars(r)
+		olympiadID, err := strconv.Atoi(params["id"])
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid olympiad ID"})
+			return
+		}
+
+		// Step 3: Query the olympiad
+		var olympiad models.SubjectOlympiad
+		var createdAt, updatedAt string
+		query := `SELECT id, subject_name, olympiad_name, date, end_date, description, 
+				 photo_url, city, school_id, level, limit_participants, created_at, updated_at
+				 FROM subject_olympiads WHERE id = ?`
+
+		err = db.QueryRow(query, olympiadID).Scan(
+			&olympiad.ID,
+			&olympiad.OlympiadName,
+			&olympiad.OlympiadType,
+			&olympiad.StartDate,
+			&olympiad.EndDate,
+			&olympiad.Description,
+			&olympiad.PhotoURL,
+			&olympiad.City,
+			&olympiad.SchoolID,
+			&olympiad.Level,
+			&olympiad.Limit,
+			&createdAt,
+			&updatedAt,
+		)
+
+		if err != nil {
+			if err == sql.ErrNoRows {
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Olympiad not found"})
+			} else {
+				log.Println("Error fetching olympiad:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve olympiad"})
+			}
+			return
+		}
+
+		// Step 4: Get school name for the olympiad (we'll add it to the response separately)
+		var schoolName string
+		err = db.QueryRow("SELECT name FROM schools WHERE id = ?", olympiad.SchoolID).Scan(&schoolName)
+		if err != nil && err != sql.ErrNoRows {
+			log.Println("Error fetching school name:", err)
+			// Continue without school name rather than failing the whole request
+		}
+
+		// Create response with school name
+		type OlympiadResponse struct {
+			models.SubjectOlympiad
+			SchoolName string `json:"school_name"`
+		}
+
+		response := OlympiadResponse{
+			SubjectOlympiad: olympiad,
+			SchoolName:      schoolName,
+		}
+
+		// Step 5: Return the olympiad data with school name
+		utils.ResponseJSON(w, response)
 	}
 }
 
@@ -403,82 +478,7 @@ func (c *SubjectOlympiadController) UpdateSubjectOlympiad(db *sql.DB) http.Handl
 }
 
 // GetSubjectOlympiad returns a specific subject olympiad by ID
-func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var error models.Error
 
-		// Step 1: Verify user token
-		_, err := utils.VerifyToken(r)
-		if err != nil {
-			error.Message = "Invalid token."
-			utils.RespondWithError(w, http.StatusUnauthorized, error)
-			return
-		}
-
-		// Step 2: Get olympiad ID from URL params
-		params := mux.Vars(r)
-		olympiadID, err := strconv.Atoi(params["id"])
-		if err != nil {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid olympiad ID"})
-			return
-		}
-
-		// Step 3: Query the olympiad
-		var olympiad models.SubjectOlympiad
-		var createdAt, updatedAt string
-		query := `SELECT id, subject_name, olympiad_name, date, end_date, description, 
-				 photo_url, city, school_id, level, limit_participants, created_at, updated_at
-				 FROM subject_olympiads WHERE id = ?`
-
-		err = db.QueryRow(query, olympiadID).Scan(
-			&olympiad.ID,
-			&olympiad.OlympiadName,
-			&olympiad.OlympiadType,
-			&olympiad.StartDate,
-			&olympiad.EndDate,
-			&olympiad.Description,
-			&olympiad.PhotoURL,
-			&olympiad.City,
-			&olympiad.SchoolID,
-			&olympiad.Level,
-			&olympiad.Limit,
-			&createdAt,
-			&updatedAt,
-		)
-
-		if err != nil {
-			if err == sql.ErrNoRows {
-				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Olympiad not found"})
-			} else {
-				log.Println("Error fetching olympiad:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve olympiad"})
-			}
-			return
-		}
-
-		// Step 4: Get school name for the olympiad (we'll add it to the response separately)
-		var schoolName string
-		err = db.QueryRow("SELECT name FROM schools WHERE id = ?", olympiad.SchoolID).Scan(&schoolName)
-		if err != nil && err != sql.ErrNoRows {
-			log.Println("Error fetching school name:", err)
-			// Continue without school name rather than failing the whole request
-		}
-
-		// Create response with school name
-		type OlympiadResponse struct {
-			models.SubjectOlympiad
-			SchoolName string `json:"school_name"`
-		}
-
-		response := OlympiadResponse{
-			SubjectOlympiad: olympiad,
-			SchoolName:      schoolName,
-		}
-
-		// Step 5: Return the olympiad data with school name
-		utils.ResponseJSON(w, response)
-	}
-}
 
 // GetAllSubjectOlympiads returns a list of all subject olympiads
 func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.HandlerFunc {

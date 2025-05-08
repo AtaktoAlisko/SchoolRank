@@ -260,7 +260,6 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, olympiads)
 	}
 }
-
 func (oc *OlympiadController) DeleteOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// 1. Извлекаем параметры запроса
@@ -524,7 +523,6 @@ func (oc *OlympiadController) UpdateOlympiad(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, "Olympiad record updated successfully")
 	}
 }
-
 func (oc *OlympiadController) GetOlympiadBySchoolId(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// 1. Получаем school_id из URL параметров
