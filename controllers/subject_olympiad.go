@@ -175,7 +175,7 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 		var olympiad models.SubjectOlympiad
 		var createdAt, updatedAt string
 		query := `SELECT id, subject_name, olympiad_name, date, end_date, description, 
-				 photo_url, city, school_id, level, limit_participants, created_at, updated_at
+				 photo_url, city, school_id, level, limit_participants
 				 FROM subject_olympiads WHERE id = ?`
 
 		err = db.QueryRow(query, olympiadID).Scan(
@@ -494,7 +494,7 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 		}
 
 		// Step 2: Parse query parameters for filtering
-		query := "SELECT id, subject_name, olympiad_name, date, end_date, description, photo_url, city, school_id, level, limit_participants, created_at, updated_at FROM subject_olympiads WHERE 1=1"
+		query := "SELECT id, subject_name, olympiad_name, date, end_date, description, photo_url, city, school_id, level, limit_participants FROM subject_olympiads WHERE 1=1"
 		args := []interface{}{}
 
 		// Filter by school_id if provided
@@ -537,8 +537,6 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 			args = append(args, level)
 		}
 
-		// Add ordering
-		query += " ORDER BY created_at DESC"
 
 		// Step 3: Execute the query
 		rows, err := db.Query(query, args...)
@@ -553,7 +551,6 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 		olympiads := []models.SubjectOlympiad{}
 		for rows.Next() {
 			var olympiad models.SubjectOlympiad
-			var createdAt, updatedAt string
 			if err := rows.Scan(
 				&olympiad.ID,
 				&olympiad.OlympiadName,
@@ -566,8 +563,6 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 				&olympiad.SchoolID,
 				&olympiad.Level,
 				&olympiad.Limit,
-				&createdAt,
-				&updatedAt,
 			); err != nil {
 				log.Println("Error scanning olympiad row:", err)
 				continue // Skip this row and continue with the next
