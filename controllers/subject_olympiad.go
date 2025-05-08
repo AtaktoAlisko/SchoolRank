@@ -9,19 +9,18 @@ import (
 	"ranking-school/utils"
 	"strconv"
 	"time"
+
+	"github.com/gorilla/mux"
 )
 
 type SubjectOlympiadController struct{}
 
 func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var error models.Error
-
 		// Шаг 1: Проверка токена
 		userID, err := utils.VerifyToken(r)
 		if err != nil {
-			error.Message = "Invalid token."
-			utils.RespondWithError(w, http.StatusUnauthorized, error)
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token."})
 			return
 		}
 
@@ -40,65 +39,43 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 			return
 		}
 
-		// Шаг 4: Парсинг формы
+		// Шаг 4: Получение school_id из URL
+		var schoolID int
+		schoolIDStr := r.URL.Path[len("/api/subject-olympiads/create/"):]
+		schoolID, err = strconv.Atoi(schoolIDStr)
+		if err != nil || schoolID <= 0 {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid or missing school_id in URL"})
+			return
+		}
+
+		// Шаг 5: Парсинг формы
 		err = r.ParseMultipartForm(10 << 20)
 		if err != nil {
-			error.Message = "Error parsing form data"
-			utils.RespondWithError(w, http.StatusBadRequest, error)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Error parsing form data"})
 			log.Printf("Error parsing multipart form: %v", err)
 			return
 		}
 
-		// Шаг 5: Получение school_id
-		var schoolID int
-		if userRole == "schooladmin" {
-			err = db.QueryRow("SELECT school_id FROM users WHERE id = ?", userID).Scan(&schoolID)
-			if err != nil {
-				log.Println("Error fetching school_id for schooladmin:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Cannot retrieve school_id for schooladmin"})
-				return
-			}
-		} else {
-			schoolIDStr := r.FormValue("school_id")
-			if schoolIDStr == "" {
-				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "school_id is required for superadmin"})
-				return
-			}
-			schoolID, err = strconv.Atoi(schoolIDStr)
-			if err != nil {
-				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school_id format"})
-				log.Printf("Error converting school_id: %v", err)
-				return
-			}
-		}
-
 		// Шаг 6: Парсинг остальных полей
-		limit, err := strconv.Atoi(r.FormValue("limit"))
+		subjectName := r.FormValue("subject_name")
+		startDate := r.FormValue("date")
+		endDate := r.FormValue("end_date")
+		description := r.FormValue("description")
+		level := r.FormValue("level")
+		limitStr := r.FormValue("limit")
+
+		if subjectName == "" || startDate == "" || endDate == "" || description == "" || level == "" || limitStr == "" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "subject_name, start date, end date, description, level, and limit are required fields."})
+			return
+		}
+
+		limit, err := strconv.Atoi(limitStr)
 		if err != nil || limit <= 0 {
-			error.Message = "Invalid participant limit format or value"
-			utils.RespondWithError(w, http.StatusBadRequest, error)
-			log.Printf("Error converting limit: %v", err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid participant limit format or value"})
 			return
 		}
 
-		olympiad := models.SubjectOlympiad{
-			StartDate:   r.FormValue("date"),
-			EndDate:     r.FormValue("end_date"),
-			Description: r.FormValue("description"),
-			SchoolID:    schoolID,
-			Level:       r.FormValue("level"),
-			Limit:       limit,
-		}
-
-		// Шаг 7: Проверка обязательных полей
-		if olympiad.StartDate == "" || olympiad.EndDate == "" || olympiad.Description == "" || olympiad.Level == "" {
-			error.Message = "Start date, end date, description, and level are required fields."
-			utils.RespondWithError(w, http.StatusBadRequest, error)
-			log.Printf("Missing required fields: %+v", olympiad)
-			return
-		}
-
-		// Шаг 8: Загрузка фото
+		// Шаг 7: Загрузка фото
 		file, _, err := r.FormFile("photo_url")
 		if err != nil {
 			log.Println("Error reading file:", err)
@@ -114,14 +91,25 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 			log.Println("Error uploading file:", err)
 			return
 		}
-		olympiad.PhotoURL = photoURL
 
-		// Шаг 9: Вставка в БД
+		olympiad := models.SubjectOlympiad{
+			SubjectName: subjectName,
+			StartDate:   startDate,
+			EndDate:     endDate,
+			Description: description,
+			PhotoURL:    photoURL,
+			SchoolID:    schoolID,
+			Level:       level,
+			Limit:       limit,
+		}
+
+		// Шаг 8: Вставка в БД
 		query := `INSERT INTO subject_olympiads 
-			(date, end_date, description, photo_url, school_id, level, limit_participants) 
-			VALUES (?, ?, ?, ?, ?, ?, ?)`
+			(subject_name, date, end_date, description, photo_url, school_id, level, limit_participants) 
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 
 		_, err = db.Exec(query,
+			olympiad.SubjectName,
 			olympiad.StartDate,
 			olympiad.EndDate,
 			olympiad.Description,
@@ -139,397 +127,242 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 		utils.ResponseJSON(w, olympiad)
 	}
 }
-// func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.HandlerFunc {
-// 	return func(w http.ResponseWriter, r *http.Request) {
-// 		var error models.Error
+func (c *SubjectOlympiadController) GetSubjectOlympiads(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Шаг 1: Получение school_id из URL
+		schoolIDStr := mux.Vars(r)["school_id"]
+		schoolID, err := strconv.Atoi(schoolIDStr)
+		if err != nil || schoolID <= 0 {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid or missing school_id in URL"})
+			return
+		}
 
-// 		_, err := utils.VerifyToken(r)
-// 		if err != nil {
-// 			error.Message = "Invalid token."
-// 			utils.RespondWithError(w, http.StatusUnauthorized, error)
-// 			return
-// 		}
+		// Шаг 2: Извлечение параметров фильтрации из строки запроса
+		subjectName := r.URL.Query().Get("subject_name")
+		startDate := r.URL.Query().Get("start_date")
+		endDate := r.URL.Query().Get("end_date")
+		level := r.URL.Query().Get("level")
 
-// 		query := `
-// 			SELECT id, subject_name, date, description, photo_url, school_id, end_date, level, limit_participants
-// 			FROM subject_olympiads
-// 			WHERE 1=1`
-// 		args := []interface{}{}
+		// Шаг 3: Строим SQL-запрос с учетом фильтров
+		query := `SELECT subject_name, date, end_date, description, photo_url, school_id, level, limit_participants
+				  FROM subject_olympiads 
+				  WHERE school_id = ?`
 
-// 		// Фильтрации
-// 		if v := r.URL.Query().Get("school_id"); v != "" {
-// 			query += " AND school_id = ?"
-// 			id, err := strconv.Atoi(v)
-// 			if err != nil {
-// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
-// 				return
-// 			}
-// 			args = append(args, id)
-// 		}
+		var args []interface{}
+		args = append(args, schoolID)
 
-// 		if v := r.URL.Query().Get("level"); v != "" {
-// 			query += " AND level = ?"
-// 			args = append(args, v)
-// 		}
+		// Добавляем фильтры в запрос, если они были переданы
+		if subjectName != "" {
+			query += " AND subject_name LIKE ?"
+			args = append(args, "%"+subjectName+"%")
+		}
+		if startDate != "" {
+			query += " AND date >= ?"
+			args = append(args, startDate)
+		}
+		if endDate != "" {
+			query += " AND end_date <= ?"
+			args = append(args, endDate)
+		}
+		if level != "" {
+			query += " AND level = ?"
+			args = append(args, level)
+		}
 
-// 		if v := r.URL.Query().Get("date"); v != "" {
-// 			query += " AND date = ?"
-// 			args = append(args, v)
-// 		}
+		// Шаг 4: Выполнение запроса
+		rows, err := db.Query(query, args...)
+		if err != nil {
+			log.Println("Error querying olympiads:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve olympiads"})
+			return
+		}
+		defer rows.Close()
 
-// 		if v := r.URL.Query().Get("end_date"); v != "" {
-// 			query += " AND end_date = ?"
-// 			args = append(args, v)
-// 		}
+		// Шаг 5: Чтение результатов
+		var olympiads []models.SubjectOlympiad
+		for rows.Next() {
+			var olympiad models.SubjectOlympiad
+			err := rows.Scan(&olympiad.SubjectName, &olympiad.StartDate, &olympiad.EndDate, &olympiad.Description, &olympiad.PhotoURL, &olympiad.SchoolID, &olympiad.Level, &olympiad.Limit)
+			if err != nil {
+				log.Println("Error scanning row:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to process olympiad data"})
+				return
+			}
+			olympiads = append(olympiads, olympiad)
+		}
 
-// 		if v := r.URL.Query().Get("subject_name"); v != "" {
-// 			query += " AND subject_name LIKE ?"
-// 			args = append(args, "%"+v+"%")
-// 		}
+		// Шаг 6: Ответ в формате JSON
+		if len(olympiads) == 0 {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No olympiads found"})
+			return
+		}
 
-// 		rows, err := db.Query(query, args...)
-// 		if err != nil {
-// 			log.Println("Query error:", err)
-// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve olympiads"})
-// 			return
-// 		}
-// 		defer rows.Close()
+		utils.ResponseJSON(w, olympiads)
+	}
+}
+func (c *SubjectOlympiadController) UpdateSubjectOlympiad(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Шаг 1: Проверка токена
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token."})
+			return
+		}
 
-// 		var olympiads []models.SubjectOlympiad
-// 		for rows.Next() {
-// 			var o models.SubjectOlympiad
-// 			err := rows.Scan(&o.ID, &o.SubjectName, &o.StartDate, &o.Description, &o.PhotoURL, &o.SchoolID, &o.EndDate, &o.Level, &o.Limit)
-// 			if err != nil {
-// 				log.Println("Scan error:", err)
-// 				continue
-// 			}
-// 			olympiads = append(olympiads, o)
-// 		}
+		// Шаг 2: Получение роли пользователя
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil {
+			log.Println("Error fetching user role:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
 
-// 		utils.ResponseJSON(w, olympiads)
-// 	}
-// }
+		// Шаг 3: Проверка прав доступа
+		if userRole != "superadmin" && userRole != "schooladmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to update an olympiad"})
+			return
+		}
 
+		// Шаг 4: Получение subject_olympiad_id из URL
+		var olympiadID int
+		vars := mux.Vars(r)
+		olympiadID, err = strconv.Atoi(vars["id"])
+		if err != nil || olympiadID <= 0 {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid or missing olympiad_id in URL"})
+			return
+		}
 
-// func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerFunc {
-// 	return func(w http.ResponseWriter, r *http.Request) {
-// 		var error models.Error
+		// Шаг 5: Парсинг формы
+		err = r.ParseMultipartForm(10 << 20)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Error parsing form data"})
+			log.Printf("Error parsing multipart form: %v", err)
+			return
+		}
 
-// 		// Step 1: Verify user token
-// 		_, err := utils.VerifyToken(r)
-// 		if err != nil {
-// 			error.Message = "Invalid token."
-// 			utils.RespondWithError(w, http.StatusUnauthorized, error)
-// 			return
-// 		}
+		// Шаг 6: Парсинг остальных полей
+		subjectName := r.FormValue("subject_name")
+		startDate := r.FormValue("date")
+		endDate := r.FormValue("end_date")
+		description := r.FormValue("description")
+		level := r.FormValue("level")
+		limitStr := r.FormValue("limit")
 
-// 		// Step 2: Get olympiad ID from URL params
-// 		params := mux.Vars(r)
-// 		olympiadID, err := strconv.Atoi(params["id"])
-// 		if err != nil {
-// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid olympiad ID"})
-// 			return
-// 		}
+		if subjectName == "" || startDate == "" || endDate == "" || description == "" || level == "" || limitStr == "" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "subject_name, start date, end date, description, level, and limit are required fields."})
+			return
+		}
 
-// 		// Step 3: Query the olympiad
-// 		var olympiad models.SubjectOlympiad
-// 		var createdAt, updatedAt string
-// 		query := `SELECT id, subject_name, olympiad_name, date, end_date, description,
-// 				 photo_url, city, school_id, level, limit_participants
-// 				 FROM subject_olympiads WHERE id = ?`
+		limit, err := strconv.Atoi(limitStr)
+		if err != nil || limit <= 0 {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid participant limit format or value"})
+			return
+		}
 
-// 		err = db.QueryRow(query, olympiadID).Scan(
-// 			&olympiad.ID,
-// 			&olympiad.OlympiadName,
-// 			&olympiad.OlympiadType,
-// 			&olympiad.StartDate,
-// 			&olympiad.EndDate,
-// 			&olympiad.Description,
-// 			&olympiad.PhotoURL,
-// 			&olympiad.City,
-// 			&olympiad.SchoolID,
-// 			&olympiad.Level,
-// 			&olympiad.Limit,
-// 			&createdAt,
-// 			&updatedAt,
-// 		)
+		// Шаг 7: Загрузка фото (опционально)
+		var photoURL string
+		file, _, err := r.FormFile("photo_url")
+		if err == nil {
+			defer file.Close()
+			uniqueFileName := fmt.Sprintf("olympiad-%d.jpg", time.Now().Unix())
+			photoURL, err = utils.UploadFileToS3(file, uniqueFileName, "schoolphoto")
+			if err != nil {
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to upload photo"})
+				log.Println("Error uploading file:", err)
+				return
+			}
+		} else if err != http.ErrMissingFile {
+			log.Println("Error reading file:", err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Error reading file"})
+			return
+		}
 
-// 		if err != nil {
-// 			if err == sql.ErrNoRows {
-// 				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Olympiad not found"})
-// 			} else {
-// 				log.Println("Error fetching olympiad:", err)
-// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve olympiad"})
-// 			}
-// 			return
-// 		}
+		// Шаг 8: Обновление олимпиады в БД
+		query := `UPDATE subject_olympiads
+				  SET subject_name = ?, date = ?, end_date = ?, description = ?, level = ?, limit_participants = ?`
+		var args []interface{}
+		args = append(args, subjectName, startDate, endDate, description, level, limit)
 
-// 		// Step 4: Get school name for the olympiad (we'll add it to the response separately)
-// 		var schoolName string
-// 		err = db.QueryRow("SELECT name FROM schools WHERE id = ?", olympiad.SchoolID).Scan(&schoolName)
-// 		if err != nil && err != sql.ErrNoRows {
-// 			log.Println("Error fetching school name:", err)
-// 			// Continue without school name rather than failing the whole request
-// 		}
+		// Если файл был загружен, обновляем photo_url
+		if photoURL != "" {
+			query += ", photo_url = ?"
+			args = append(args, photoURL)
+		}
 
-// 		// Create response with school name
-// 		type OlympiadResponse struct {
-// 			models.SubjectOlympiad
-// 			SchoolName string `json:"school_name"`
-// 		}
+		query += " WHERE id = ?"
+		args = append(args, olympiadID)
 
-// 		response := OlympiadResponse{
-// 			SubjectOlympiad: olympiad,
-// 			SchoolName:      schoolName,
-// 		}
+		_, err = db.Exec(query, args...)
+		if err != nil {
+			log.Println("Error updating olympiad:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update olympiad"})
+			return
+		}
 
-// 		// Step 5: Return the olympiad data with school name
-// 		utils.ResponseJSON(w, response)
-// 	}
-// }
+		// Шаг 9: Ответ в формате JSON
+		utils.ResponseJSON(w, models.SubjectOlympiad{
+			SubjectName: subjectName,
+			StartDate:   startDate,
+			EndDate:     endDate,
+			Description: description,
+			PhotoURL:    photoURL,
+			SchoolID:    0, // Можно оставить или обновить SchoolID по необходимости
+			Level:       level,
+			Limit:       limit,
+		})
+	}
+}
+func (c *SubjectOlympiadController) DeleteSubjectOlympiad(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Шаг 1: Проверка токена
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token."})
+			return
+		}
 
-// func (c *SubjectOlympiadController) DeleteSubjectOlympiad(db *sql.DB) http.HandlerFunc {
-// 	return func(w http.ResponseWriter, r *http.Request) {
-// 		var error models.Error
+		// Шаг 2: Получение роли пользователя
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil {
+			log.Println("Error fetching user role:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
 
-// 		// Step 1: Verify user token and get user ID
-// 		userID, err := utils.VerifyToken(r)
-// 		if err != nil {
-// 			error.Message = "Invalid token."
-// 			utils.RespondWithError(w, http.StatusUnauthorized, error)
-// 			return
-// 		}
+		// Шаг 3: Проверка прав доступа
+		if userRole != "superadmin" && userRole != "schooladmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to delete an olympiad"})
+			return
+		}
 
-// 		// Step 2: Get user role from DB
-// 		var userRole string
-// 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
-// 		if err != nil {
-// 			log.Println("Error fetching user role:", err)
-// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
-// 			return
-// 		}
+		// Шаг 4: Получение olympiad_id из URL
+		vars := mux.Vars(r)
+		olympiadIDStr := vars["id"]
+		olympiadID, err := strconv.Atoi(olympiadIDStr)
+		if err != nil || olympiadID <= 0 {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid olympiad ID"})
+			return
+		}
 
-// 		// Step 3: Get olympiad ID from URL params
-// 		params := mux.Vars(r)
-// 		olympiadID, err := strconv.Atoi(params["id"])
-// 		if err != nil {
-// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid olympiad ID"})
-// 			return
-// 		}
+		// Шаг 5: Удаление олимпиады из БД
+		query := "DELETE FROM subject_olympiads WHERE id = ?"
+		result, err := db.Exec(query, olympiadID)
+		if err != nil {
+			log.Println("Error deleting olympiad:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete olympiad"})
+			return
+		}
 
-// 		// Step 4: Check if olympiad exists and get school_id
-// 		var olympiadSchoolID int
-// 		err = db.QueryRow("SELECT school_id FROM subject_olympiads WHERE id = ?", olympiadID).Scan(&olympiadSchoolID)
-// 		if err != nil {
-// 			if err == sql.ErrNoRows {
-// 				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Olympiad not found"})
-// 			} else {
-// 				log.Println("Error fetching olympiad:", err)
-// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching olympiad"})
-// 			}
-// 			return
-// 		}
+		// Шаг 6: Проверка, был ли удален хотя бы один ряд
+		rowsAffected, err := result.RowsAffected()
+		if err != nil || rowsAffected == 0 {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Olympiad not found"})
+			return
+		}
 
-// 		// Step 5: Check access permission
-// 		if userRole == "schooladmin" {
-// 			// Verify if the user belongs to the same school as the olympiad
-// 			var userSchoolID int
-// 			err = db.QueryRow("SELECT school_id FROM users WHERE id = ?", userID).Scan(&userSchoolID)
-// 			if err != nil {
-// 				log.Println("Error fetching school_id for user:", err)
-// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error verifying access"})
-// 				return
-// 			}
-
-// 			if userSchoolID != olympiadSchoolID {
-// 				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You don't have permission to delete this olympiad"})
-// 				return
-// 			}
-// 		} else if userRole != "superadmin" {
-// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You don't have permission to delete olympiads"})
-// 			return
-// 		}
-
-// 		// Step 6: Delete the olympiad
-// 		_, err = db.Exec("DELETE FROM subject_olympiads WHERE id = ?", olympiadID)
-// 		if err != nil {
-// 			log.Println("Error deleting olympiad:", err)
-// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete olympiad"})
-// 			return
-// 		}
-
-// 		// Step 7: Return success response
-// 		utils.ResponseJSON(w, map[string]string{"message": "Olympiad deleted successfully"})
-// 	}
-// }
-// func (c *SubjectOlympiadController) UpdateSubjectOlympiad(db *sql.DB) http.HandlerFunc {
-// 	return func(w http.ResponseWriter, r *http.Request) {
-// 		var error models.Error
-
-// 		// Step 1: Verify user token and get user ID
-// 		userID, err := utils.VerifyToken(r)
-// 		if err != nil {
-// 			error.Message = "Invalid token."
-// 			utils.RespondWithError(w, http.StatusUnauthorized, error)
-// 			return
-// 		}
-
-// 		// Step 2: Get user role from DB
-// 		var userRole string
-// 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
-// 		if err != nil {
-// 			log.Println("Error fetching user role:", err)
-// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
-// 			return
-// 		}
-
-// 		// Step 3: Get olympiad ID from URL params
-// 		params := mux.Vars(r)
-// 		olympiadID, err := strconv.Atoi(params["id"])
-// 		if err != nil {
-// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid olympiad ID"})
-// 			return
-// 		}
-
-// 		// Step 4: Check if olympiad exists and get school_id
-// 		var olympiadSchoolID int
-// 		err = db.QueryRow("SELECT school_id FROM subject_olympiads WHERE id = ?", olympiadID).Scan(&olympiadSchoolID)
-// 		if err != nil {
-// 			if err == sql.ErrNoRows {
-// 				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Olympiad not found"})
-// 			} else {
-// 				log.Println("Error fetching olympiad:", err)
-// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching olympiad"})
-// 			}
-// 			return
-// 		}
-
-// 		// Step 5: Check access permission
-// 		if userRole == "schooladmin" {
-// 			// Verify if the user belongs to the same school as the olympiad
-// 			var userSchoolID int
-// 			err = db.QueryRow("SELECT school_id FROM users WHERE id = ?", userID).Scan(&userSchoolID)
-// 			if err != nil {
-// 				log.Println("Error fetching school_id for user:", err)
-// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error verifying access"})
-// 				return
-// 			}
-
-// 			if userSchoolID != olympiadSchoolID {
-// 				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You don't have permission to update this olympiad"})
-// 				return
-// 			}
-// 		} else if userRole != "superadmin" {
-// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You don't have permission to update olympiads"})
-// 			return
-// 		}
-
-// 		// Step 6: Parse multipart form
-// 		err = r.ParseMultipartForm(10 << 20) // 10MB limit
-// 		if err != nil {
-// 			error.Message = "Error parsing form data"
-// 			utils.RespondWithError(w, http.StatusBadRequest, error)
-// 			log.Printf("Error parsing multipart form: %v", err)
-// 			return
-// 		}
-
-// 		// Step 7: Parse form fields
-// 		olympiad := models.SubjectOlympiad{
-// 			ID:           olympiadID,
-// 			OlympiadName: r.FormValue("subject_name"),
-// 			OlympiadType: r.FormValue("olympiad_name"),
-// 			StartDate:    r.FormValue("date"),
-// 			EndDate:      r.FormValue("end_date"),
-// 			Description:  r.FormValue("description"),
-// 			City:         r.FormValue("city"),
-// 			SchoolID:     olympiadSchoolID, // Keep the original school_id
-// 			Level:        r.FormValue("level"),
-// 		}
-
-// 		// Handle limit if provided
-// 		limitStr := r.FormValue("limit")
-// 		if limitStr != "" {
-// 			limit, err := strconv.Atoi(limitStr)
-// 			if err != nil || limit <= 0 {
-// 				error.Message = "Invalid participant limit format or value"
-// 				utils.RespondWithError(w, http.StatusBadRequest, error)
-// 				log.Printf("Error converting limit: %v", err)
-// 				return
-// 			}
-// 			olympiad.Limit = limit
-// 		} else {
-// 			// Get the current limit value from DB
-// 			err = db.QueryRow("SELECT limit_participants FROM subject_olympiads WHERE id = ?", olympiadID).Scan(&olympiad.Limit)
-// 			if err != nil {
-// 				log.Println("Error fetching current limit:", err)
-// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error retrieving current olympiad data"})
-// 				return
-// 			}
-// 		}
-
-// 		// Step 8: Validate required fields
-// 		if olympiad.OlympiadName == "" || olympiad.OlympiadType == "" || olympiad.StartDate == "" ||
-// 			olympiad.City == "" || olympiad.Level == "" {
-// 			error.Message = "Subject name, olympiad name, start date, city, and level are required fields."
-// 			utils.RespondWithError(w, http.StatusBadRequest, error)
-// 			log.Printf("Missing required fields: %v", olympiad)
-// 			return
-// 		}
-
-// 		// Step 9: Handle file upload if provided
-// 		file, _, err := r.FormFile("photo_url")
-// 		var photoURL string
-
-// 		if err == nil {
-// 			// A new file was uploaded
-// 			defer file.Close()
-// 			uniqueFileName := fmt.Sprintf("olympiad-%d-%d.jpg", olympiadID, time.Now().Unix())
-// 			photoURL, err = utils.UploadFileToS3(file, uniqueFileName, "schoolphoto")
-// 			if err != nil {
-// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to upload photo"})
-// 				log.Println("Error uploading file:", err)
-// 				return
-// 			}
-// 			olympiad.PhotoURL = photoURL
-// 		} else if err != http.ErrMissingFile {
-// 			// There was an error that wasn't simply missing file
-// 			log.Println("Error reading file:", err)
-// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Error reading file"})
-// 			return
-// 		} else {
-// 			// No new file, keep the existing photo URL
-// 			err = db.QueryRow("SELECT photo_url FROM subject_olympiads WHERE id = ?", olympiadID).Scan(&olympiad.PhotoURL)
-// 			if err != nil {
-// 				log.Println("Error fetching current photo URL:", err)
-// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error retrieving current photo"})
-// 				return
-// 			}
-// 		}
-
-// 		// Step 10: Update olympiad in DB
-// 		query := `UPDATE subject_olympiads
-// 				 SET subject_name = ?, olympiad_name = ?, date = ?, end_date = ?,
-// 				 description = ?, photo_url = ?, city = ?, level = ?, limit_participants = ?
-// 				 WHERE id = ?`
-
-// 		_, err = db.Exec(query,
-// 			olympiad.OlympiadName,
-// 			olympiad.OlympiadType,
-// 			olympiad.StartDate,
-// 			olympiad.EndDate,
-// 			olympiad.Description,
-// 			olympiad.PhotoURL,
-// 			olympiad.City,
-// 			olympiad.Level,
-// 			olympiad.Limit,
-// 			olympiad.ID)
-
-// 		if err != nil {
-// 			log.Println("Error updating olympiad:", err)
-// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update olympiad"})
-// 			return
-// 		}
-
-// 		utils.ResponseJSON(w, olympiad)
-// 	}
-// }
+		// Шаг 7: Ответ на успешное удаление
+		utils.ResponseJSON(w, map[string]string{"message": "Olympiad successfully deleted"})
+	}
+}

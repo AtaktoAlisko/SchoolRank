@@ -1408,8 +1408,6 @@ func (sfc *StudentController) GetAvailableGrades(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
-
-// GetAvailableLetters returns letters available for a specific grade in a school
 func (sfc *StudentController) GetAvailableLetters(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Step 1: Verify the user's token and get user ID
@@ -1507,8 +1505,6 @@ func (sfc *StudentController) GetAvailableLetters(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
-
-// GetFilteredStudents returns students filtered by school, grade, and letter
 func (sfc *StudentController) GetFilteredStudents(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, err := utils.VerifyToken(r)

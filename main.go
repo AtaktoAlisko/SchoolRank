@@ -204,11 +204,10 @@ func main() {
 	router.HandleFunc("/api/total-olympiad-rating/{school_id}", olympiadController.CalculateTotalOlympiadRating(db)).Methods("GET")
 	router.HandleFunc("/api/olympiads/school/{school_id}", olympiadController.GetOlympiadBySchoolId(db)).Methods("GET")
 
-	router.HandleFunc("/api/subject-olympiads/create", SubjectOlympiadController.CreateSubjectOlympiad(db)).Methods("POST")
-	// router.HandleFunc("/api/subject-olympiads", SubjectOlympiadController.GetAllSubjectOlympiads(db)).Methods("GET")
-	// router.HandleFunc("/api/subject-olympiads//{id}", SubjectOlympiadController.GetSubjectOlympiad(db)).Methods("GET")
-	// router.HandleFunc("/api/subject-olympiads//{id}", SubjectOlympiadController.UpdateSubjectOlympiad(db)).Methods("PUT")
-	// router.HandleFunc("/api/subject-olympiads//{id}", SubjectOlympiadController.DeleteSubjectOlympiad(db)).Methods("DELETE")
+	router.HandleFunc("/api/subject-olympiads/create/{school_id}", SubjectOlympiadController.CreateSubjectOlympiad(db)).Methods("POST")
+	router.HandleFunc("/api/subject-olympiads/{school_id}", SubjectOlympiadController.GetSubjectOlympiads(db)).Methods("GET")
+	router.HandleFunc("/api/subject-olympiads/{id}", SubjectOlympiadController.UpdateSubjectOlympiad(db)).Methods("PUT")
+	router.HandleFunc("/api/subject-olympiads/{id}", SubjectOlympiadController.DeleteSubjectOlympiad(db)).Methods("DELETE")
 
 	// =======================
 	// Контактная информация
