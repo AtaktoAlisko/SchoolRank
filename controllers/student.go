@@ -655,101 +655,63 @@ func (sc StudentController) GetStudents(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, students)
 	}
 }
-func (sc StudentController) GetStudentsBySchoolAndGrade(db *sql.DB) http.HandlerFunc {
+func (sc StudentController) GetAvailableGradesBySchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Извлекаем параметры school_id и grade из URL
+		// Extract school_id from URL
 		vars := mux.Vars(r)
 		schoolIDParam := vars["school_id"]
-		gradeParam := vars["grade"]
 
-		// Преобразуем параметры в нужные типы
+		// Convert parameter to required type
 		schoolID, err := strconv.Atoi(schoolIDParam)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
 			return
 		}
 
-		grade, err := strconv.Atoi(gradeParam)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade"})
-			return
-		}
+		// No need to check if school exists - we'll just return available grades
 
-		// Шаг 1: Запрос к базе данных для получения студентов по school_id и grade
-		rows, err := db.Query("SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email FROM student WHERE school_id = ? AND grade = ?", schoolID, grade)
+		// Query to get distinct grades that exist for this school
+		rows, err := db.Query("SELECT DISTINCT grade FROM student WHERE school_id = ? ORDER BY grade", schoolID)
 		if err != nil {
 			log.Println("SQL Error:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get students"})
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get grades"})
 			return
 		}
 		defer rows.Close()
 
-		// Шаг 2: Создаем срез для хранения студентов
-		var students []models.Student
+		// Create a slice to store grades
+		var grades []int
+
 		for rows.Next() {
-			var student models.Student
-
-			// Шаг 3: Обработка возможных NULL значений с помощью sql.Null типов
-			var firstName, lastName, patronymic, iin, letter, gender, phone, email sql.NullString
-			var schoolID sql.NullInt64
-			var dateOfBirth sql.NullString
-			var grade sql.NullInt64
-
-			// Шаг 4: Сканирование строки в объект student
-			if err := rows.Scan(&student.ID, &firstName, &lastName, &patronymic, &iin, &schoolID, &dateOfBirth, &grade, &letter, &gender, &phone, &email); err != nil {
+			var grade int
+			if err := rows.Scan(&grade); err != nil {
 				log.Println("Scan Error:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse students"})
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse grades"})
 				return
 			}
-
-			// Шаг 5: Присваиваем значения студенту, проверяя на NULL
-			if firstName.Valid {
-				student.FirstName = firstName.String
-			}
-			if lastName.Valid {
-				student.LastName = lastName.String
-			}
-			if patronymic.Valid {
-				student.Patronymic = patronymic.String
-			}
-			if iin.Valid {
-				student.IIN = iin.String
-			}
-			if schoolID.Valid {
-				student.SchoolID = int(schoolID.Int64)
-			}
-			if dateOfBirth.Valid {
-				student.DateOfBirth = dateOfBirth.String
-			}
-			if grade.Valid {
-				student.Grade = int(grade.Int64)
-			}
-			if letter.Valid {
-				student.Letter = letter.String
-			}
-			if gender.Valid {
-				student.Gender = gender.String
-			}
-			if phone.Valid {
-				student.Phone = phone.String
-			}
-			if email.Valid {
-				student.Email = email.String
-			}
-
-			// Шаг 6: Добавляем студента в срез
-			students = append(students, student)
+			grades = append(grades, grade)
 		}
 
-		// Шаг 7: Проверяем на ошибки при обработке строк
+		// Check for errors in processing rows
 		if err := rows.Err(); err != nil {
 			log.Println("Rows Error:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing students"})
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing grades"})
 			return
 		}
 
-		// Шаг 8: Ответ с данным списком студентов
-		utils.ResponseJSON(w, students)
+		// Create a response structure that includes available grades
+		type GradesResponse struct {
+			AvailableGrades []int `json:"available_grades"`
+			SchoolID        int   `json:"school_id"`
+		}
+
+		response := GradesResponse{
+			AvailableGrades: grades,
+			SchoolID:        schoolID,
+		}
+
+		// Return the list of available grades
+		utils.ResponseJSON(w, response)
 	}
 }
 func (sc StudentController) GetStudentsByGradeAndLetter(db *sql.DB) http.HandlerFunc {

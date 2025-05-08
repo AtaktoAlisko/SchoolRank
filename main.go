@@ -159,7 +159,7 @@ func main() {
 	router.HandleFunc("/api/schools/{school_id}/total-students", studentController.GetTotalStudentsBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/students/{student_id}", studentController.DeleteStudent(db)).Methods("DELETE")
 	router.HandleFunc("/api/schools/{school_id}/students", studentController.GetStudentsBySchool(db)).Methods("GET")
-	router.HandleFunc("/api/schools/{school_id}/students/{grade}", studentController.GetStudentsBySchoolAndGrade(db)).Methods("GET")
+	router.HandleFunc("/api/schools/{school_id}/students/grades", studentController.GetAvailableGradesBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/students/grade/{grade}/letter/{letter}", studentController.GetStudentsByGradeAndLetter(db)).Methods("GET")
 	// Роут для получения данных о студенте
 	router.HandleFunc("/api/schools/{school_id}/students/{student_id}", studentController.GetStudentData(db)).Methods("GET")
