@@ -10,6 +10,7 @@ import (
 	"ranking-school/models"
 	"ranking-school/utils"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -120,47 +121,79 @@ func (oc *OlympiadController) CreateOlympiad(db *sql.DB) http.HandlerFunc {
 }
 func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Получаем userID из токена для проверки прав доступа
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+			return
+		}
+
+		// Получаем роль и школу пользователя
+		var userRole string
+		var userSchoolID sql.NullInt64
+		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch user information"})
+			return
+		}
+
 		studentID := r.URL.Query().Get("student_id")
 		level := r.URL.Query().Get("level")
+		schoolIDParam := r.URL.Query().Get("school_id")
 
 		var query string
 		var rows *sql.Rows
-		var err error
+		var queryArgs []interface{}
 
-		if studentID != "" {
-			query = `SELECT 
+		// Базовая часть запроса с выборкой всех полей включая grade и letter
+		baseQuery := `SELECT 
 						Olympiads.olympiad_id, Olympiads.student_id, Olympiads.olympiad_place, Olympiads.score, 
 						Olympiads.school_id, Olympiads.level, Olympiads.olympiad_name, Olympiads.document_url,
 						Olympiads.date, 
 						student.first_name, student.last_name, student.patronymic, 
 						student.grade, student.letter
 					FROM Olympiads
-					JOIN student ON Olympiads.student_id = student.student_id
-					WHERE Olympiads.student_id = ?`
-			rows, err = db.Query(query, studentID)
-		} else if level != "" {
-			query = `SELECT 
-						Olympiads.olympiad_id, Olympiads.student_id, Olympiads.olympiad_place, Olympiads.score, 
-						Olympiads.school_id, Olympiads.level, Olympiads.olympiad_name, Olympiads.document_url,
-						Olympiads.date,
-						student.first_name, student.last_name, student.patronymic,
-						student.grade, student.letter
-					FROM Olympiads
-					JOIN student ON Olympiads.student_id = student.student_id
-					WHERE Olympiads.level = ?`
-			rows, err = db.Query(query, level)
-		} else {
-			query = `SELECT 
-						Olympiads.olympiad_id, Olympiads.student_id, Olympiads.olympiad_place, Olympiads.score, 
-						Olympiads.school_id, Olympiads.level, Olympiads.olympiad_name, Olympiads.document_url,
-						Olympiads.date,
-						student.first_name, student.last_name, student.patronymic,
-						student.grade, student.letter
-					FROM Olympiads
 					JOIN student ON Olympiads.student_id = student.student_id`
-			rows, err = db.Query(query)
+
+		// Создаем условия запроса на основе параметров и роли пользователя
+		whereConditions := []string{}
+
+		// Для schooladmin показываем только данные из его школы
+		if userRole == "schooladmin" && userSchoolID.Valid {
+			whereConditions = append(whereConditions, "Olympiads.school_id = ?")
+			queryArgs = append(queryArgs, userSchoolID.Int64)
 		}
 
+		// Добавляем фильтр по studentID, если указан
+		if studentID != "" {
+			whereConditions = append(whereConditions, "Olympiads.student_id = ?")
+			queryArgs = append(queryArgs, studentID)
+		}
+
+		// Добавляем фильтр по level, если указан
+		if level != "" {
+			whereConditions = append(whereConditions, "Olympiads.level = ?")
+			queryArgs = append(queryArgs, level)
+		}
+
+		// Добавляем фильтр по school_id, если указан и пользователь superadmin
+		if schoolIDParam != "" && userRole == "superadmin" {
+			schoolID, err := strconv.Atoi(schoolIDParam)
+			if err == nil {
+				whereConditions = append(whereConditions, "Olympiads.school_id = ?")
+				queryArgs = append(queryArgs, schoolID)
+			}
+		}
+
+		// Строим полный запрос с условиями WHERE
+		if len(whereConditions) > 0 {
+			query = baseQuery + " WHERE " + strings.Join(whereConditions, " AND ")
+		} else {
+			query = baseQuery
+		}
+
+		// Выполняем запрос
+		rows, err = db.Query(query, queryArgs...)
 		if err != nil {
 			log.Printf("Error fetching Olympiad records: %v", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch Olympiad records"})
@@ -168,13 +201,20 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		var olympiads []models.Olympiads
+		// Структура для ответа с полями Grade и Letter
+		type OlympiadWithStudentInfo struct {
+			models.Olympiads
+			Grade  int    `json:"grade"`
+			Letter string `json:"letter"`
+		}
+
+		var olympiads []OlympiadWithStudentInfo
 
 		for rows.Next() {
-			var olympiad models.Olympiads
-			var olympiadName sql.NullString
-			var documentURL sql.NullString
-			var date sql.NullString
+			var olympiad OlympiadWithStudentInfo
+			var olympiadName, documentURL, date sql.NullString
+			var grade sql.NullInt64
+			var letter sql.NullString
 
 			err := rows.Scan(
 				&olympiad.OlympiadID,
@@ -189,8 +229,8 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 				&olympiad.FirstName,
 				&olympiad.LastName,
 				&olympiad.Patronymic,
-				&olympiad.Grade,
-				&olympiad.Letter,
+				&grade,
+				&letter,
 			)
 			if err != nil {
 				log.Printf("Error scanning Olympiad record: %v", err)
@@ -206,6 +246,12 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 			}
 			if date.Valid {
 				olympiad.Date = date.String
+			}
+			if grade.Valid {
+				olympiad.Grade = int(grade.Int64)
+			}
+			if letter.Valid {
+				olympiad.Letter = letter.String
 			}
 
 			olympiads = append(olympiads, olympiad)
