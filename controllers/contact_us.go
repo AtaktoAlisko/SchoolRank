@@ -16,34 +16,34 @@ type ContactUsController struct{}
 func (c *ContactUsController) CreateContactRequest(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var contactRequest struct {
-			Name    string `json:"name"`
-			Email   string `json:"email"`
-			Message string `json:"message"`
+			FullName string `json:"full_name"`
+			Email    string `json:"email"`
+			Message  string `json:"message"`
 		}
 
-		// Декодируем тело запроса в структуру
+		// Decode the request body into the struct
 		err := json.NewDecoder(r.Body).Decode(&contactRequest)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
 			return
 		}
 
-		// Проверяем, что все необходимые данные присутствуют
-		if contactRequest.Name == "" || contactRequest.Email == "" || contactRequest.Message == "" {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Name, email, and message are required"})
+		// Check that all required fields are provided
+		if contactRequest.FullName == "" || contactRequest.Email == "" || contactRequest.Message == "" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Full name, email, and message are required"})
 			return
 		}
 
-		// Сохраняем запрос в базе данных
-		query := `INSERT INTO contact_us (name, email, message) VALUES (?, ?, ?)`
-		_, err = db.Exec(query, contactRequest.Name, contactRequest.Email, contactRequest.Message)
+		// Save the contact request to the database
+		query := `INSERT INTO contact_us (full_name, email, message) VALUES (?, ?, ?)`
+		_, err = db.Exec(query, contactRequest.FullName, contactRequest.Email, contactRequest.Message)
 		if err != nil {
 			log.Println("Error inserting contact request:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to save contact request"})
 			return
 		}
 
-		// Отправляем email админу
+		// Send email to the admin
 		err = sendEmailToAdmin(contactRequest)
 		if err != nil {
 			log.Println("Error sending email:", err)
@@ -51,30 +51,31 @@ func (c *ContactUsController) CreateContactRequest(db *sql.DB) http.HandlerFunc 
 			return
 		}
 
-		// Ответ с подтверждением
+		// Send response with confirmation
 		utils.ResponseJSON(w, map[string]string{"message": "Your request has been received. We will get back to you soon!"})
 	}
 }
+
 func sendEmailToAdmin(contactRequest struct {
-	Name    string `json:"name"`
-	Email   string `json:"email"`
-	Message string `json:"message"`
+	FullName string `json:"full_name"`
+	Email    string `json:"email"`
+	Message  string `json:"message"`
 }) error {
-	// Настройки для отправки email
-	from := "mralibekmurat27@gmail.com"         // Ваша почта
-	password := "bdyi mtae fqub cfcr"           // Пароль приложения, созданный в Google
-	to := []string{"mralibekmurat27@gmail.com"} // Почта, на которую вы хотите получать письма
-	smtpHost := "smtp.gmail.com"                // Для Gmail
-	smtpPort := "587"                           // Порт для Gmail SMTP
+	// Settings for sending email
+	from := "mralibekmurat27@gmail.com"         // Your email
+	password := "bdyi mtae fqub cfcr"           // App password for Gmail
+	to := []string{"mralibekmurat27@gmail.com"} // Email to receive messages
+	smtpHost := "smtp.gmail.com"                // Gmail SMTP
+	smtpPort := "587"                           // Gmail SMTP port
 
 	subject := "New Contact Us Request"
 	body := fmt.Sprintf("You have received a new contact request:\n\nName: %s\nEmail: %s\nMessage: %s",
-		contactRequest.Name, contactRequest.Email, contactRequest.Message)
+		contactRequest.FullName, contactRequest.Email, contactRequest.Message)
 
-	// Собираем сообщение
+	// Create the message
 	message := []byte(fmt.Sprintf("Subject: %s\r\n\r\n%s", subject, body))
 
-	// Отправляем email
+	// Send the email
 	auth := smtp.PlainAuth("", from, password, smtpHost)
 	return smtp.SendMail(smtpHost+":"+smtpPort, auth, from, to, message)
 }

@@ -70,6 +70,7 @@ func main() {
 	contactController := &controllers.ContactUsController{}
 	SubjectOlympiadController := controllers.SubjectOlympiadController{}
 	olympiadController := &controllers.OlympiadController{}
+	eventController := controllers.EventController{}
 
 	router := mux.NewRouter()
 
@@ -215,6 +216,12 @@ func main() {
 	router.HandleFunc("/api/subject-olympiads/{school_id}", SubjectOlympiadController.GetSubjectOlympiads(db)).Methods("GET")
 	router.HandleFunc("/api/subject-olympiads/{id}", SubjectOlympiadController.EditOlympiadsCreated(db)).Methods("PUT")
 	router.HandleFunc("/api/subject-olympiads/{id}", SubjectOlympiadController.DeleteSubjectOlympiad(db)).Methods("DELETE")
+
+	// =======================
+	// Контактная информация
+	// =======================
+	router.HandleFunc("/api/events", eventController.AddEvent(db)).Methods("POST")
+	router.HandleFunc("/api/events", eventController.GetEvents(db)).Methods("GET")
 
 	// =======================
 	// Контактная информация
