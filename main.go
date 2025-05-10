@@ -127,7 +127,7 @@ func main() {
 	router.HandleFunc("/api/schools/total", schoolController.GetTotalSchools(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{id}", schoolController.GetSchoolByID(db)).Methods("GET")
 
-	// =======================updated_at
+	// =======================
 	// Работа с отзывами (Reviews)
 	// =======================
 	router.HandleFunc("/api/reviews", reviewController.CreateReview(db)).Methods("POST")
@@ -139,6 +139,11 @@ func main() {
 	// =======================
 	// Работа с UNT Scores (оценками)
 	// =======================
+	router.HandleFunc("/api/unt/{school_id}", untScoreController.CreateUNT(db)).Methods("POST")
+	router.HandleFunc("/api/unt", untScoreController.GetUNTExams(db)).Methods("GET")
+	router.HandleFunc("/api/unt/school/{school_id}", untScoreController.GetUNTBySchoolID(db)).Methods("GET")
+	router.HandleFunc("/api/unt/{id}", untScoreController.UpdateUNTExam(db)).Methods("PUT")
+	router.HandleFunc("/api/unt/{id}", untScoreController.DeleteUNTExam(db)).Methods("DELETE")
 	router.HandleFunc("/api/unt_scores/total-score-school", untScoreController.GetTotalScoreForSchool(db)).Methods("GET")
 	router.HandleFunc("/api/average-rating/{school_id}", untScoreController.GetAverageRatingBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/school/combined-average-rating", untScoreController.GetCombinedAverageRating(db)).Methods("GET")
@@ -146,6 +151,7 @@ func main() {
 	// =======================
 	// Работа с типами UNT (например, для классификации)
 	// =======================
+
 	router.HandleFunc("/api/unt-types", untTypeController.CreateUNTType(db)).Methods("POST")
 	router.HandleFunc("/api/schools/{school_id}/unt-types", typeController.GetUNTTypesBySchool(db)).Methods("GET")
 
@@ -205,8 +211,9 @@ func main() {
 	router.HandleFunc("/api/olympiads/school/{school_id}", olympiadController.GetOlympiadBySchoolId(db)).Methods("GET")
 
 	router.HandleFunc("/api/subject-olympiads/create/{school_id}", SubjectOlympiadController.CreateSubjectOlympiad(db)).Methods("POST")
+	router.HandleFunc("/api/subject-olympiadsAll/{school_id}", SubjectOlympiadController.GetAllSubjectOlympiads(db)).Methods("GET")
 	router.HandleFunc("/api/subject-olympiads/{school_id}", SubjectOlympiadController.GetSubjectOlympiads(db)).Methods("GET")
-	router.HandleFunc("/api/subject-olympiads/{id}", SubjectOlympiadController.UpdateSubjectOlympiad(db)).Methods("PUT")
+	router.HandleFunc("/api/subject-olympiads/{id}", SubjectOlympiadController.EditOlympiadsCreated(db)).Methods("PUT")
 	router.HandleFunc("/api/subject-olympiads/{id}", SubjectOlympiadController.DeleteSubjectOlympiad(db)).Methods("DELETE")
 
 	// =======================

@@ -15,4 +15,5 @@ type Olympiads struct {
 	Letter        string `json:"letter"`
 	DocumentURL   string `json:"document_url"`
 	Date          string `json:"date"`
+	SchoolName    string `json:"school_name"`
 }

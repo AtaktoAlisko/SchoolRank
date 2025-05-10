@@ -1,9 +1,11 @@
 package controllers
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -141,19 +143,19 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 		level := r.URL.Query().Get("level")
 		schoolIDParam := r.URL.Query().Get("school_id")
 
-		var query string
-		var rows *sql.Rows
 		var queryArgs []interface{}
 
-		// Базовая часть запроса с выборкой всех полей включая grade и letter
+		// Базовая часть запроса с выборкой всех полей включая grade, letter и school_name
 		baseQuery := `SELECT 
 						Olympiads.olympiad_id, Olympiads.student_id, Olympiads.olympiad_place, Olympiads.score, 
 						Olympiads.school_id, Olympiads.level, Olympiads.olympiad_name, Olympiads.document_url,
 						Olympiads.date, 
 						student.first_name, student.last_name, student.patronymic, 
-						student.grade, student.letter
+						student.grade, student.letter,
+						Schools.school_name
 					FROM Olympiads
-					JOIN student ON Olympiads.student_id = student.student_id`
+					JOIN student ON Olympiads.student_id = student.student_id
+					LEFT JOIN Schools ON Olympiads.school_id = Schools.school_id`
 
 		// Создаем условия запроса на основе параметров и роли пользователя
 		whereConditions := []string{}
@@ -186,14 +188,13 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Строим полный запрос с условиями WHERE
+		query := baseQuery
 		if len(whereConditions) > 0 {
 			query = baseQuery + " WHERE " + strings.Join(whereConditions, " AND ")
-		} else {
-			query = baseQuery
 		}
 
 		// Выполняем запрос
-		rows, err = db.Query(query, queryArgs...)
+		rows, err := db.Query(query, queryArgs...)
 		if err != nil {
 			log.Printf("Error fetching Olympiad records: %v", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch Olympiad records"})
@@ -201,18 +202,17 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		// Структура для ответа с полями Grade и Letter
-		type OlympiadWithStudentInfo struct {
+		// Расширенная структура для ответа с полями Grade, Letter и SchoolName
+		type OlympiadWithExtendedInfo struct {
 			models.Olympiads
-			Grade  int    `json:"grade"`
-			Letter string `json:"letter"`
+			SchoolName string `json:"school_name"`
 		}
 
-		var olympiads []OlympiadWithStudentInfo
+		var olympiads []OlympiadWithExtendedInfo
 
 		for rows.Next() {
-			var olympiad OlympiadWithStudentInfo
-			var olympiadName, documentURL, date sql.NullString
+			var olympiad OlympiadWithExtendedInfo
+			var olympiadName, documentURL, date, schoolName sql.NullString
 			var grade sql.NullInt64
 			var letter sql.NullString
 
@@ -231,6 +231,7 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 				&olympiad.Patronymic,
 				&grade,
 				&letter,
+				&schoolName,
 			)
 			if err != nil {
 				log.Printf("Error scanning Olympiad record: %v", err)
@@ -252,6 +253,9 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 			}
 			if letter.Valid {
 				olympiad.Letter = letter.String
+			}
+			if schoolName.Valid {
+				olympiad.SchoolName = schoolName.String
 			}
 
 			olympiads = append(olympiads, olympiad)
@@ -329,198 +333,277 @@ func (oc *OlympiadController) DeleteOlympiad(db *sql.DB) http.HandlerFunc {
 	}
 }
 func (oc *OlympiadController) UpdateOlympiad(db *sql.DB) http.HandlerFunc {
+
 	return func(w http.ResponseWriter, r *http.Request) {
-		// 1. Проверяем токен и получаем userID
+		// Проверка авторизации
 		userID, err := utils.VerifyToken(r)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
 			return
 		}
 
-		// 2. Получаем school_id и role из данных пользователя
-		var userSchoolID sql.NullInt64
+		// Получаем ID олимпиады из тела запроса или параметров URL
+		var olympiadID int
+
+		// Сначала проверяем, есть ли ID в параметрах URL
+		vars := mux.Vars(r)
+		if idStr, ok := vars["olympiad_id"]; ok { // Изменено с "id" на "olympiad_id"
+			var errAtoi error
+			olympiadID, errAtoi = strconv.Atoi(idStr)
+			if errAtoi != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid olympiad ID in URL"})
+				return
+			}
+		} else {
+			// Если ID нет в URL, проверяем в параметрах запроса
+			idStr := r.URL.Query().Get("olympiad_id")
+			if idStr != "" {
+				var errAtoi error
+				olympiadID, errAtoi = strconv.Atoi(idStr)
+				if errAtoi != nil {
+					utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid olympiad ID in query parameter"})
+					return
+				}
+			} else {
+				// Проверяем, есть ли ID в form-data
+				if err := r.ParseForm(); err == nil {
+					if idStr := r.FormValue("olympiad_id"); idStr != "" {
+						var errAtoi error
+						olympiadID, errAtoi = strconv.Atoi(idStr)
+						if errAtoi != nil {
+							utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid olympiad ID in form data"})
+							return
+						}
+					}
+				}
+
+				// Если ID олимпиады всё еще нет, пытаемся получить из JSON-данных
+				if olympiadID == 0 {
+					var olympiadIDFromBody struct {
+						OlympiadID int `json:"olympiad_id"`
+					}
+
+					// Сначала считываем тело запроса в буфер, чтобы не "израсходовать" его
+					bodyBytes, errRead := io.ReadAll(r.Body)
+					if errRead != nil {
+						utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Failed to read request body"})
+						return
+					}
+
+					// Восстанавливаем тело запроса для дальнейшего использования
+					r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+					// Пытаемся извлечь olympiad_id из тела
+					errUnmarshal := json.Unmarshal(bodyBytes, &olympiadIDFromBody)
+					if errUnmarshal != nil || olympiadIDFromBody.OlympiadID == 0 {
+						utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Olympiad ID is required"})
+						return
+					}
+
+					olympiadID = olympiadIDFromBody.OlympiadID
+				}
+			}
+		}
+
+		// Финальная проверка ID олимпиады
+		if olympiadID == 0 {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Olympiad ID is required"})
+			return
+		}
+
+		// Разбор данных из запроса
+		var updateData struct {
+			OlympiadID    int    `json:"olympiad_id,omitempty"`
+			StudentID     int    `json:"student_id"`
+			OlympiadPlace int    `json:"olympiad_place"`
+			Level         string `json:"level"`
+			OlympiadName  string `json:"olympiad_name"`
+			DocumentURL   string `json:"document_url"`
+			Date          string `json:"date,omitempty"`
+			SchoolID      int    `json:"school_id"`
+			Grade         int    `json:"grade"`
+			Letter        string `json:"letter"`
+		}
+
+		// Для запросов с form-data
+		if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") ||
+			r.Header.Get("Content-Type") == "application/x-www-form-urlencoded" {
+
+			if err := r.ParseMultipartForm(10 << 20); err == nil { // Поддержка до 10MB файлов
+				// Получаем значения из формы
+				studentIDStr := r.FormValue("student_id")
+				if studentIDStr != "" {
+					updateData.StudentID, _ = strconv.Atoi(studentIDStr)
+				}
+
+				olympiadPlaceStr := r.FormValue("olympiad_place")
+				if olympiadPlaceStr != "" {
+					updateData.OlympiadPlace, _ = strconv.Atoi(olympiadPlaceStr)
+				}
+
+				updateData.Level = r.FormValue("level")
+				updateData.OlympiadName = r.FormValue("olympiad_name")
+				updateData.DocumentURL = r.FormValue("document_url")
+				updateData.Date = r.FormValue("date")
+
+				schoolIDStr := r.FormValue("school_id")
+				if schoolIDStr != "" {
+					updateData.SchoolID, _ = strconv.Atoi(schoolIDStr)
+				}
+
+				gradeStr := r.FormValue("grade")
+				if gradeStr != "" {
+					updateData.Grade, _ = strconv.Atoi(gradeStr)
+				}
+
+				updateData.Letter = r.FormValue("letter")
+			}
+		} else {
+			// Для запросов с JSON
+			// Используем новый экземпляр Body, так как мы уже могли прочитать его выше
+			errDecode := json.NewDecoder(r.Body).Decode(&updateData)
+			if errDecode != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
+				return
+			}
+		}
+
+		// Если olympiadID еще не установлен и присутствует в теле запроса, используем его
+		if olympiadID == 0 && updateData.OlympiadID > 0 {
+			olympiadID = updateData.OlympiadID
+		}
+
+		// Проверка роли пользователя и школы
 		var userRole string
-		err = db.QueryRow("SELECT school_id, role FROM users WHERE id = ?", userID).Scan(&userSchoolID, &userRole)
+		var userSchoolID sql.NullInt64
+		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch user information"})
 			return
 		}
 
-		// Проверяем, имеет ли пользователь достаточные права (director, schooladmin или superadmin)
-		isAuthorized := userRole == "director" || userRole == "schooladmin" || userRole == "superadmin"
-		if !isAuthorized {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Insufficient permissions"})
-			return
-		}
-
-		// 3. Получаем olympiad_id из URL параметров
-		vars := mux.Vars(r)
-		olympiadID, err := strconv.Atoi(vars["olympiad_id"])
+		// Проверяем существование олимпиады и получаем текущую школу
+		var currentSchoolID int
+		var currentStudentID int
+		err = db.QueryRow("SELECT school_id, student_id FROM Olympiads WHERE olympiad_id = ?", olympiadID).Scan(&currentSchoolID, &currentStudentID)
 		if err != nil {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid olympiad ID"})
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Olympiad not found"})
 			return
 		}
 
-		// 4. Декодируем тело запроса
-		var olympiad struct {
-			models.Olympiads
-			Grade  int    `json:"grade"`
-			Letter string `json:"letter"`
-		}
-
-		if err := json.NewDecoder(r.Body).Decode(&olympiad); err != nil {
-			log.Printf("Error decoding request body: %v", err)
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
+		// Проверка доступа: schooladmin может редактировать только своей школы
+		if userRole == "schooladmin" && (!userSchoolID.Valid || int(userSchoolID.Int64) != currentSchoolID) {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only edit olympiads for your school"})
 			return
 		}
 
-		// Validate date format if provided
-		if olympiad.Date != "" {
-			_, err := time.Parse("2006-01-02", olympiad.Date)
+		// Если меняется ученик, проверяем принадлежность к школе
+		if updateData.StudentID != 0 && updateData.StudentID != currentStudentID {
+			var studentSchoolID int
+			err = db.QueryRow("SELECT school_id FROM student WHERE student_id = ?", updateData.StudentID).Scan(&studentSchoolID)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Student not found"})
+				return
+			}
+
+			// Школьный админ может назначать только учеников своей школы
+			if userRole == "schooladmin" && (!userSchoolID.Valid || int(userSchoolID.Int64) != studentSchoolID) {
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Student does not belong to your school"})
+				return
+			}
+		}
+
+		// Проверка уровня олимпиады
+		if updateData.Level != "" && updateData.Level != "city" && updateData.Level != "region" && updateData.Level != "republican" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid level"})
+			return
+		}
+
+		// Вычисление очков на основе места
+		var score int
+		switch updateData.OlympiadPlace {
+		case 1:
+			score = 50
+		case 2:
+			score = 30
+		case 3:
+			score = 20
+		default:
+			score = 0
+		}
+
+		// Проверка формата даты, если она указана
+		if updateData.Date != "" {
+			_, err := time.Parse("2006-01-02", updateData.Date)
 			if err != nil {
 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid date format. Use YYYY-MM-DD"})
 				return
 			}
 		}
 
-		// 5. Проверяем, существует ли олимпиада с таким ID
-		var existingOlympiadSchoolID int
-		var studentID int
-		err = db.QueryRow("SELECT school_id, student_id FROM Olympiads WHERE olympiad_id = ?", olympiadID).Scan(&existingOlympiadSchoolID, &studentID)
+		// Проверяем, какие поля нужно обновить
+		var queryParts []string
+		var queryParams []interface{}
+
+		// Добавляем только те поля, которые были указаны в запросе
+		if updateData.StudentID != 0 {
+			queryParts = append(queryParts, "student_id = ?")
+			queryParams = append(queryParams, updateData.StudentID)
+		}
+
+		if updateData.OlympiadPlace != 0 {
+			queryParts = append(queryParts, "olympiad_place = ?")
+			queryParams = append(queryParams, updateData.OlympiadPlace)
+
+			queryParts = append(queryParts, "score = ?")
+			queryParams = append(queryParams, score)
+		}
+
+		if updateData.Level != "" {
+			queryParts = append(queryParts, "level = ?")
+			queryParams = append(queryParams, updateData.Level)
+		}
+
+		if updateData.OlympiadName != "" {
+			queryParts = append(queryParts, "olympiad_name = ?")
+			queryParams = append(queryParams, updateData.OlympiadName)
+		}
+
+		if updateData.DocumentURL != "" {
+			queryParts = append(queryParts, "document_url = ?")
+			queryParams = append(queryParams, updateData.DocumentURL)
+		}
+
+		if updateData.SchoolID != 0 {
+			queryParts = append(queryParts, "school_id = ?")
+			queryParams = append(queryParams, updateData.SchoolID)
+		}
+
+		if updateData.Date != "" {
+			queryParts = append(queryParts, "date = ?")
+			queryParams = append(queryParams, updateData.Date)
+		}
+
+		// Если нет полей для обновления, возвращаем ошибку
+		if len(queryParts) == 0 {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "No fields to update"})
+			return
+		}
+
+		// Формируем и выполняем запрос
+		query := "UPDATE Olympiads SET " + strings.Join(queryParts, ", ") + " WHERE olympiad_id = ?"
+		queryParams = append(queryParams, olympiadID)
+
+		_, err = db.Exec(query, queryParams...)
 		if err != nil {
-			if err == sql.ErrNoRows {
-				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Olympiad record not found"})
-			} else {
-				log.Printf("Error checking olympiad: %v", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking olympiad"})
-			}
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update olympiad: " + err.Error()})
 			return
 		}
 
-		// 6. Проверяем права доступа пользователя к этой записи
-		if userRole != "superadmin" {
-			if !userSchoolID.Valid || existingOlympiadSchoolID != int(userSchoolID.Int64) {
-				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You don't have permission to update this olympiad record"})
-				return
-			}
-		}
-
-		// 7. Проверяем student_id, если указан и отличается
-		if olympiad.StudentID != 0 && olympiad.StudentID != studentID {
-			// Проверяем существует ли студент
-			var studentSchoolID int
-			studentExists := false
-			err = db.QueryRow("SELECT school_id FROM student WHERE student_id = ?", olympiad.StudentID).Scan(&studentSchoolID)
-			if err == nil {
-				studentExists = true
-			}
-
-			// Если студент не существует, создаем его
-			if !studentExists {
-				if olympiad.Grade <= 0 || olympiad.Letter == "" {
-					utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Grade and letter are required for new student"})
-					return
-				}
-
-				// Используем school_id текущего пользователя для нового студента
-				if !userSchoolID.Valid {
-					utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School ID is required for new student"})
-					return
-				}
-
-				studentSchoolID = int(userSchoolID.Int64)
-
-				// Создаем нового студента
-				_, err = db.Exec("INSERT INTO student (student_id, school_id, grade, letter) VALUES (?, ?, ?, ?)",
-					olympiad.StudentID, studentSchoolID, olympiad.Grade, olympiad.Letter)
-				if err != nil {
-					utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create student"})
-					return
-				}
-			} else if userRole != "superadmin" && (!userSchoolID.Valid || studentSchoolID != int(userSchoolID.Int64)) {
-				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Student does not belong to your school"})
-				return
-			}
-		} else if olympiad.StudentID == 0 {
-			olympiad.StudentID = studentID
-		}
-
-		// Обновляем информацию о студенте, если предоставлены grade и letter
-		if olympiad.Grade > 0 || olympiad.Letter != "" {
-			updateQuery := "UPDATE student SET"
-			params := []interface{}{}
-
-			if olympiad.Grade > 0 {
-				updateQuery += " grade = ?"
-				params = append(params, olympiad.Grade)
-			}
-
-			if olympiad.Letter != "" {
-				if len(params) > 0 {
-					updateQuery += ","
-				}
-				updateQuery += " letter = ?"
-				params = append(params, olympiad.Letter)
-			}
-
-			updateQuery += " WHERE student_id = ?"
-			params = append(params, olympiad.StudentID)
-
-			_, err = db.Exec(updateQuery, params...)
-			if err != nil {
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update student info"})
-				return
-			}
-		}
-
-		// 8. Присваиваем баллы
-		switch olympiad.OlympiadPlace {
-		case 1:
-			olympiad.Score = 50
-		case 2:
-			olympiad.Score = 30
-		case 3:
-			olympiad.Score = 20
-		default:
-			olympiad.Score = 0
-		}
-
-		// 9. Проверяем уровень олимпиады
-		var level string
-		switch olympiad.Level {
-		case "city", "region", "republican":
-			level = olympiad.Level
-		default:
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid level"})
-			return
-		}
-
-		// 10. Получаем school_id, который нужно сохранить
-		var schoolIDToSave int
-		if userRole == "superadmin" && olympiad.SchoolID != 0 {
-			schoolIDToSave = olympiad.SchoolID
-		} else {
-			err = db.QueryRow("SELECT school_id FROM student WHERE student_id = ?", olympiad.StudentID).Scan(&schoolIDToSave)
-			if err != nil {
-				log.Printf("Error getting student school: %v", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get student school"})
-				return
-			}
-		}
-
-		// 11. Обновляем запись с учетом поля date
-		query := `UPDATE Olympiads 
-		  SET student_id = ?, olympiad_place = ?, score = ?, level = ?, school_id = ?, olympiad_name = ?, document_url = ?, date = ?
-		  WHERE olympiad_id = ?`
-		_, err = db.Exec(query, olympiad.StudentID, olympiad.OlympiadPlace, olympiad.Score, level, schoolIDToSave,
-			olympiad.OlympiadName, olympiad.DocumentURL, olympiad.Date, olympiadID)
-		if err != nil {
-			log.Printf("Error updating Olympiad: %v", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update Olympiad record"})
-			return
-		}
-
-		utils.ResponseJSON(w, "Olympiad record updated successfully")
+		utils.ResponseJSON(w, map[string]interface{}{
+			"message":     "Olympiad updated successfully",
+			"olympiad_id": olympiadID,
+		})
 	}
 }
 func (oc *OlympiadController) GetOlympiadBySchoolId(db *sql.DB) http.HandlerFunc {
