@@ -229,6 +229,10 @@ func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		log.Println("DEBUG: Начало обработки запроса на обновление школы")
+		log.Println("DEBUG: Метод запроса:", r.Method)
+		log.Println("DEBUG: Content-Type:", r.Header.Get("Content-Type"))
+
 		// Step 2: Get user role
 		var requesterRole string
 		var requesterSchoolID sql.NullInt64
@@ -246,6 +250,7 @@ func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
 			return
 		}
+		log.Println("DEBUG: Обновление школы ID:", schoolID)
 
 		// Access control: ensure the user has permission to update this school
 		if requesterRole != "superadmin" && (requesterRole != "schooladmin" || int(requesterSchoolID.Int64) != schoolID) {
@@ -291,6 +296,8 @@ func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		log.Println("DEBUG: Существующее фото URL:", existingSchool.PhotoURL)
+
 		// Unmarshal existing specializations
 		if specializationsJSON != "" {
 			err = json.Unmarshal([]byte(specializationsJSON), &existingSchool.Specializations)
@@ -302,8 +309,18 @@ func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 		// Step 5: Parse the form data for other fields
 		err = r.ParseMultipartForm(10 << 20) // 10MB
 		if err != nil {
+			log.Println("DEBUG: Ошибка при разборе формы:", err)
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Failed to parse form"})
 			return
+		}
+
+		// Отладка: вывести все ключи формы
+		log.Println("DEBUG: Ключи формы:")
+		for key := range r.MultipartForm.Value {
+			log.Printf("DEBUG: Ключ: %s, Значение: %s\n", key, r.FormValue(key))
+		}
+		for key := range r.MultipartForm.File {
+			log.Printf("DEBUG: Файловый ключ: %s\n", key)
 		}
 
 		// Create a new school object based on the existing school
@@ -328,6 +345,11 @@ func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 		if email := r.FormValue("school_email"); email != "" {
 			updatedSchool.SchoolEmail = email
 		}
+		// Исправляем проблему с опечаткой в форме
+		if phone := r.FormValue("schol_phone"); phone != "" {
+			log.Println("DEBUG: Обнаружено поле schol_phone (опечатка), значение:", phone)
+			updatedSchool.SchoolPhone = phone
+		}
 		if phone := r.FormValue("school_phone"); phone != "" {
 			updatedSchool.SchoolPhone = phone
 		}
@@ -344,25 +366,98 @@ func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 			}
 		}
 
-		// Step 8: Handle photo upload (if present)
-		file, _, err := r.FormFile("photo")
-		if err == nil {
-			defer file.Close()
-			log.Println("Photo file received")
+		// Step 8: Handle photo upload (если загружена как photo или photo_url)
+		photoUpdated := false
 
-			uniqueFileName := fmt.Sprintf("school-%d-%d.jpg", schoolID, time.Now().Unix())
-			photoURL, err := utils.UploadFileToS3(file, uniqueFileName, "schoolphoto")
-			if err != nil {
-				log.Println("S3 upload failed:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Photo upload failed"})
-				return
+		// Проверяем наличие файла photo_url в форме (исправляем имя поля)
+		if fileHeaders := r.MultipartForm.File["photo_url"]; len(fileHeaders) > 0 {
+			fileHeader := fileHeaders[0]
+
+			log.Printf("DEBUG: Найден файл в поле 'photo_url': %s, размер: %d байт",
+				fileHeader.Filename, fileHeader.Size)
+
+			if fileHeader.Size > 0 {
+				file, err := fileHeader.Open()
+				if err != nil {
+					log.Println("DEBUG: Ошибка при открытии файла:", err)
+					utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to open uploaded file"})
+					return
+				}
+				defer file.Close()
+
+				uniqueFileName := fmt.Sprintf("school-%d-%d.jpg", schoolID, time.Now().Unix())
+				log.Println("DEBUG: Загрузка файла в S3 с именем:", uniqueFileName)
+
+				photoURL, err := utils.UploadFileToS3(file, uniqueFileName, "schoolphoto")
+				if err != nil {
+					log.Println("DEBUG: S3 upload failed:", err)
+					utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Photo upload failed: " + err.Error()})
+					return
+				}
+
+				updatedSchool.PhotoURL = sql.NullString{String: photoURL, Valid: true}
+				photoUpdated = true
+				log.Println("DEBUG: Фото успешно загружено, URL:", photoURL)
+			} else {
+				log.Println("DEBUG: Файл имеет нулевой размер, игнорируем")
 			}
-
-			updatedSchool.PhotoURL = sql.NullString{String: photoURL, Valid: true}
-			log.Println("Photo uploaded successfully, URL:", photoURL)
 		} else {
-			log.Println("No photo uploaded, retaining existing PhotoURL")
-			// Retain existing PhotoURL (could be NULL or a valid URL)
+			// Проверяем также поле photo для обратной совместимости
+			if fileHeaders := r.MultipartForm.File["photo"]; len(fileHeaders) > 0 {
+				fileHeader := fileHeaders[0]
+
+				log.Printf("DEBUG: Найден файл в поле 'photo': %s, размер: %d байт",
+					fileHeader.Filename, fileHeader.Size)
+
+				if fileHeader.Size > 0 {
+					file, err := fileHeader.Open()
+					if err != nil {
+						log.Println("DEBUG: Ошибка при открытии файла:", err)
+						utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to open uploaded file"})
+						return
+					}
+					defer file.Close()
+
+					uniqueFileName := fmt.Sprintf("school-%d-%d.jpg", schoolID, time.Now().Unix())
+					log.Println("DEBUG: Загрузка файла в S3 с именем:", uniqueFileName)
+
+					photoURL, err := utils.UploadFileToS3(file, uniqueFileName, "schoolphoto")
+					if err != nil {
+						log.Println("DEBUG: S3 upload failed:", err)
+						utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Photo upload failed: " + err.Error()})
+						return
+					}
+
+					updatedSchool.PhotoURL = sql.NullString{String: photoURL, Valid: true}
+					photoUpdated = true
+					log.Println("DEBUG: Фото успешно загружено, URL:", photoURL)
+				} else {
+					log.Println("DEBUG: Файл имеет нулевой размер, игнорируем")
+				}
+			} else {
+				log.Println("DEBUG: Поля 'photo' и 'photo_url' не найдены в форме")
+			}
+		}
+
+		// Проверяем явный запрос на удаление фото
+		if removePhoto := r.FormValue("remove_photo"); removePhoto == "true" {
+			updatedSchool.PhotoURL = sql.NullString{Valid: false}
+			photoUpdated = true
+			log.Println("DEBUG: Фото удалено по запросу")
+		}
+
+		// Если фото не было обновлено, сохраняем существующее
+		if !photoUpdated {
+			log.Println("DEBUG: Сохраняем существующее фото URL:", existingSchool.PhotoURL)
+		}
+
+		// Принудительная установка URL фото по умолчанию, если запрашивается
+		// или если нет фото и включен флаг use_default_if_empty
+		if (!updatedSchool.PhotoURL.Valid && r.FormValue("use_default_if_empty") == "true") ||
+			r.FormValue("force_default_photo") == "true" {
+			defaultURL := "https://schoolrank-schoolphotos.s3.eu-central-1.amazonaws.com/default-school.jpg"
+			updatedSchool.PhotoURL = sql.NullString{String: defaultURL, Valid: true}
+			log.Println("DEBUG: Установлено фото по умолчанию:", defaultURL)
 		}
 
 		// Step 9: Convert specializations to JSON
@@ -372,6 +467,10 @@ func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error marshaling specializations"})
 			return
 		}
+
+		// Отладка: выводим, что именно будем обновлять
+		log.Printf("DEBUG: Обновляемые данные: PhotoURL=%v, Valid=%v",
+			updatedSchool.PhotoURL.String, updatedSchool.PhotoURL.Valid)
 
 		// Step 10: Update school data in the database
 		query := `
@@ -389,7 +488,7 @@ func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
                 updated_at = NOW()
             WHERE school_id = ?
         `
-		_, err = db.Exec(query,
+		result, err := db.Exec(query,
 			updatedSchool.SchoolName,
 			updatedSchool.SchoolAddress,
 			updatedSchool.City,
@@ -402,9 +501,22 @@ func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 			updatedSchool.SchoolID,
 		)
 		if err != nil {
-			log.Println("Failed to update school:", err)
+			log.Println("DEBUG: Ошибка обновления в БД:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update school"})
 			return
+		}
+
+		rowsAffected, _ := result.RowsAffected()
+		log.Println("DEBUG: Затронуто строк в БД:", rowsAffected)
+
+		// Проверка после обновления
+		var checkPhotoURL sql.NullString
+		err = db.QueryRow("SELECT photo_url FROM Schools WHERE school_id = ?", schoolID).Scan(&checkPhotoURL)
+		if err != nil {
+			log.Println("DEBUG: Ошибка при проверке обновления:", err)
+		} else {
+			log.Printf("DEBUG: После обновления в БД: PhotoURL=%v, Valid=%v",
+				checkPhotoURL.String, checkPhotoURL.Valid)
 		}
 
 		// Step 11: Return the updated school data as a response
@@ -435,6 +547,8 @@ func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 		if updatedSchool.PhotoURL.Valid {
 			responseSchool.PhotoURL = &updatedSchool.PhotoURL.String
 		}
+
+		log.Println("DEBUG: Обработка запроса завершена успешно")
 
 		utils.ResponseJSON(w, map[string]interface{}{
 			"message":    "School updated successfully",
