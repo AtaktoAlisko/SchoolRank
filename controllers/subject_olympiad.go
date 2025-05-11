@@ -305,25 +305,31 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 			return
 		}
 
+		// Log all form field names for debugging
+		log.Printf("Received form fields:")
+		for key, values := range r.Form {
+			log.Printf("Field: %s, value: %v", key, values)
+		}
+
 		// Step 7: Fetch current olympiad data
 		var currentOlympiad models.SubjectOlympiad
 		err = db.QueryRow(`
 			SELECT 
-				subject_name, date, end_date, description, photo_url, level, limit_participants
+				subject_name, date, end_date, description, photo_url, school_id, level, limit_participants
 			FROM 
 				subject_olympiads
 			WHERE 
 				subject_olympiad_id = ?
 		`, olympiadID).Scan(
 			&currentOlympiad.SubjectName,
-			&currentOlympiad.StartDate,
+			&currentOlympiad.StartDate, // Mapping 'date' column to StartDate field
 			&currentOlympiad.EndDate,
 			&currentOlympiad.Description,
 			&currentOlympiad.PhotoURL,
+			&currentOlympiad.SchoolID,
 			&currentOlympiad.Level,
 			&currentOlympiad.Limit,
 		)
-
 		if err != nil {
 			log.Printf("Error fetching current olympiad data for olympiadID %d: %v", olympiadID, err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch current olympiad data"})
@@ -331,14 +337,22 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 		}
 
 		// Step 8: Get form data (use current data as defaults)
-		subjectName := r.FormValue("olympiad_name")
+		// Try both possible field names for subject name
+		subjectName := r.FormValue("subject_name")
 		if subjectName == "" {
-			subjectName = currentOlympiad.SubjectName
+			subjectName = r.FormValue("olympiad_name")
+			if subjectName == "" {
+				subjectName = currentOlympiad.SubjectName
+			}
 		}
 
-		startDate := r.FormValue("date")
+		// Try both possible field names for start date
+		startDate := r.FormValue("start_date")
 		if startDate == "" {
-			startDate = currentOlympiad.StartDate
+			startDate = r.FormValue("date")
+			if startDate == "" {
+				startDate = currentOlympiad.StartDate
+			}
 		}
 
 		endDate := r.FormValue("end_date")
@@ -357,9 +371,18 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 		}
 
 		var limit int
-		limitStr := r.FormValue("limit")
+		limitStr := r.FormValue("limit_participants")
 		if limitStr == "" {
-			limit = currentOlympiad.Limit
+			limitStr = r.FormValue("limit") // Try alternative field name
+			if limitStr == "" {
+				limit = currentOlympiad.Limit
+			} else {
+				limit, err = strconv.Atoi(limitStr)
+				if err != nil || limit <= 0 {
+					utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid participant limit format or value"})
+					return
+				}
+			}
 		} else {
 			limit, err = strconv.Atoi(limitStr)
 			if err != nil || limit <= 0 {
@@ -367,6 +390,46 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 				return
 			}
 		}
+
+		// Handle school_id (allow superadmin to change, restrict schooladmin)
+		var schoolID int = currentOlympiad.SchoolID
+		schoolIDStr := r.FormValue("school_id")
+		if schoolIDStr != "" {
+			newSchoolID, err := strconv.Atoi(schoolIDStr)
+			if err != nil || newSchoolID <= 0 {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+				return
+			}
+
+			// Validate school_id exists
+			var count int
+			err = db.QueryRow("SELECT COUNT(*) FROM Schools WHERE school_id = ?", newSchoolID).Scan(&count)
+			if err != nil || count == 0 {
+				log.Printf("Invalid school_id %d: %v", newSchoolID, err)
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School does not exist"})
+				return
+			}
+
+			if userRole == "schooladmin" {
+				// Ensure schooladmin can only set school_id to their own school
+				err = db.QueryRow(`
+					SELECT COUNT(*) 
+					FROM Schools 
+					WHERE school_id = ? AND user_id = ?
+				`, newSchoolID, userID).Scan(&count)
+				if err != nil || count == 0 {
+					log.Printf("Schooladmin %d attempted to set invalid school_id %d", userID, newSchoolID)
+					utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only set your own school"})
+					return
+				}
+			}
+
+			schoolID = newSchoolID
+		}
+
+		// Log updated form data for debugging
+		log.Printf("Processed form data - olympiadID: %d, subject_name: %s, start_date: %s, end_date: %s, school_id: %d, level: %s, limit: %d",
+			olympiadID, subjectName, startDate, endDate, schoolID, level, limit)
 
 		// Step 9: Handle photo upload
 		var photoURL string = currentOlympiad.PhotoURL
@@ -382,13 +445,13 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 			}
 		}
 
-		// Step 10: Update olympiad (including creator_id)
+		// Step 10: Update olympiad (including school_id and creator_id)
 		_, err = db.Exec(`
 			UPDATE subject_olympiads
 			SET subject_name = ?, date = ?, end_date = ?, description = ?, 
-				photo_url = ?, level = ?, limit_participants = ?, creator_id = ?
+				photo_url = ?, school_id = ?, level = ?, limit_participants = ?, creator_id = ?
 			WHERE subject_olympiad_id = ?
-		`, subjectName, startDate, endDate, description, photoURL, level, limit, userID, olympiadID)
+		`, subjectName, startDate, endDate, description, photoURL, schoolID, level, limit, userID, olympiadID)
 
 		if err != nil {
 			log.Printf("Error updating olympiad for olympiadID %d: %v", olympiadID, err)
@@ -424,7 +487,7 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 		`, olympiadID).Scan(
 			&updatedOlympiad.ID,
 			&updatedOlympiad.SubjectName,
-			&updatedOlympiad.StartDate,
+			&updatedOlympiad.StartDate, // Mapping 'date' column to StartDate field
 			&updatedOlympiad.EndDate,
 			&updatedOlympiad.Description,
 			&updatedOlympiad.PhotoURL,
