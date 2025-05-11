@@ -206,7 +206,6 @@ func main() {
 	// Итоговый рейтинг по олимппиадам
 	// =======================
 
-
 	router.HandleFunc("/api/subject-olympiads/create/{school_id}", SubjectOlympiadController.CreateSubjectOlympiad(db)).Methods("POST")
 	router.HandleFunc("/api/subject-olympiadsAll", SubjectOlympiadController.GetAllSubjectOlympiads(db)).Methods("GET")
 	router.HandleFunc("/api/subject-olympiads/{school_id}", SubjectOlympiadController.GetSubjectOlympiads(db)).Methods("GET")
