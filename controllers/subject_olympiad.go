@@ -245,29 +245,29 @@ func (c *SubjectOlympiadController) GetSubjectOlympiads(db *sql.DB) http.Handler
 }
 func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Шаг 1: Проверка токена
+		// Step 1: Verify token
 		userID, err := utils.VerifyToken(r)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token."})
 			return
 		}
 
-		// Шаг 2: Получение роли пользователя
+		// Step 2: Fetch user role
 		var userRole string
 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
 		if err != nil {
-			log.Println("Error fetching user role:", err)
+			log.Printf("Error fetching user role for userID %d: %v", userID, err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
 			return
 		}
 
-		// Шаг 3: Проверка прав доступа
+		// Step 3: Check permissions
 		if userRole != "superadmin" && userRole != "schooladmin" {
 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to edit olympiads"})
 			return
 		}
 
-		// Шаг 4: Получение olympiad_id из URL
+		// Step 4: Get olympiad_id from URL
 		vars := mux.Vars(r)
 		olympiadID, err := strconv.Atoi(vars["id"])
 		if err != nil || olympiadID <= 0 {
@@ -275,9 +275,8 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 			return
 		}
 
-		// Шаг 5: Проверка, имеет ли пользователь право редактировать эту олимпиаду
+		// Step 5: Verify olympiad ownership for schooladmin
 		if userRole == "schooladmin" {
-			// Проверяем, является ли пользователь администратором школы, к которой относится олимпиада
 			var count int
 			err = db.QueryRow(`
 				SELECT COUNT(*) 
@@ -287,7 +286,7 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 			`, olympiadID, userID).Scan(&count)
 
 			if err != nil {
-				log.Println("Error verifying olympiad ownership:", err)
+				log.Printf("Error verifying olympiad ownership for olympiadID %d, userID %d: %v", olympiadID, userID, err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to verify olympiad ownership"})
 				return
 			}
@@ -298,15 +297,15 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 			}
 		}
 
-		// Шаг 6: Парсинг запроса
+		// Step 6: Parse form data
 		err = r.ParseMultipartForm(10 << 20)
 		if err != nil {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Error parsing form data"})
 			log.Printf("Error parsing multipart form: %v", err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Error parsing form data"})
 			return
 		}
 
-		// Шаг 7: Получение текущих данных олимпиады
+		// Step 7: Fetch current olympiad data
 		var currentOlympiad models.SubjectOlympiad
 		err = db.QueryRow(`
 			SELECT 
@@ -326,12 +325,12 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 		)
 
 		if err != nil {
-			log.Println("Error fetching current olympiad data:", err)
+			log.Printf("Error fetching current olympiad data for olympiadID %d: %v", olympiadID, err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch current olympiad data"})
 			return
 		}
 
-		// Шаг 8: Получение данных из формы (используем текущие данные как значения по умолчанию)
+		// Step 8: Get form data (use current data as defaults)
 		subjectName := r.FormValue("olympiad_name")
 		if subjectName == "" {
 			subjectName = currentOlympiad.SubjectName
@@ -356,6 +355,7 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 		if level == "" {
 			level = currentOlympiad.Level
 		}
+
 		var limit int
 		limitStr := r.FormValue("limit")
 		if limitStr == "" {
@@ -368,39 +368,36 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 			}
 		}
 
-		// Шаг 9: Проверяем, загружено ли новое фото
+		// Step 9: Handle photo upload
 		var photoURL string = currentOlympiad.PhotoURL
 		file, _, err := r.FormFile("photo_url")
-
-		// Если новое фото загружено
 		if err == nil {
 			defer file.Close()
 			uniqueFileName := fmt.Sprintf("olympiad-%d-%d.jpg", olympiadID, time.Now().Unix())
 			photoURL, err = utils.UploadFileToS3(file, uniqueFileName, "schoolphoto")
 			if err != nil {
+				log.Printf("Error uploading photo for olympiadID %d: %v", olympiadID, err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to upload photo"})
-				log.Println("Error uploading file:", err)
 				return
 			}
 		}
 
-		// Шаг 10: Обновляем данные олимпиады
+		// Step 10: Update olympiad (including creator_id)
 		_, err = db.Exec(`
 			UPDATE subject_olympiads
 			SET subject_name = ?, date = ?, end_date = ?, description = ?, 
-				photo_url = ?, level = ?, limit_participants = ?
+				photo_url = ?, level = ?, limit_participants = ?, creator_id = ?
 			WHERE subject_olympiad_id = ?
-		`, subjectName, startDate, endDate, description, photoURL, level, limit, olympiadID)
+		`, subjectName, startDate, endDate, description, photoURL, level, limit, userID, olympiadID)
 
 		if err != nil {
-			log.Println("Error updating olympiad:", err)
+			log.Printf("Error updating olympiad for olympiadID %d: %v", olympiadID, err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update olympiad"})
 			return
 		}
 
-		// Шаг 11: Получаем обновленные данные олимпиады для ответа
+		// Step 11: Fetch updated olympiad data
 		var updatedOlympiad models.SubjectOlympiad
-
 		err = db.QueryRow(`
 			SELECT 
 				so.subject_olympiad_id, 
@@ -412,16 +409,16 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 				so.school_id, 
 				so.level, 
 				so.limit_participants,
-				u.id as creator_id,
-				u.first_name as creator_first_name,
-				u.last_name as creator_last_name,
-				s.school_name
+				COALESCE(so.creator_id, 0) as creator_id,
+				COALESCE(u.first_name, '') as creator_first_name,
+				COALESCE(u.last_name, '') as creator_last_name,
+				COALESCE(s.school_name, '') as school_name
 			FROM 
 				subject_olympiads so
 			LEFT JOIN 
 				Schools s ON so.school_id = s.school_id
 			LEFT JOIN 
-				users u ON s.user_id = u.id
+				users u ON so.creator_id = u.id
 			WHERE 
 				so.subject_olympiad_id = ?
 		`, olympiadID).Scan(
@@ -441,7 +438,7 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 		)
 
 		if err != nil {
-			log.Println("Error fetching updated olympiad:", err)
+			log.Printf("Error fetching updated olympiad for olympiadID %d: %v", olympiadID, err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Olympiad updated but failed to fetch updated data"})
 			return
 		}

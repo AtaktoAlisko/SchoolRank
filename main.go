@@ -205,11 +205,7 @@ func main() {
 	// =======================
 	// Итоговый рейтинг по олимппиадам
 	// =======================
-	router.HandleFunc("/api/city-olympiad-rating/{school_id}", olympiadController.CalculateCityOlympiadRating(db)).Methods("GET")
-	router.HandleFunc("/api/regional-olympiad-rating/{school_id}", olympiadController.CalculateRegionalOlympiadRating(db)).Methods("GET")
-	router.HandleFunc("/api/republican-olympiad-rating/{school_id}", olympiadController.CalculateRepublicanOlympiadRating(db)).Methods("GET")
-	router.HandleFunc("/api/total-olympiad-rating/{school_id}", olympiadController.CalculateTotalOlympiadRating(db)).Methods("GET")
-	router.HandleFunc("/api/olympiads/school/{school_id}", olympiadController.GetOlympiadBySchoolId(db)).Methods("GET")
+
 
 	router.HandleFunc("/api/subject-olympiads/create/{school_id}", SubjectOlympiadController.CreateSubjectOlympiad(db)).Methods("POST")
 	router.HandleFunc("/api/subject-olympiadsAll", SubjectOlympiadController.GetAllSubjectOlympiads(db)).Methods("GET")
