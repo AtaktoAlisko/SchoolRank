@@ -199,6 +199,7 @@ func main() {
 	// =======================
 	router.HandleFunc("/api/olympiads", olympiadController.CreateOlympiad(db)).Methods("POST")
 	router.HandleFunc("/api/olympiads", olympiadController.GetOlympiad(db)).Methods("GET")
+	router.HandleFunc("/api/olympiads/{school_id}", olympiadController.GetOlympiadById(db)).Methods("GET")
 	router.HandleFunc("/api/olympiads/{olympiad_id}", olympiadController.DeleteOlympiad(db)).Methods("DELETE")
 	router.HandleFunc("/api/olympiads/{olympiad_id}", olympiadController.UpdateOlympiad(db)).Methods("PUT")
 
