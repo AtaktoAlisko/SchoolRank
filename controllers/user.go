@@ -1112,115 +1112,186 @@ func (c Controller) DeleteAccount(db *sql.DB) http.HandlerFunc {
 }
 func (c *Controller) EditProfile(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var user models.User
+		var userUpdate models.User
 		var error models.Error
 
-		// Декодируем запрос
-		err := json.NewDecoder(r.Body).Decode(&user)
+		// Get user ID from token using VerifyToken
+		currentUserID, err := utils.VerifyToken(r)
+		if err != nil {
+			error.Message = "Unauthorized access."
+			utils.RespondWithError(w, http.StatusUnauthorized, error)
+			return
+		}
+
+		// Parse target user ID from URL if provided (for superadmins)
+		targetUserID := currentUserID
+		targetUserIDParam := r.URL.Query().Get("id")
+		if targetUserIDParam != "" {
+			parsedID, err := strconv.Atoi(targetUserIDParam)
+			if err != nil {
+				error.Message = "Invalid user ID format."
+				utils.RespondWithError(w, http.StatusBadRequest, error)
+				return
+			}
+			targetUserID = parsedID
+		}
+
+		// Decode request body
+		err = json.NewDecoder(r.Body).Decode(&userUpdate)
 		if err != nil {
 			error.Message = "Invalid request body."
 			utils.RespondWithError(w, http.StatusBadRequest, error)
 			return
 		}
 
-		// Извлекаем токен авторизации
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			error.Message = "Authorization header is required"
-			utils.RespondWithError(w, http.StatusUnauthorized, error)
-			return
-		}
+		// Log update attempt
+		log.Printf("Profile update attempt for userID: %d by userID: %d", targetUserID, currentUserID)
 
-		// Ожидаем, что токен будет в формате "Bearer <token>"
-		tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
-
-		// Парсим токен
-		token, err := utils.ParseToken(tokenString)
+		// Check if target user exists and get current role
+		var role string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", targetUserID).Scan(&role)
 		if err != nil {
-			error.Message = "Invalid token"
-			utils.RespondWithError(w, http.StatusUnauthorized, error)
+			if err == sql.ErrNoRows {
+				error.Message = "User not found."
+				utils.RespondWithError(w, http.StatusNotFound, error)
+			} else {
+				log.Printf("Database error: %v", err)
+				error.Message = "Server error."
+				utils.RespondWithError(w, http.StatusInternalServerError, error)
+			}
 			return
 		}
 
-		// Проверяем, что токен валидный и извлекаем данные
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok || !token.Valid {
-			error.Message = "Invalid token"
-			utils.RespondWithError(w, http.StatusUnauthorized, error)
+		// Start transaction
+		tx, err := db.Begin()
+		if err != nil {
+			log.Printf("Transaction error: %v", err)
+			error.Message = "Server error."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
+			return
+		}
+		defer tx.Rollback() // Will be ignored if transaction is committed
+
+		// Initialize query parts
+		setClause := []string{}
+		args := []interface{}{}
+
+		// Process first_name update
+		if userUpdate.FirstName != "" {
+			setClause = append(setClause, "first_name = ?")
+			args = append(args, userUpdate.FirstName)
+		}
+
+		// Process last_name update
+		if userUpdate.LastName != "" {
+			setClause = append(setClause, "last_name = ?")
+			args = append(args, userUpdate.LastName)
+		}
+
+		// Process date of birth update
+		if userUpdate.DateOfBirth != "" {
+			// Check date format
+			birthDate, err := time.Parse("2006-01-02", userUpdate.DateOfBirth)
+			if err != nil {
+				error.Message = "Invalid date format. Please use YYYY-MM-DD format."
+				utils.RespondWithError(w, http.StatusBadRequest, error)
+				return
+			}
+
+			// Calculate age
+			now := time.Now()
+			age := now.Year() - birthDate.Year()
+			if now.YearDay() < birthDate.YearDay() {
+				age--
+			}
+
+			setClause = append(setClause, "date_of_birth = ?, age = ?")
+			args = append(args, userUpdate.DateOfBirth, age)
+		}
+
+		// If no fields to update
+		if len(setClause) == 0 {
+			error.Message = "No valid fields to update."
+			utils.RespondWithError(w, http.StatusBadRequest, error)
 			return
 		}
 
-		// Извлекаем userID и роль из токена
-		userID := int(claims["user_id"].(float64))
-		role := claims["role"].(string)
+		// Build and execute query
+		query := fmt.Sprintf("UPDATE users SET %s WHERE id = ?", strings.Join(setClause, ", "))
+		args = append(args, targetUserID)
 
-		// Логируем извлеченные данные для отладки
-		log.Printf("User ID from token: %d", userID)
-		log.Printf("User role from token: %s", role)
-
-		// Проверяем, существует ли пользователь в базе данных
-		var existingID int
-		var currentPassword string
-		err = db.QueryRow("SELECT id, password, role FROM users WHERE id = ?", userID).Scan(&existingID, &currentPassword, &role)
-		if err == sql.ErrNoRows {
-			error.Message = "User not found"
-			utils.RespondWithError(w, http.StatusNotFound, error)
+		result, err := tx.Exec(query, args...)
+		if err != nil {
+			log.Printf("Update error: %v", err)
+			error.Message = "Failed to update profile."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
 			return
-		} else if err != nil {
-			log.Printf("Error fetching user: %v", err)
+		}
+
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected == 0 {
+			error.Message = "No changes made."
+			utils.RespondWithError(w, http.StatusNotModified, error)
+			return
+		}
+
+		// Commit transaction
+		if err := tx.Commit(); err != nil {
+			log.Printf("Transaction commit error: %v", err)
 			error.Message = "Server error."
 			utils.RespondWithError(w, http.StatusInternalServerError, error)
 			return
 		}
 
-		// Логируем извлеченные данные пользователя
-		log.Printf("User ID from DB: %d", existingID)
-		log.Printf("User role from DB: %s", role)
+		// Get updated user data to return
+		var userData models.User
+		var email, phone, firstName, lastName, dateOfBirth, login sql.NullString
+		var avatarURL sql.NullString
+		var isVerified bool
+		var age, schoolID int
 
-		// Если роль не "superadmin", проверяем, что пользователь обновляет только свои данные
-		if role != "superadmin" && userID != existingID {
-			error.Message = "You do not have permission to edit this profile."
-			utils.RespondWithError(w, http.StatusForbidden, error)
-			return
-		}
+		err = db.QueryRow(`
+			SELECT id, COALESCE(email, ''), COALESCE(phone, ''), 
+			COALESCE(first_name, ''), COALESCE(last_name, ''), 
+			COALESCE(date_of_birth, ''), age, role, is_verified, 
+			school_id, avatar_url, COALESCE(login, '')
+			FROM users WHERE id = ?`,
+			targetUserID).Scan(
+			&userData.ID, &email, &phone, &firstName, &lastName,
+			&dateOfBirth, &age, &userData.Role, &isVerified,
+			&schoolID, &avatarURL, &login)
 
-		// Обновляем только те данные, которые были переданы в запросе
-		if user.FirstName != "" {
-			// Если передано новое имя, обновляем его
-			_, err = db.Exec("UPDATE users SET first_name = ? WHERE id = ?", user.FirstName, userID)
-			if err != nil {
-				log.Printf("Error updating first_name: %v", err)
-				error.Message = "Failed to update first name."
-				utils.RespondWithError(w, http.StatusInternalServerError, error)
-				return
+		if err != nil {
+			log.Printf("Error retrieving updated user data: %v", err)
+			// Continue anyway since the update was successful
+		} else {
+			if email.Valid {
+				userData.Email = email.String
 			}
-		}
-
-		if user.LastName != "" {
-			// Если передана новая фамилия, обновляем её
-			_, err = db.Exec("UPDATE users SET last_name = ? WHERE id = ?", user.LastName, userID)
-			if err != nil {
-				log.Printf("Error updating last_name: %v", err)
-				error.Message = "Failed to update last name."
-				utils.RespondWithError(w, http.StatusInternalServerError, error)
-				return
+			if phone.Valid {
+				userData.Phone = phone.String
 			}
-		}
-
-		if user.DateOfBirth != "" {
-			// Если передана новая дата рождения, обновляем её
-			_, err = db.Exec("UPDATE users SET date_of_birth = ? WHERE id = ?", user.DateOfBirth, userID)
-			if err != nil {
-				log.Printf("Error updating date_of_birth: %v", err)
-				error.Message = "Failed to update date of birth."
-				utils.RespondWithError(w, http.StatusInternalServerError, error)
-				return
+			if firstName.Valid {
+				userData.FirstName = firstName.String
 			}
+			if lastName.Valid {
+				userData.LastName = lastName.String
+			}
+			if dateOfBirth.Valid {
+				userData.DateOfBirth = dateOfBirth.String
+			}
+			if login.Valid {
+				userData.Login = login.String
+			}
+			userData.Age = age
+			userData.IsVerified = isVerified
+			userData.SchoolID = schoolID
+			userData.AvatarURL = avatarURL
 		}
 
-		// Возвращаем успешный ответ
 		response := map[string]interface{}{
-			"message": "Profile updated successfully.",
+			"message": "Profile updated successfully",
+			"user":    userData,
 		}
 
 		utils.ResponseJSON(w, response)
@@ -1311,7 +1382,6 @@ func (c Controller) UpdatePassword(db *sql.DB) http.HandlerFunc {
 		json.NewEncoder(w).Encode(map[string]string{"message": "Password updated successfully."})
 	}
 }
-
 func (c *Controller) TokenVerifyMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var errorObject models.Error

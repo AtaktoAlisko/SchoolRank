@@ -434,6 +434,189 @@ func (sc *StudentController) GetAllStudents(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, students)
 	}
 }
+func (sc *StudentController) GetStudentByID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify the user's token and get user ID
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		// Step 2: Get user role from the database
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil {
+			log.Println("Error fetching user role:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
+
+		// Step 3: Check if the user is a superadmin or schooladmin
+		if userRole != "schooladmin" && userRole != "superadmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view this student"})
+			return
+		}
+
+		// Step 4: Get student ID from URL parameters
+		vars := mux.Vars(r)
+		studentIDStr, ok := vars["id"]
+		if !ok {
+			log.Println("Student ID not found in URL")
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Student ID not provided"})
+			return
+		}
+
+		studentID, err := strconv.Atoi(studentIDStr)
+		if err != nil {
+			log.Printf("Invalid student ID format: %v", err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid student ID"})
+			return
+		}
+
+		// Step 5: Handle permissions based on user role
+		if userRole == "schooladmin" {
+			// Fetch school ID for schooladmin
+			var userEmail string
+			err = db.QueryRow("SELECT email FROM users WHERE id = ?", userID).Scan(&userEmail)
+			if err != nil {
+				log.Println("Error fetching user email:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user email"})
+				return
+			}
+
+			var adminSchoolID int
+			err = db.QueryRow("SELECT school_id FROM Schools WHERE school_admin_login = ?", userEmail).Scan(&adminSchoolID)
+			if err != nil {
+				log.Println("Error fetching school ID:", err)
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Director does not have an assigned school"})
+				return
+			}
+
+			// Verify that student belongs to admin's school
+			var studentSchoolID int
+			err = db.QueryRow("SELECT school_id FROM student WHERE student_id = ?", studentID).Scan(&studentSchoolID)
+			if err != nil {
+				log.Printf("Error fetching student school ID: %v for student ID: %d", err, studentID)
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found"})
+				return
+			}
+
+			if studentSchoolID != adminSchoolID {
+				log.Printf("Permission denied: Student ID %d (school ID %d) not in admin's school (school ID %d)", studentID, studentSchoolID, adminSchoolID)
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view this student"})
+				return
+			}
+		}
+
+		// Step 6: Fetch student data with school name
+		var student models.Student
+		var schoolID sql.NullInt64
+		var grade sql.NullInt64
+		var letter sql.NullString
+		var gender sql.NullString
+		var phone sql.NullString
+		var email sql.NullString
+		var avatarURL sql.NullString
+		var password sql.NullString
+		var schoolName sql.NullString
+
+		err = db.QueryRow(`
+			SELECT s.student_id, s.first_name, s.last_name, s.patronymic, s.iin, s.school_id, 
+				   s.grade, s.letter, s.gender, s.phone, s.email, s.role, s.login, s.avatar_url, s.password,
+				   Sc.school_name 
+			FROM student s
+			JOIN Schools Sc ON s.school_id = Sc.school_id
+			WHERE s.student_id = ?`, studentID).
+			Scan(
+				&student.ID,
+				&student.FirstName,
+				&student.LastName,
+				&student.Patronymic,
+				&student.IIN,
+				&schoolID,
+				&grade,
+				&letter,
+				&gender,
+				&phone,
+				&email,
+				&student.Role,
+				&student.Login,
+				&avatarURL,
+				&password,
+				&schoolName,
+			)
+
+		if err != nil {
+			if err == sql.ErrNoRows {
+				log.Printf("Student with ID %d not found", studentID)
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found"})
+			} else {
+				log.Printf("Error fetching student: %v", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch student"})
+			}
+			return
+		}
+
+		// Step 7: Handle NULL values
+		if schoolID.Valid {
+			student.SchoolID = int(schoolID.Int64)
+		} else {
+			student.SchoolID = 0
+		}
+
+		if grade.Valid {
+			student.Grade = int(grade.Int64)
+		} else {
+			student.Grade = 0
+		}
+
+		if letter.Valid {
+			student.Letter = letter.String
+		} else {
+			student.Letter = ""
+		}
+
+		if gender.Valid {
+			student.Gender = gender.String
+		} else {
+			student.Gender = ""
+		}
+
+		if phone.Valid {
+			student.Phone = phone.String
+		} else {
+			student.Phone = ""
+		}
+
+		if email.Valid {
+			student.Email = email.String
+		} else {
+			student.Email = ""
+		}
+
+		if avatarURL.Valid {
+			student.AvatarURL = avatarURL.String
+		} else {
+			student.AvatarURL = ""
+		}
+
+		if password.Valid {
+			student.Password = password.String
+		} else {
+			student.Password = ""
+		}
+
+		if schoolName.Valid {
+			student.SchoolName = schoolName.String
+		} else {
+			student.SchoolName = ""
+		}
+
+		// Step 8: Return the student data in the response
+		utils.ResponseJSON(w, student)
+	}
+}
 func (c *StudentController) GetStudentsBySchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Извлекаем school_id из URL параметров

@@ -492,3 +492,40 @@ func UploadFileToS3Compat(file multipart.File, fileName string, isAvatar bool) (
 	}
 	return UploadFileToS3(file, fileName, fileType)
 }
+
+// GetUserIDFromToken extracts the user ID from the JWT token in the Authorization header
+func GetUserIDFromToken(r *http.Request) (int, error) {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		return 0, errors.New("Authorization header missing")
+	}
+
+	parts := strings.Split(authHeader, " ")
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		return 0, errors.New("Invalid Authorization header format")
+	}
+
+	tokenString := parts[1]
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, errors.New("Unexpected signing method")
+		}
+		return []byte(os.Getenv("SECRET")), nil
+	})
+	if err != nil || !token.Valid {
+		return 0, errors.New("Invalid or expired token")
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return 0, errors.New("Invalid token claims")
+	}
+
+	// Extract userID
+	userIDFloat, ok := claims["user_id"].(float64)
+	if !ok {
+		return 0, errors.New("user_id not found in token")
+	}
+
+	return int(userIDFloat), nil
+}

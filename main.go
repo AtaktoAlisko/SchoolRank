@@ -162,6 +162,7 @@ func main() {
 	router.HandleFunc("/api/students", studentController.CreateStudent(db)).Methods("POST")
 	router.HandleFunc("/api/students", studentController.GetAllStudents(db)).Methods("GET")
 	router.HandleFunc("/api/students/{student_id}", studentController.UpdateStudent(db)).Methods("PUT")
+	router.HandleFunc("/api/students/{id}", studentController.GetStudentByID(db)).Methods("GET")
 
 	router.HandleFunc("/api/schools/{school_id}/total-students", studentController.GetTotalStudentsBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/students/{student_id}", studentController.DeleteStudent(db)).Methods("DELETE")
