@@ -93,7 +93,6 @@ func main() {
 	router.HandleFunc("/api/users", controller.GetAllUsers(db)).Methods("GET")
 	router.HandleFunc("/api/users/total", controller.GetTotalUsersWithRoleCount(db)).Methods("GET")
 	router.HandleFunc("/api/users", controller.CreateUser(db)).Methods("POST")
-	router.HandleFunc("/api/users/{id}", controller.UpdateUser(db)).Methods("PUT")
 	router.HandleFunc("/api/users/me", controller.EditProfile(db)).Methods("PUT")
 	router.HandleFunc("/api/users/me/avatar", controller.UploadAvatar(db)).Methods("POST")
 	router.HandleFunc("/api/users/me/avatar", controller.UpdateAvatar(db)).Methods("PUT")

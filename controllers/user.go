@@ -868,100 +868,6 @@ func (c *Controller) GetAllUsers(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, users)
 	}
 }
-func (c *Controller) UpdateUser(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var requestData struct {
-			FirstName   string `json:"first_name"`
-			LastName    string `json:"last_name"`
-			DateOfBirth string `json:"date_of_birth"`
-			Email       string `json:"email"`
-			Password    string `json:"password"` // можно не передавать
-			Role        string `json:"role"`
-		}
-
-		// Проверка токена
-		adminID, err := utils.VerifyToken(r)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
-			return
-		}
-
-		// Проверка роли суперадмина
-		var adminRole string
-		err = db.QueryRow("SELECT role FROM users WHERE id = ?", adminID).Scan(&adminRole)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching role"})
-			return
-		}
-		if adminRole != "superadmin" {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only superadmin can update users"})
-			return
-		}
-
-		// Читаем тело запроса
-		err = json.NewDecoder(r.Body).Decode(&requestData)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
-			return
-		}
-
-		// Валидация роли
-		if requestData.Role != "user" && requestData.Role != "schooladmin" && requestData.Role != "superadmin" {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid role"})
-			return
-		}
-
-		// Получение ID из URL
-		vars := mux.Vars(r)
-		userIDStr := vars["id"]
-		userID, err := strconv.Atoi(userIDStr)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid user ID"})
-			return
-		}
-
-		// Проверяем, существует ли пользователь
-		var existingID int
-		err = db.QueryRow("SELECT id FROM users WHERE id = ?", userID).Scan(&existingID)
-		if err != nil || existingID == 0 {
-			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "User not found"})
-			return
-		}
-
-		// Если передан пароль, хешируем
-		var query string
-		var args []interface{}
-		if requestData.Password != "" {
-			hashedPassword, err := utils.HashPassword(requestData.Password)
-			if err != nil {
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Password hashing failed"})
-				return
-			}
-
-			query = `UPDATE users SET first_name = ?, last_name = ?, date_of_birth = ?, email = ?, password = ?, role = ? WHERE id = ?`
-			args = []interface{}{
-				requestData.FirstName, requestData.LastName, requestData.DateOfBirth,
-				requestData.Email, hashedPassword, requestData.Role, userID,
-			}
-		} else {
-			query = `UPDATE users SET first_name = ?, last_name = ?, date_of_birth = ?, email = ?, role = ? WHERE id = ?`
-			args = []interface{}{
-				requestData.FirstName, requestData.LastName, requestData.DateOfBirth,
-				requestData.Email, requestData.Role, userID,
-			}
-		}
-
-		// Обновляем
-		_, err = db.Exec(query, args...)
-		if err != nil {
-			log.Printf("SQL Exec error: %v", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update user"})
-			return
-		}
-
-		utils.ResponseJSON(w, map[string]string{"message": "User updated successfully"})
-	}
-}
 func (c *Controller) CreateUser(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var requestData struct {
@@ -1170,7 +1076,7 @@ func (c *Controller) EditProfile(db *sql.DB) http.HandlerFunc {
 			utils.RespondWithError(w, http.StatusInternalServerError, error)
 			return
 		}
-		defer tx.Rollback() // Will be ignored if transaction is committed
+		defer tx.Rollback()
 
 		// Initialize query parts
 		setClause := []string{}
@@ -1190,7 +1096,6 @@ func (c *Controller) EditProfile(db *sql.DB) http.HandlerFunc {
 
 		// Process date of birth update
 		if userUpdate.DateOfBirth != "" {
-			// Check date format
 			birthDate, err := time.Parse("2006-01-02", userUpdate.DateOfBirth)
 			if err != nil {
 				error.Message = "Invalid date format. Please use YYYY-MM-DD format."
@@ -1198,7 +1103,6 @@ func (c *Controller) EditProfile(db *sql.DB) http.HandlerFunc {
 				return
 			}
 
-			// Calculate age
 			now := time.Now()
 			age := now.Year() - birthDate.Year()
 			if now.YearDay() < birthDate.YearDay() {
@@ -1243,60 +1147,14 @@ func (c *Controller) EditProfile(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Get updated user data to return
-		var userData models.User
-		var email, phone, firstName, lastName, dateOfBirth, login sql.NullString
-		var avatarURL sql.NullString
-		var isVerified bool
-		var age, schoolID int
-
-		err = db.QueryRow(`
-			SELECT id, COALESCE(email, ''), COALESCE(phone, ''), 
-			COALESCE(first_name, ''), COALESCE(last_name, ''), 
-			COALESCE(date_of_birth, ''), age, role, is_verified, 
-			school_id, avatar_url, COALESCE(login, '')
-			FROM users WHERE id = ?`,
-			targetUserID).Scan(
-			&userData.ID, &email, &phone, &firstName, &lastName,
-			&dateOfBirth, &age, &userData.Role, &isVerified,
-			&schoolID, &avatarURL, &login)
-
-		if err != nil {
-			log.Printf("Error retrieving updated user data: %v", err)
-			// Continue anyway since the update was successful
-		} else {
-			if email.Valid {
-				userData.Email = email.String
-			}
-			if phone.Valid {
-				userData.Phone = phone.String
-			}
-			if firstName.Valid {
-				userData.FirstName = firstName.String
-			}
-			if lastName.Valid {
-				userData.LastName = lastName.String
-			}
-			if dateOfBirth.Valid {
-				userData.DateOfBirth = dateOfBirth.String
-			}
-			if login.Valid {
-				userData.Login = login.String
-			}
-			userData.Age = age
-			userData.IsVerified = isVerified
-			userData.SchoolID = schoolID
-			userData.AvatarURL = avatarURL
-		}
-
+		// Return only the success message
 		response := map[string]interface{}{
 			"message": "Profile updated successfully",
-			"user":    userData,
 		}
-
 		utils.ResponseJSON(w, response)
 	}
 }
+
 func (c Controller) UpdatePassword(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Structure to capture the request data
