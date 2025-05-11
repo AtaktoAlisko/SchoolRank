@@ -224,7 +224,8 @@ func main() {
 	// =======================
 	router.HandleFunc("/api/events", eventController.AddEvent(db)).Methods("POST")
 	router.HandleFunc("/api/events", eventController.GetEvents(db)).Methods("GET")
-	router.HandleFunc("/api/events/{event_id}", eventController.GetEvents(db)).Methods("PUT")
+	router.HandleFunc("/api/events/{event_id}", eventController.UpdateEvent(db)).Methods("PUT")
+	router.HandleFunc("/api/events/{event_id}", eventController.DeleteEvent(db)).Methods("DELETE")
 
 	// =======================
 	// Контактная информация

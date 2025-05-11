@@ -3,10 +3,8 @@ package controllers
 import (
 	"database/sql"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -146,7 +144,6 @@ func (ec *EventController) AddEvent(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Handle file upload for photo
-		var photoFileName string
 		file, handler, err := r.FormFile("photo")
 		if err != nil && err != http.ErrMissingFile {
 			log.Println("Error retrieving photo file:", err)
@@ -157,36 +154,20 @@ func (ec *EventController) AddEvent(db *sql.DB) http.HandlerFunc {
 		if file != nil {
 			defer file.Close()
 
-			// Create unique filename
+			// Create unique filename for S3
 			fileExt := filepath.Ext(handler.Filename)
-			photoFileName = fmt.Sprintf("event_%d%s", time.Now().UnixNano(), fileExt)
+			photoFileName := fmt.Sprintf("event_%d%s", time.Now().UnixNano(), fileExt)
 
-			// Create uploads directory if it doesn't exist
-			uploadDir := "./uploads/events"
-			if err := os.MkdirAll(uploadDir, 0755); err != nil {
-				log.Println("Error creating uploads directory:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error saving photo"})
-				return
-			}
-
-			// Create the file
-			dst, err := os.Create(filepath.Join(uploadDir, photoFileName))
+			// Upload file to S3 using the "schoolphoto" case
+			photoURL, err := utils.UploadFileToS3(file, photoFileName, "schoolphoto")
 			if err != nil {
-				log.Println("Error creating destination file:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error saving photo"})
-				return
-			}
-			defer dst.Close()
-
-			// Copy the uploaded file to the destination file
-			if _, err := io.Copy(dst, file); err != nil {
-				log.Println("Error copying file:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error saving photo"})
+				log.Println("Error uploading photo to S3:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error saving photo to cloud storage"})
 				return
 			}
 
-			// Set the photo path in the event object
-			event.Photo = filepath.Join("uploads/events", photoFileName)
+			// Set the S3 URL in the event object
+			event.Photo = photoURL
 		}
 
 		// Validate school access based on role
@@ -310,14 +291,48 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 
 		// Получаем параметры запроса
 		query := r.URL.Query()
-		eventID := query.Get("id")
-		schoolID := query.Get("school_id")
-		status := query.Get("status")
-		category := query.Get("category")
-		dateFrom := query.Get("date_from")
-		dateTo := query.Get("date_to")
-		limit := query.Get("limit")
-		offset := query.Get("offset")
+
+		// Создаем map для хранения всех параметров
+		params := make(map[string]string)
+
+		// Собираем основные параметры
+		params["id"] = query.Get("id")
+		params["school_id"] = query.Get("school_id")
+		params["status"] = query.Get("status")
+		params["category"] = query.Get("category")
+		params["date_from"] = query.Get("date_from")
+		params["date_to"] = query.Get("date_to")
+		params["limit"] = query.Get("limit")
+		params["offset"] = query.Get("offset")
+
+		// Добавляем все остальные параметры, которые могут быть переданы
+		for key, values := range query {
+			if _, exists := params[key]; !exists && len(values) > 0 {
+				params[key] = values[0]
+			}
+		}
+
+		// Логируем все параметры
+		log.Println("GetEvents called with parameters:", params)
+
+		// Если запрошен debug режим, возвращаем все параметры
+		if query.Get("debug") == "true" {
+			utils.ResponseJSON(w, map[string]interface{}{
+				"message":    "Debug mode: showing all parameters",
+				"parameters": params,
+			})
+			return
+		}
+
+		// Переменные для основных параметров
+		eventID := params["id"]
+		schoolID := params["school_id"]
+		status := params["status"]
+		category := params["category"]
+		dateFrom := params["date_from"]
+		dateTo := params["date_to"]
+		limit := params["limit"]
+		offset := params["offset"]
 
 		// Если указан конкретный ID события - получаем только его
 		if eventID != "" {
@@ -336,7 +351,13 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 				}
 				return
 			}
-			utils.ResponseJSON(w, event)
+
+			// Добавляем информацию о параметрах в ответ
+			response := map[string]interface{}{
+				"event":           event,
+				"parameters_used": params,
+			}
+			utils.ResponseJSON(w, response)
 			return
 		}
 
@@ -426,8 +447,12 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 			}
 		}
 
+		// Логируем финальный SQL запрос для отладки
+		finalQuery := queryBuilder.String()
+		log.Printf("Executing SQL query: %s with args: %v", finalQuery, args)
+
 		// Выполняем запрос
-		rows, err := db.Query(queryBuilder.String(), args...)
+		rows, err := db.Query(finalQuery, args...)
 		if err != nil {
 			log.Println("Error executing events query:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch events"})
@@ -457,15 +482,19 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Проверяем, нашлись ли события
+		// Подготавливаем ответ с данными о событиях и использованными параметрами
+		response := map[string]interface{}{
+			"events":          events,
+			"parameters_used": params,
+			"total_count":     len(events),
+		}
+
 		if len(events) == 0 {
-			// Отправляем пустой массив, а не ошибку
-			utils.ResponseJSON(w, []models.Event{})
-			return
+			response["message"] = "No events found for the specified criteria"
 		}
 
 		// Отправляем результат
-		utils.ResponseJSON(w, events)
+		utils.ResponseJSON(w, response)
 	}
 }
 func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
@@ -480,7 +509,7 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 
 		// Получаем роль пользователя
 		var userRole string
-		var userSchoolID int
+		var userSchoolID sql.NullInt64 // Changed to sql.NullInt64 to handle NULL values
 		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
 		if err != nil {
 			log.Println("Error fetching user role:", err)
@@ -497,19 +526,25 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 		// Получаем ID события из URL
 		vars := mux.Vars(r)
 		eventIDStr := vars["id"]
+		if eventIDStr == "" {
+			// Check for "event_id" parameter as shown in the router registration
+			eventIDStr = vars["event_id"]
+		}
+
 		eventID, err := strconv.Atoi(eventIDStr)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid event ID format"})
 			return
 		}
 
-		// Проверяем, существует ли событие
+		// Проверяем, существует ли событие и получаем текущие данные, включая путь к фото
 		var existingEvent models.Event
 		var eventSchoolID int
 		var eventCreatorID int
+		var currentPhotoURL string
 
-		err = db.QueryRow("SELECT id, school_id, user_id FROM Events WHERE id = ?", eventID).Scan(
-			&existingEvent.ID, &eventSchoolID, &eventCreatorID,
+		err = db.QueryRow("SELECT id, school_id, user_id, photo FROM Events WHERE id = ?", eventID).Scan(
+			&existingEvent.ID, &eventSchoolID, &eventCreatorID, &currentPhotoURL,
 		)
 
 		if err != nil {
@@ -522,10 +557,10 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Проверяем права доступа
+		// Проверяем права доступа для schooladmin
 		if userRole == "schooladmin" {
-			// Для schooladmin: проверяем, что пользователь относится к школе этого события
-			if userSchoolID != eventSchoolID {
+			// Убедимся, что school_id не NULL перед сравнением
+			if !userSchoolID.Valid || int(userSchoolID.Int64) != eventSchoolID {
 				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You don't have permission to update this event"})
 				return
 			}
@@ -565,7 +600,7 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 			updatedEvent.DateTime = dateTime
 		}
 
-		// Обработка новых полей
+		// Обработка полей дат
 		if startDate := r.FormValue("start_date"); startDate != "" {
 			// Проверяем формат даты
 			dateFormats := []string{"2006-01-02", "2006-01-02 15:04:05"}
@@ -643,38 +678,32 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 		if err == nil {
 			defer file.Close()
 
-			// Создаем уникальное имя файла
+			// Создаем уникальное имя файла для S3
 			fileExt := filepath.Ext(handler.Filename)
 			photoFileName := fmt.Sprintf("event_%d_%d%s", eventID, time.Now().UnixNano(), fileExt)
 
-			// Создаем директорию, если нужно
-			uploadDir := "./uploads/events"
-			if err := os.MkdirAll(uploadDir, 0755); err != nil {
-				log.Println("Error creating uploads directory:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error saving photo"})
-				return
-			}
-
-			// Создаем файл для сохранения фото
-			dst, err := os.Create(filepath.Join(uploadDir, photoFileName))
+			// Загружаем файл в S3 с использованием case "schoolphoto"
+			photoURL, err := utils.UploadFileToS3(file, photoFileName, "schoolphoto")
 			if err != nil {
-				log.Println("Error creating file:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error saving photo"})
-				return
-			}
-			defer dst.Close()
-
-			// Копируем содержимое загруженного файла
-			if _, err := io.Copy(dst, file); err != nil {
-				log.Println("Error copying file:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error saving photo"})
+				log.Println("Error uploading photo to S3:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error saving photo to cloud storage"})
 				return
 			}
 
 			// Обновляем путь к фото
-			photoPath := filepath.Join("uploads/events", photoFileName)
-			updateFields["photo"] = photoPath
-			updatedEvent.Photo = photoPath
+			updateFields["photo"] = photoURL
+			updatedEvent.Photo = photoURL
+
+			// Если фото уже было и хранится в S3 (URL содержит amazonaws.com),
+			// можно попробовать удалить его
+			if currentPhotoURL != "" && strings.Contains(currentPhotoURL, "amazonaws.com") {
+				// Пытаемся удалить старое фото из S3, но продолжаем, даже если возникла ошибка
+				err = utils.DeleteFileFromS3(currentPhotoURL)
+				if err != nil {
+					log.Println("Error deleting old photo from S3:", err)
+					// Продолжаем выполнение, не останавливаем процесс обновления
+				}
+			}
 		}
 
 		// Добавляем поле updated_at
@@ -772,4 +801,40 @@ func getEventByID(db *sql.DB, id int) (models.Event, error) {
 	}
 
 	return event, nil
+}
+func (c *EventController) DeleteEvent(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Проверка токена
+		_, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token."})
+			return
+		}
+
+		// Получение ID события из URL-параметра
+		vars := mux.Vars(r)
+		eventIDStr, ok := vars["event_id"]
+		if !ok {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Event ID is required"})
+			return
+		}
+
+		// Преобразование string ID в int
+		eventID, err := strconv.Atoi(eventIDStr)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid event ID format"})
+			return
+		}
+
+		// Удаление события из базы данных
+		_, err = db.Exec("DELETE FROM events WHERE id = ?", eventID)
+		if err != nil {
+			log.Println("Error deleting event:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete event"})
+			return
+		}
+
+		// Отправка успешного ответа
+		utils.ResponseJSON(w, map[string]string{"message": "Event deleted successfully"})
+	}
 }
