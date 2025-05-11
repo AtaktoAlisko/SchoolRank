@@ -92,35 +92,78 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 			return
 		}
 
-		olympiad := models.SubjectOlympiad{
-			SubjectName: subjectName,
-			StartDate:   startDate,
-			EndDate:     endDate,
-			Description: description,
-			PhotoURL:    photoURL,
-			SchoolID:    schoolID,
-			Level:       level,
-			Limit:       limit,
-		}
-
-		// Шаг 8: Вставка в БД
+		// Шаг 8: Вставка в БД и получение ID
 		query := `INSERT INTO subject_olympiads 
-			(subject_name, date, end_date, description, photo_url, school_id, level, limit_participants) 
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+			(subject_name, date, end_date, description, photo_url, school_id, level, limit_participants, creator_id) 
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
-		_, err = db.Exec(query,
-			olympiad.SubjectName,
-			olympiad.StartDate,
-			olympiad.EndDate,
-			olympiad.Description,
-			olympiad.PhotoURL,
-			olympiad.SchoolID,
-			olympiad.Level,
-			olympiad.Limit)
+		result, err := db.Exec(query,
+			subjectName,
+			startDate,
+			endDate,
+			description,
+			photoURL,
+			schoolID,
+			level,
+			limit,
+			userID) // Добавляем creator_id
 
 		if err != nil {
 			log.Println("Error inserting olympiad:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create olympiad"})
+			return
+		}
+
+		// Получение ID созданной олимпиады
+		olympiadID, err := result.LastInsertId()
+		if err != nil {
+			log.Println("Error getting last insert ID:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve olympiad ID"})
+			return
+		}
+
+		// Получаем полные данные олимпиады из БД для корректного ответа
+		var olympiad models.SubjectOlympiad
+
+		query = `SELECT so.id, so.subject_name, so.date, so.end_date, so.description, so.photo_url, 
+			so.school_id, so.level, so.limit_participants, 
+			u.id as creator_id, u.first_name, u.last_name, s.name as school_name
+			FROM subject_olympiads so
+			LEFT JOIN users u ON so.creator_id = u.id
+			LEFT JOIN schools s ON so.school_id = s.id
+			WHERE so.id = ?`
+
+		err = db.QueryRow(query, olympiadID).Scan(
+			&olympiad.ID,
+			&olympiad.SubjectName,
+			&olympiad.StartDate,
+			&olympiad.EndDate,
+			&olympiad.Description,
+			&olympiad.PhotoURL,
+			&olympiad.SchoolID,
+			&olympiad.Level,
+			&olympiad.Limit,
+			&olympiad.CreatorID,
+			&olympiad.CreatorFirstName,
+			&olympiad.CreatorLastName,
+			&olympiad.SchoolName,
+		)
+
+		if err != nil {
+			log.Println("Error fetching created olympiad:", err)
+			// Если не удалось получить полные данные, вернем базовую информацию
+			utils.ResponseJSON(w, models.SubjectOlympiad{
+				ID:          int(olympiadID),
+				SubjectName: subjectName,
+				StartDate:   startDate,
+				EndDate:     endDate,
+				Description: description,
+				PhotoURL:    photoURL,
+				SchoolID:    schoolID,
+				Level:       level,
+				Limit:       limit,
+				CreatorID:   userID,
+			})
 			return
 		}
 
@@ -240,7 +283,7 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 				SELECT COUNT(*) 
 				FROM subject_olympiads so
 				JOIN Schools s ON so.school_id = s.school_id
-				WHERE so.id = ? AND s.user_id = ?
+				WHERE so.subject_olympiad_id = ? AND s.user_id = ?
 			`, olympiadID, userID).Scan(&count)
 
 			if err != nil {
@@ -267,11 +310,11 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 		var currentOlympiad models.SubjectOlympiad
 		err = db.QueryRow(`
 			SELECT 
-				subject_name, date, end_date, description, photo_url, level,  limit_participants
+				subject_name, date, end_date, description, photo_url, level, limit_participants
 			FROM 
 				subject_olympiads
 			WHERE 
-				id = ?
+				subject_olympiad_id = ?
 		`, olympiadID).Scan(
 			&currentOlympiad.SubjectName,
 			&currentOlympiad.StartDate,
@@ -345,8 +388,8 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 		_, err = db.Exec(`
 			UPDATE subject_olympiads
 			SET subject_name = ?, date = ?, end_date = ?, description = ?, 
-				photo_url = ?, level = ?,  limit_participants = ?
-			WHERE id = ?
+				photo_url = ?, level = ?, limit_participants = ?
+			WHERE subject_olympiad_id = ?
 		`, subjectName, startDate, endDate, description, photoURL, level, limit, olympiadID)
 
 		if err != nil {
@@ -360,7 +403,7 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 
 		err = db.QueryRow(`
 			SELECT 
-				so.id, 
+				so.subject_olympiad_id, 
 				so.subject_name, 
 				so.date, 
 				so.end_date, 
@@ -380,7 +423,7 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 			LEFT JOIN 
 				users u ON s.user_id = u.id
 			WHERE 
-				so.id = ?
+				so.subject_olympiad_id = ?
 		`, olympiadID).Scan(
 			&updatedOlympiad.ID,
 			&updatedOlympiad.SubjectName,
@@ -440,7 +483,7 @@ func (c *SubjectOlympiadController) DeleteSubjectOlympiad(db *sql.DB) http.Handl
 		}
 
 		// Шаг 5: Удаление олимпиады из БД
-		query := "DELETE FROM subject_olympiads WHERE id = ?"
+		query := "DELETE FROM subject_olympiads WHERE subject_olympiad_id = ?"
 		result, err := db.Exec(query, olympiadID)
 		if err != nil {
 			log.Println("Error deleting olympiad:", err)
@@ -482,7 +525,7 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 		// SQL запрос для получения всех олимпиад с информацией о создателе и школе
 		query := `
 			SELECT 
-				so.id, 
+				so.subject_olympiad_id, 
 				so.subject_name, 
 				so.date, 
 				so.end_date, 
