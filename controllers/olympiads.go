@@ -425,12 +425,63 @@ func (oc *OlympiadController) UpdateOlympiad(db *sql.DB) http.HandlerFunc {
 			Letter        string `json:"letter"`
 		}
 
-		// Для запросов с form-data
-		if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") ||
-			r.Header.Get("Content-Type") == "application/x-www-form-urlencoded" {
+		// Переменная для хранения URL документа
+		var documentURL string
 
+		// Для запросов с form-data
+		if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+			// Обрабатываем multipart/form-data
 			if err := r.ParseMultipartForm(10 << 20); err == nil { // Поддержка до 10MB файлов
 				// Получаем значения из формы
+				studentIDStr := r.FormValue("student_id")
+				if studentIDStr != "" {
+					updateData.StudentID, _ = strconv.Atoi(studentIDStr)
+				}
+
+				olympiadPlaceStr := r.FormValue("olympiad_place")
+				if olympiadPlaceStr != "" {
+					updateData.OlympiadPlace, _ = strconv.Atoi(olympiadPlaceStr)
+				}
+
+				updateData.Level = r.FormValue("level")
+				updateData.OlympiadName = r.FormValue("olympiad_name")
+				updateData.DocumentURL = r.FormValue("document_url")
+				updateData.Date = r.FormValue("date")
+
+				schoolIDStr := r.FormValue("school_id")
+				if schoolIDStr != "" {
+					updateData.SchoolID, _ = strconv.Atoi(schoolIDStr)
+				}
+
+				gradeStr := r.FormValue("grade")
+				if gradeStr != "" {
+					updateData.Grade, _ = strconv.Atoi(gradeStr)
+				}
+
+				updateData.Letter = r.FormValue("letter")
+
+				// Обработка загруженного файла
+				file, handler, errFile := r.FormFile("document")
+				if errFile == nil && file != nil {
+					defer file.Close()
+
+					// Генерируем уникальное имя для файла
+					timestamp := time.Now().Unix()
+					filename := fmt.Sprintf("olympiaddoc_%d_%s", timestamp, handler.Filename)
+
+					// Загружаем файл в S3
+					uploadedURL, errUpload := utils.UploadFileToS3(file, filename, "olympiaddoc")
+					if errUpload != nil {
+						utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to upload document: " + errUpload.Error()})
+						return
+					}
+
+					documentURL = uploadedURL
+				}
+			}
+		} else if r.Header.Get("Content-Type") == "application/x-www-form-urlencoded" {
+			// Обрабатываем application/x-www-form-urlencoded
+			if err := r.ParseForm(); err == nil {
 				studentIDStr := r.FormValue("student_id")
 				if studentIDStr != "" {
 					updateData.StudentID, _ = strconv.Atoi(studentIDStr)
@@ -569,7 +620,13 @@ func (oc *OlympiadController) UpdateOlympiad(db *sql.DB) http.HandlerFunc {
 			queryParams = append(queryParams, updateData.OlympiadName)
 		}
 
-		if updateData.DocumentURL != "" {
+		// Обновляем document_url, если загружен новый файл или указан в данных
+		if documentURL != "" {
+			// Новый файл был загружен
+			queryParts = append(queryParts, "document_url = ?")
+			queryParams = append(queryParams, documentURL)
+		} else if updateData.DocumentURL != "" {
+			// URL документа был передан в данных
 			queryParts = append(queryParts, "document_url = ?")
 			queryParams = append(queryParams, updateData.DocumentURL)
 		}
@@ -629,10 +686,11 @@ func (oc *OlympiadController) GetOlympiadBySchoolId(db *sql.DB) http.HandlerFunc
 			return
 		}
 
-		// 3. Получаем список олимпиад для указанной школы
+		// 3. Получаем список олимпиад для указанной школы с добавлением grade и letter
 		query := `
 			SELECT o.olympiad_id, o.student_id, s.first_name, s.last_name, o.olympiad_place, 
-			       o.score, o.level, o.school_id, o.olympiad_name, o.document_url
+			       o.score, o.level, o.school_id, o.olympiad_name, o.document_url,
+			       s.grade, s.letter
 			FROM Olympiads o
 			JOIN student s ON o.student_id = s.student_id
 			WHERE o.school_id = ?
@@ -646,7 +704,7 @@ func (oc *OlympiadController) GetOlympiadBySchoolId(db *sql.DB) http.HandlerFunc
 		}
 		defer rows.Close()
 
-		// 4. Расширенная структура с полем document_url
+		// 4. Расширенная структура с полями grade и letter
 		type OlympiadWithStudent struct {
 			OlympiadID    int    `json:"olympiad_id"`
 			StudentID     int    `json:"student_id"`
@@ -658,13 +716,16 @@ func (oc *OlympiadController) GetOlympiadBySchoolId(db *sql.DB) http.HandlerFunc
 			SchoolID      int    `json:"school_id"`
 			OlympiadName  string `json:"olympiad_name"`
 			DocumentURL   string `json:"document_url"`
+			Grade         int    `json:"grade"`
+			Letter        string `json:"letter"`
 		}
 
 		// 5. Считываем данные из результата запроса
 		olympiads := []OlympiadWithStudent{}
 		for rows.Next() {
 			var olympiad OlympiadWithStudent
-			var olympiadName, documentURL sql.NullString
+			var olympiadName, documentURL, letter sql.NullString
+			var grade sql.NullInt64
 
 			err := rows.Scan(
 				&olympiad.OlympiadID,
@@ -677,6 +738,8 @@ func (oc *OlympiadController) GetOlympiadBySchoolId(db *sql.DB) http.HandlerFunc
 				&olympiad.SchoolID,
 				&olympiadName,
 				&documentURL,
+				&grade,
+				&letter,
 			)
 			if err != nil {
 				log.Printf("Error scanning olympiad row: %v", err)
@@ -694,6 +757,18 @@ func (oc *OlympiadController) GetOlympiadBySchoolId(db *sql.DB) http.HandlerFunc
 				olympiad.DocumentURL = documentURL.String
 			} else {
 				olympiad.DocumentURL = ""
+			}
+
+			if grade.Valid {
+				olympiad.Grade = int(grade.Int64)
+			} else {
+				olympiad.Grade = 0
+			}
+
+			if letter.Valid {
+				olympiad.Letter = letter.String
+			} else {
+				olympiad.Letter = ""
 			}
 
 			olympiads = append(olympiads, olympiad)
@@ -1034,5 +1109,292 @@ func (oc *OlympiadController) CalculateTotalOlympiadRating(db *sql.DB) http.Hand
 
 		// Возвращаем только общий рейтинг
 		utils.ResponseJSON(w, map[string]float64{"total_rating": totalRating})
+	}
+}
+func (soc *SubjectOlympiadController) GetAllSubOlypmiad(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Получаем userID из токена для проверки прав доступа
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+			return
+		}
+
+		// Получаем роль пользователя
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil {
+			log.Printf("Error fetching user information: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch user information"})
+			return
+		}
+
+		// Получаем параметры запроса
+		studentID := r.URL.Query().Get("student_id")
+		schoolIDParam := r.URL.Query().Get("school_id")
+		subject := r.URL.Query().Get("subject")
+		level := r.URL.Query().Get("level")
+
+		var queryArgs []interface{}
+		// Базовый SQL-запрос
+		baseQuery := `
+			SELECT 
+				o.olympiad_id, o.student_id, o.olympiad_place, o.score, 
+				o.school_id, o.level, o.olympiad_name, o.document_url, o.date, o.subject,
+				s.first_name, s.last_name, s.patronymic, s.grade, s.letter,
+				sc.school_name
+			FROM SubjectOlympiads o
+			JOIN student s ON o.student_id = s.student_id
+			LEFT JOIN Schools sc ON o.school_id = sc.school_id`
+
+		// Условия фильтрации
+		whereConditions := []string{}
+
+		// Ограничения по роли
+		if userRole == "student" {
+			// Студент видит только свои олимпиады
+			var studentIDFromDB int
+			err = db.QueryRow("SELECT student_id FROM student WHERE user_id = ?", userID).Scan(&studentIDFromDB)
+			if err != nil {
+				log.Printf("Error fetching student ID: %v", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch student information"})
+				return
+			}
+			whereConditions = append(whereConditions, "o.student_id = ?")
+			queryArgs = append(queryArgs, studentIDFromDB)
+		} else if userRole != "superadmin" && userRole != "schooladmin" && userRole != "user" {
+			// Проверка на допустимую роль
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Invalid user role"})
+			return
+		}
+
+		// Добавляем фильтры из параметров запроса
+		if studentID != "" && userRole != "student" { // Студент не может фильтровать по другим student_id
+			whereConditions = append(whereConditions, "o.student_id = ?")
+			queryArgs = append(queryArgs, studentID)
+		}
+
+		if schoolIDParam != "" { // Любой авторизованный пользователь может фильтровать по school_id
+			whereConditions = append(whereConditions, "o.school_id = ?")
+			queryArgs = append(queryArgs, schoolIDParam)
+		}
+
+		if subject != "" {
+			whereConditions = append(whereConditions, "o.subject = ?")
+			queryArgs = append(queryArgs, subject)
+		}
+
+		if level != "" {
+			whereConditions = append(whereConditions, "o.level = ?")
+			queryArgs = append(queryArgs, level)
+		}
+
+		// Формируем полный запрос
+		query := baseQuery
+		if len(whereConditions) > 0 {
+			query += " WHERE " + strings.Join(whereConditions, " AND ")
+		}
+
+		// Выполняем запрос
+		rows, err := db.Query(query, queryArgs...)
+		if err != nil {
+			log.Printf("Error fetching SubjectOlympiad records: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch SubjectOlympiad records"})
+			return
+		}
+		defer rows.Close()
+
+		// Структура для ответа
+		type SubjectOlympiadWithInfo struct {
+			OlympiadID    int    `json:"olympiad_id"`
+			StudentID     int    `json:"student_id"`
+			OlympiadPlace int    `json:"olympiad_place"`
+			Score         int    `json:"score"`
+			SchoolID      int    `json:"school_id"`
+			Level         string `json:"level"`
+			OlympiadName  string `json:"olympiad_name"`
+			DocumentURL   string `json:"document_url"`
+			Date          string `json:"date"`
+			Subject       string `json:"subject"`
+			FirstName     string `json:"first_name"`
+			LastName      string `json:"last_name"`
+			Patronymic    string `json:"patronymic"`
+			Grade         int    `json:"grade"`
+			Letter        string `json:"letter"`
+			SchoolName    string `json:"school_name"`
+		}
+
+		var olympiads []SubjectOlympiadWithInfo
+
+		// Обрабатываем результаты
+		for rows.Next() {
+			var olympiad SubjectOlympiadWithInfo
+			var olympiadName, documentURL, date, subject, letter, schoolName sql.NullString
+			var grade sql.NullInt64
+
+			err := rows.Scan(
+				&olympiad.OlympiadID,
+				&olympiad.StudentID,
+				&olympiad.OlympiadPlace,
+				&olympiad.Score,
+				&olympiad.SchoolID,
+				&olympiad.Level,
+				&olympiadName,
+				&documentURL,
+				&date,
+				&subject,
+				&olympiad.FirstName,
+				&olympiad.LastName,
+				&olympiad.Patronymic,
+				&grade,
+				&letter,
+				&schoolName,
+			)
+			if err != nil {
+				log.Printf("Error scanning SubjectOlympiad record: %v", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing SubjectOlympiad data"})
+				return
+			}
+
+			// Присваиваем значения, если они валидны
+			if olympiadName.Valid {
+				olympiad.OlympiadName = olympiadName.String
+			}
+			if documentURL.Valid {
+				olympiad.DocumentURL = documentURL.String
+			}
+			if date.Valid {
+				olympiad.Date = date.String
+			}
+			if subject.Valid {
+				olympiad.Subject = subject.String
+			}
+			if grade.Valid {
+				olympiad.Grade = int(grade.Int64)
+			}
+			if letter.Valid {
+				olympiad.Letter = letter.String
+			}
+			if schoolName.Valid {
+				olympiad.SchoolName = schoolName.String
+			}
+
+			olympiads = append(olympiads, olympiad)
+		}
+
+		// Проверяем ошибки после обработки строк
+		if err = rows.Err(); err != nil {
+			log.Printf("Error iterating SubjectOlympiad rows: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing SubjectOlympiad data"})
+			return
+		}
+
+		// Возвращаем результат
+		utils.ResponseJSON(w, olympiads)
+	}
+}
+func (soc *SubjectOlympiadController) GetAllSubOlypmiadNamePicture(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Получаем userID из токена
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+			return
+		}
+
+		// Получаем роль пользователя
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil {
+			log.Printf("Error fetching user role: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch user role"})
+			return
+		}
+
+		// Получаем параметры запроса
+		studentID := r.URL.Query().Get("student_id")
+		var queryArgs []interface{}
+
+		// Базовый SQL-запрос
+		baseQuery := `
+			SELECT o.subject_name, o.photo_url
+			FROM SubjectOlympiads o
+			JOIN student s ON o.student_id = s.student_id`
+
+		// Условия фильтрации
+		whereConditions := []string{}
+
+		// Ограничения по роли
+		if userRole == "student" {
+			var studentIDFromDB int
+			err = db.QueryRow("SELECT student_id FROM student WHERE user_id = ?", userID).Scan(&studentIDFromDB)
+			if err != nil {
+				log.Printf("Error fetching student ID: %v", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch student information"})
+				return
+			}
+			whereConditions = append(whereConditions, "o.student_id = ?")
+			queryArgs = append(queryArgs, studentIDFromDB)
+		} else if userRole != "superadmin" && userRole != "schooladmin" && userRole != "user" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Invalid user role"})
+			return
+		}
+
+		// Фильтрация по student_id (только для не-студентов)
+		if studentID != "" && userRole != "student" {
+			whereConditions = append(whereConditions, "o.student_id = ?")
+			queryArgs = append(queryArgs, studentID)
+		}
+
+		// Формируем полный SQL-запрос
+		query := baseQuery
+		if len(whereConditions) > 0 {
+			query += " WHERE " + strings.Join(whereConditions, " AND ")
+		}
+
+		// Выполняем запрос
+		rows, err := db.Query(query, queryArgs...)
+		if err != nil {
+			log.Printf("Error fetching SubjectOlympiad records: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch SubjectOlympiad records"})
+			return
+		}
+		defer rows.Close()
+
+		type SubjectOlympiadNamePicture struct {
+			SubjectName string `json:"subject_name"`
+			PhotoURL    string `json:"photo_url"`
+		}
+
+		var olympiads []SubjectOlympiadNamePicture
+
+		for rows.Next() {
+			var olympiad SubjectOlympiadNamePicture
+			var subjectName, photoURL sql.NullString
+
+			err := rows.Scan(&subjectName, &photoURL)
+			if err != nil {
+				log.Printf("Error scanning SubjectOlympiad record: %v", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing SubjectOlympiad data"})
+				return
+			}
+
+			if subjectName.Valid {
+				olympiad.SubjectName = subjectName.String
+			}
+			if photoURL.Valid {
+				olympiad.PhotoURL = photoURL.String
+			}
+
+			olympiads = append(olympiads, olympiad)
+		}
+
+		if err = rows.Err(); err != nil {
+			log.Printf("Error iterating SubjectOlympiad rows: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing SubjectOlympiad data"})
+			return
+		}
+
+		utils.ResponseJSON(w, olympiads)
 	}
 }
