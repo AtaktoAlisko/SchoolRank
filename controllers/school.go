@@ -129,15 +129,15 @@ func (sc *SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 		if err == nil {
 			defer file.Close()
 			uniqueFileName := fmt.Sprintf("school-%d-%d.jpg", requesterID, time.Now().Unix())
-
-			// Обновлено: передаем строку "schoolphoto" вместо false
 			photoURL, err := utils.UploadFileToS3(file, uniqueFileName, "schoolphoto")
 			if err != nil {
 				log.Println("S3 upload failed:", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Photo upload failed"})
 				return
 			}
-			school.PhotoURL = photoURL
+			school.PhotoURL = sql.NullString{String: photoURL, Valid: true}
+		} else {
+			school.PhotoURL = sql.NullString{Valid: false} // Set to NULL when no photo is uploaded
 		}
 
 		// Преобразуем массив специализаций в JSON строку для сохранения в БД
@@ -150,10 +150,21 @@ func (sc *SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 
 		// Шаг 6: Вставка в таблицу Schools
 		query := `
-           INSERT INTO Schools (school_name, school_address, city, about_school, photo_url, school_email, school_phone, school_admin_login, specializations, created_at, updated_at, user_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?)
+            INSERT INTO Schools (school_name, school_address, city, about_school, photo_url, school_email, school_phone, school_admin_login, specializations, created_at, updated_at, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), ?)
         `
-		result, err := db.Exec(query, school.SchoolName, school.SchoolAddress, school.City, school.AboutSchool, school.PhotoURL, school.SchoolEmail, school.SchoolPhone, school.SchoolAdminLogin, string(specializationsJSON), schoolAdminID)
+		result, err := db.Exec(query,
+			school.SchoolName,
+			school.SchoolAddress,
+			school.City,
+			school.AboutSchool,
+			school.PhotoURL,
+			school.SchoolEmail,
+			school.SchoolPhone,
+			school.SchoolAdminLogin,
+			string(specializationsJSON),
+			schoolAdminID,
+		)
 		if err != nil {
 			log.Println("Insert error:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create school"})
@@ -171,7 +182,42 @@ func (sc *SchoolController) CreateSchool(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		utils.ResponseJSON(w, school)
+		// Подготовка ответа
+		responseSchool := struct {
+			SchoolID         int      `json:"school_id"`
+			UserID           int      `json:"user_id"`
+			SchoolName       string   `json:"school_name"`
+			SchoolAddress    string   `json:"school_address"`
+			City             string   `json:"city"`
+			AboutSchool      string   `json:"about_school"`
+			PhotoURL         *string  `json:"photo_url"` // Pointer to handle NULL
+			SchoolEmail      string   `json:"school_email"`
+			SchoolPhone      string   `json:"school_phone"`
+			SchoolAdminLogin string   `json:"school_admin_login"`
+			CreatedAt        string   `json:"created_at"`
+			UpdatedAt        string   `json:"updated_at"`
+			Specializations  []string `json:"specializations"`
+		}{
+			SchoolID:         school.SchoolID,
+			UserID:           schoolAdminID,
+			SchoolName:       school.SchoolName,
+			SchoolAddress:    school.SchoolAddress,
+			City:             school.City,
+			AboutSchool:      school.AboutSchool,
+			SchoolEmail:      school.SchoolEmail,
+			SchoolPhone:      school.SchoolPhone,
+			SchoolAdminLogin: school.SchoolAdminLogin,
+			Specializations:  school.Specializations,
+			CreatedAt:        time.Now().Format(time.RFC3339),
+			UpdatedAt:        time.Now().Format(time.RFC3339),
+		}
+
+		// Преобразуем sql.NullString в указатель для JSON
+		if school.PhotoURL.Valid {
+			responseSchool.PhotoURL = &school.PhotoURL.String
+		}
+
+		utils.ResponseJSON(w, responseSchool)
 	}
 }
 func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
@@ -211,25 +257,25 @@ func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 		var existingSchool models.School
 		var specializationsJSON string
 		err = db.QueryRow(`
-			SELECT 
-				school_id, 
-				school_name, 
-				school_address, 
-				city, 
-				about_school, 
-				photo_url, 
-				school_email, 
-				school_phone, 
-				school_admin_login, 
-				specializations 
-			FROM Schools 
-			WHERE school_id = ?`, schoolID).Scan(
+            SELECT 
+                school_id, 
+                school_name, 
+                school_address, 
+                city, 
+                about_school, 
+                photo_url, 
+                school_email, 
+                school_phone, 
+                school_admin_login, 
+                specializations 
+            FROM Schools 
+            WHERE school_id = ?`, schoolID).Scan(
 			&existingSchool.SchoolID,
 			&existingSchool.SchoolName,
 			&existingSchool.SchoolAddress,
 			&existingSchool.City,
 			&existingSchool.AboutSchool,
-			&existingSchool.PhotoURL,
+			&existingSchool.PhotoURL, // sql.NullString
 			&existingSchool.SchoolEmail,
 			&existingSchool.SchoolPhone,
 			&existingSchool.SchoolAdminLogin,
@@ -305,20 +351,18 @@ func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 			log.Println("Photo file received")
 
 			uniqueFileName := fmt.Sprintf("school-%d-%d.jpg", schoolID, time.Now().Unix())
-
-			// Обновлено: передаем строку "schoolphoto" вместо false
 			photoURL, err := utils.UploadFileToS3(file, uniqueFileName, "schoolphoto")
-
 			if err != nil {
 				log.Println("S3 upload failed:", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Photo upload failed"})
 				return
 			}
 
-			updatedSchool.PhotoURL = photoURL
+			updatedSchool.PhotoURL = sql.NullString{String: photoURL, Valid: true}
 			log.Println("Photo uploaded successfully, URL:", photoURL)
 		} else {
-			log.Println("No photo uploaded, proceeding with update")
+			log.Println("No photo uploaded, retaining existing PhotoURL")
+			// Retain existing PhotoURL (could be NULL or a valid URL)
 		}
 
 		// Step 9: Convert specializations to JSON
@@ -364,10 +408,39 @@ func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Step 11: Return the updated school data as a response
+		responseSchool := struct {
+			SchoolID         int      `json:"school_id"`
+			SchoolName       string   `json:"school_name"`
+			SchoolAddress    string   `json:"school_address"`
+			City             string   `json:"city"`
+			AboutSchool      string   `json:"about_school"`
+			PhotoURL         *string  `json:"photo_url"` // Pointer to handle NULL
+			SchoolEmail      string   `json:"school_email"`
+			SchoolPhone      string   `json:"school_phone"`
+			SchoolAdminLogin string   `json:"school_admin_login"`
+			Specializations  []string `json:"specializations"`
+		}{
+			SchoolID:         updatedSchool.SchoolID,
+			SchoolName:       updatedSchool.SchoolName,
+			SchoolAddress:    updatedSchool.SchoolAddress,
+			City:             updatedSchool.City,
+			AboutSchool:      updatedSchool.AboutSchool,
+			SchoolEmail:      updatedSchool.SchoolEmail,
+			SchoolPhone:      updatedSchool.SchoolPhone,
+			SchoolAdminLogin: updatedSchool.SchoolAdminLogin,
+			Specializations:  updatedSchool.Specializations,
+		}
+
+		// Handle PhotoURL for JSON response
+		if updatedSchool.PhotoURL.Valid {
+			responseSchool.PhotoURL = &updatedSchool.PhotoURL.String
+		}
+
 		utils.ResponseJSON(w, map[string]interface{}{
 			"message":    "School updated successfully",
 			"school_id":  schoolID,
 			"updated_by": requesterID,
+			"school":     responseSchool,
 		})
 	}
 }
@@ -430,9 +503,10 @@ func atoi(s string) int {
 }
 func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Шаг 1: Выполнение запроса для получения всех школ, включая поле specializations
-		query := `SELECT school_id, school_name, school_address, city, about_school, school_email, 
-                  school_phone, school_admin_login, specializations FROM Schools`
+		// Шаг 1: Выполнение запроса для получения всех школ
+		query := `SELECT school_id, school_name, school_address, city, about_school, photo_url, 
+                         school_email, school_phone, school_admin_login, specializations, 
+                         created_at, updated_at FROM Schools`
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Println("Error fetching schools:", err)
@@ -442,29 +516,38 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 		defer rows.Close()
 
 		// Шаг 2: Создание среза для хранения данных о школах
-		var schools []models.School
+		var schools []struct {
+			models.School
+			PhotoURL *string `json:"photo_url"` // Pointer for JSON null handling
+		}
 
 		// Шаг 3: Прохождение по результатам запроса и заполнение среза
 		for rows.Next() {
 			var school models.School
-			var city sql.NullString                // Используем sql.NullString для обработки возможного NULL в поле city
-			var schoolAddress sql.NullString       // Для адреса
-			var aboutSchool sql.NullString         // Для описания школы
-			var schoolEmail sql.NullString         // Для email
-			var schoolPhone sql.NullString         // Для телефона
-			var schoolAdminLogin sql.NullString    // Для логина администратора
-			var specializationsJSON sql.NullString // Для специализаций в JSON формате
+			var city sql.NullString
+			var schoolAddress sql.NullString
+			var aboutSchool sql.NullString
+			var photoURL sql.NullString
+			var schoolEmail sql.NullString
+			var schoolPhone sql.NullString
+			var schoolAdminLogin sql.NullString
+			var specializationsJSON sql.NullString
+			var createdAtStr sql.NullString // Use sql.NullString for created_at
+			var updatedAtStr sql.NullString // Use sql.NullString for updated_at
 
 			err := rows.Scan(
 				&school.SchoolID,
 				&school.SchoolName,
-				&schoolAddress,       // sql.NullString
-				&city,                // sql.NullString
-				&aboutSchool,         // sql.NullString
-				&schoolEmail,         // sql.NullString
-				&schoolPhone,         // sql.NullString
-				&schoolAdminLogin,    // sql.NullString
-				&specializationsJSON, // sql.NullString
+				&schoolAddress,
+				&city,
+				&aboutSchool,
+				&photoURL,
+				&schoolEmail,
+				&schoolPhone,
+				&schoolAdminLogin,
+				&specializationsJSON,
+				&createdAtStr,
+				&updatedAtStr,
 			)
 			if err != nil {
 				log.Println("Error scanning school data:", err)
@@ -476,40 +559,72 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 			if city.Valid {
 				school.City = city.String
 			}
-
 			if schoolAddress.Valid {
 				school.SchoolAddress = schoolAddress.String
 			}
-
 			if aboutSchool.Valid {
 				school.AboutSchool = aboutSchool.String
 			}
-
 			if schoolEmail.Valid {
 				school.SchoolEmail = schoolEmail.String
 			}
-
 			if schoolPhone.Valid {
 				school.SchoolPhone = schoolPhone.String
 			}
-
 			if schoolAdminLogin.Valid {
 				school.SchoolAdminLogin = schoolAdminLogin.String
 			}
+
+			// Обработка photo_url
+			school.PhotoURL = photoURL // Assign sql.NullString directly
 
 			// Обработка специализаций
 			if specializationsJSON.Valid && specializationsJSON.String != "" {
 				err = json.Unmarshal([]byte(specializationsJSON.String), &school.Specializations)
 				if err != nil {
-					// Если не удалось распарсить JSON, сохраняем как одну строку
 					school.Specializations = []string{specializationsJSON.String}
 				}
 			} else {
-				school.Specializations = []string{} // Пустой массив, если нет специализаций
+				school.Specializations = []string{}
+			}
+
+			// Обработка created_at
+			if createdAtStr.Valid && createdAtStr.String != "" {
+				parsedTime, err := time.Parse("2006-01-02 15:04:05", createdAtStr.String)
+				if err != nil {
+					log.Printf("Error parsing created_at '%s': %v", createdAtStr.String, err)
+					school.CreatedAt = "" // Fallback to empty string
+				} else {
+					school.CreatedAt = parsedTime.Format(time.RFC3339)
+				}
+			} else {
+				school.CreatedAt = ""
+			}
+
+			// Обработка updated_at
+			if updatedAtStr.Valid && updatedAtStr.String != "" {
+				parsedTime, err := time.Parse("2006-01-02 15:04:05", updatedAtStr.String)
+				if err != nil {
+					log.Printf("Error parsing updated_at '%s': %v", updatedAtStr.String, err)
+					school.UpdatedAt = "" // Fallback to empty string
+				} else {
+					school.UpdatedAt = parsedTime.Format(time.RFC3339)
+				}
+			} else {
+				school.UpdatedAt = ""
+			}
+
+			// Подготовка структуры для ответа с правильной сериализацией photo_url
+			responseSchool := struct {
+				models.School
+				PhotoURL *string `json:"photo_url"`
+			}{School: school}
+			if photoURL.Valid {
+				responseSchool.PhotoURL = &photoURL.String
 			}
 
 			// Добавляем школу в срез
-			schools = append(schools, school)
+			schools = append(schools, responseSchool)
 		}
 
 		// Шаг 4: Проверка ошибок после завершения итерации
