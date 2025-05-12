@@ -808,6 +808,168 @@ func (c *Controller) Login(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
+func (c *Controller) UpdateUser(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var userUpdate models.User
+		var error models.Error
+
+		// Check if the request is from a superadmin
+		authHeader := r.Header.Get("Authorization")
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			error.Message = "Authorization header is required."
+			utils.RespondWithError(w, http.StatusUnauthorized, error)
+			return
+		}
+
+		tokenString := strings.Split(authHeader, " ")[1]
+		token, err := utils.ParseToken(tokenString)
+		if err != nil || !token.Valid {
+			error.Message = "Invalid token."
+			utils.RespondWithError(w, http.StatusUnauthorized, error)
+			return
+		}
+
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok || claims["role"] != "superadmin" {
+			error.Message = "Only superadmin can update users."
+			utils.RespondWithError(w, http.StatusForbidden, error)
+			return
+		}
+
+		// Decode request body
+		err = json.NewDecoder(r.Body).Decode(&userUpdate)
+		if err != nil {
+			error.Message = "Invalid request body."
+			utils.RespondWithError(w, http.StatusBadRequest, error)
+			return
+		}
+
+		// Get user ID from URL parameters
+		vars := mux.Vars(r)
+		userID, err := strconv.Atoi(vars["user_id"])
+		if err != nil {
+			error.Message = "Invalid user ID."
+			utils.RespondWithError(w, http.StatusBadRequest, error)
+			return
+		}
+
+		// Verify user exists
+		var exists bool
+		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)", userID).Scan(&exists)
+		if err != nil || !exists {
+			error.Message = "User not found."
+			utils.RespondWithError(w, http.StatusNotFound, error)
+			return
+		}
+
+		// Build update query dynamically based on provided fields
+		updates := []string{}
+		args := []interface{}{}
+		argCount := 1
+
+		if userUpdate.Password != "" {
+			hash, err := bcrypt.GenerateFromPassword([]byte(userUpdate.Password), bcrypt.DefaultCost)
+			if err != nil {
+				log.Printf("Error hashing password: %v", err)
+				error.Message = "Server error."
+				utils.RespondWithError(w, http.StatusInternalServerError, error)
+				return
+			}
+			updates = append(updates, fmt.Sprintf("password = ?"))
+			args = append(args, string(hash))
+			argCount++
+		}
+
+		if userUpdate.FirstName != "" {
+			updates = append(updates, fmt.Sprintf("first_name = ?"))
+			args = append(args, userUpdate.FirstName)
+			argCount++
+		}
+
+		if userUpdate.LastName != "" {
+			updates = append(updates, fmt.Sprintf("last_name = ?"))
+			args = append(args, userUpdate.LastName)
+			argCount++
+		}
+
+		if userUpdate.DateOfBirth != "" {
+			_, err := time.Parse("2006-01-02", userUpdate.DateOfBirth)
+			if err != nil {
+				error.Message = "Invalid date format. Please use YYYY-MM-DD format."
+				utils.RespondWithError(w, http.StatusBadRequest, error)
+				return
+			}
+
+			// Calculate age
+			dob, _ := time.Parse("2006-01-02", userUpdate.DateOfBirth)
+			now := time.Now()
+			age := now.Year() - dob.Year()
+			if now.Month() < dob.Month() || (now.Month() == dob.Month() && now.Day() < dob.Day()) {
+				age--
+			}
+
+			updates = append(updates, fmt.Sprintf("date_of_birth = ?"))
+			args = append(args, userUpdate.DateOfBirth)
+			argCount++
+			updates = append(updates, fmt.Sprintf("age = ?"))
+			args = append(args, age)
+			argCount++
+		}
+
+		if userUpdate.Role != "" {
+			// Validate role
+			validRoles := []string{"user", "schooladmin", "superadmin"}
+			isValidRole := false
+			for _, role := range validRoles {
+				if userUpdate.Role == role {
+					isValidRole = true
+					break
+				}
+			}
+			if !isValidRole {
+				error.Message = "Invalid role specified."
+				utils.RespondWithError(w, http.StatusBadRequest, error)
+				return
+			}
+			updates = append(updates, fmt.Sprintf("role = ?"))
+			args = append(args, userUpdate.Role)
+			argCount++
+		}
+
+		if len(updates) == 0 {
+			error.Message = "No fields to update."
+			utils.RespondWithError(w, http.StatusBadRequest, error)
+			return
+		}
+
+		// Construct and execute update query
+		query := fmt.Sprintf("UPDATE users SET %s WHERE id = ?", strings.Join(updates, ", "))
+		args = append(args, userID)
+
+		result, err := db.Exec(query, args...)
+		if err != nil {
+			log.Printf("Error updating user: %v", err)
+			error.Message = "Server error."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
+			return
+		}
+
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected == 0 {
+			error.Message = "No changes made to user."
+			utils.RespondWithError(w, http.StatusNotModified, error)
+			return
+		}
+
+		// Prepare response
+		response := map[string]interface{}{
+			"message": "User updated successfully",
+			"user_id": userID,
+		}
+
+		utils.ResponseJSON(w, response)
+	}
+}
 func (c *Controller) GetAllUsers(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Запрос для получения всех пользователей из базы
