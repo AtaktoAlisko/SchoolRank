@@ -979,40 +979,223 @@ func (c Controller) DeleteAccount(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var errorObject models.Error
 
-		// Извлекаем user_id из URL
-		vars := mux.Vars(r)
-		userID := vars["user_id"]
+		// Get the authenticated user ID from the token
+		tokenUserID, err := utils.VerifyToken(r)
+		if err != nil {
+			errorObject.Message = "Unauthorized: invalid or missing token"
+			utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
+			return
+		}
 
-		// Проверяем, что user_id валидный
-		if userID == "" {
+		// Get the user ID from the URL parameter
+		vars := mux.Vars(r)
+		targetUserID := vars["user_id"]
+
+		// Validate target user ID
+		if targetUserID == "" {
 			errorObject.Message = "User ID is required"
 			utils.RespondWithError(w, http.StatusBadRequest, errorObject)
 			return
 		}
 
-		// Проверка, существует ли пользователь с таким ID в базе данных
+		// Check if the requesting user has permission to delete this account
+		var tokenUserRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", tokenUserID).Scan(&tokenUserRole)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				errorObject.Message = "Authenticated user not found"
+				utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
+				return
+			}
+			log.Printf("Error fetching user role: %v", err)
+			errorObject.Message = "Error checking user permissions"
+			utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
+			return
+		}
+
+		// Check if user is trying to delete their own account or has admin permissions
+		isOwnAccount := fmt.Sprintf("%v", tokenUserID) == targetUserID
+		isAdmin := tokenUserRole == "superadmin" || tokenUserRole == "schooladmin"
+
+		if !isOwnAccount && !isAdmin {
+			errorObject.Message = "Permission denied: you can only delete your own account or must be an admin"
+			utils.RespondWithError(w, http.StatusForbidden, errorObject)
+			return
+		}
+
+		// Additional restrictions: superadmin can delete any account, schooladmin can't delete superadmin
+		if tokenUserRole == "schooladmin" {
+			var targetUserRole string
+			err = db.QueryRow("SELECT role FROM users WHERE id = ?", targetUserID).Scan(&targetUserRole)
+			if err != nil {
+				if err == sql.ErrNoRows {
+					errorObject.Message = "Target user not found"
+					utils.RespondWithError(w, http.StatusNotFound, errorObject)
+					return
+				}
+				log.Printf("Error fetching target user role: %v", err)
+				errorObject.Message = "Error checking target user permissions"
+				utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
+				return
+			}
+
+			// School admin cannot delete superadmin
+			if targetUserRole == "superadmin" {
+				errorObject.Message = "Permission denied: school admin cannot delete superadmin accounts"
+				utils.RespondWithError(w, http.StatusForbidden, errorObject)
+				return
+			}
+		}
+
+		// Check if the target user exists
 		var existingUserID int
-		err := db.QueryRow("SELECT id FROM users WHERE id = ?", userID).Scan(&existingUserID)
+		err = db.QueryRow("SELECT id FROM users WHERE id = ?", targetUserID).Scan(&existingUserID)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				errorObject.Message = "User not found"
 				utils.RespondWithError(w, http.StatusNotFound, errorObject)
 				return
 			}
+			log.Printf("Error checking if user exists: %v", err)
 			errorObject.Message = "Error querying user"
 			utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
 			return
 		}
 
-		// Удаление пользователя из базы данных
-		_, err = db.Exec("DELETE FROM users WHERE id = ?", userID)
+		// Begin transaction to ensure atomicity
+		tx, err := db.Begin()
 		if err != nil {
+			log.Printf("Error starting transaction: %v", err)
+			errorObject.Message = "Failed to start database transaction"
+			utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
+			return
+		}
+
+		// Check if the user is associated with any Schools
+		var schoolCount int
+		err = tx.QueryRow("SELECT COUNT(*) FROM Schools WHERE user_id = ?", targetUserID).Scan(&schoolCount)
+		if err != nil {
+			tx.Rollback()
+			log.Printf("Error checking school associations: %v", err)
+			errorObject.Message = "Failed to check user associations"
+			utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
+			return
+		}
+
+		// If user has associated schools, handle dependencies
+		if schoolCount > 0 {
+			// Check if any schools are referenced in Olympiads table
+			var olympiadCount int
+			err = tx.QueryRow(`
+				SELECT COUNT(*) FROM Olympiads o
+				JOIN Schools s ON o.school_id = s.school_id
+				WHERE s.user_id = ?
+			`, targetUserID).Scan(&olympiadCount)
+			if err != nil {
+				tx.Rollback()
+				log.Printf("Error checking olympiad associations: %v", err)
+				errorObject.Message = "Failed to check olympiad associations"
+				utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
+				return
+			}
+
+			if olympiadCount > 0 {
+				_, err = tx.Exec(`
+					DELETE o FROM Olympiads o
+					JOIN Schools s ON o.school_id = s.school_id
+					WHERE s.user_id = ?
+				`, targetUserID)
+				if err != nil {
+					tx.Rollback()
+					log.Printf("Error deleting associated olympiad entries: %v", err)
+					errorObject.Message = "Failed to delete associated olympiad entries"
+					utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
+					return
+				}
+			}
+
+			// Check if any schools are referenced in UNT_Exams table
+			var untExamCount int
+			err = tx.QueryRow(`
+				SELECT COUNT(*) FROM UNT_Exams ue
+				JOIN Schools s ON ue.school_id = s.school_id
+				WHERE s.user_id = ?
+			`, targetUserID).Scan(&untExamCount)
+			if err != nil {
+				tx.Rollback()
+				log.Printf("Error checking UNT_Exams associations: %v", err)
+				errorObject.Message = "Failed to check UNT_Exams associations"
+				utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
+				return
+			}
+
+			if untExamCount > 0 {
+				_, err = tx.Exec(`
+					DELETE ue FROM UNT_Exams ue
+					JOIN Schools s ON ue.school_id = s.school_id
+					WHERE s.user_id = ?
+				`, targetUserID)
+				if err != nil {
+					tx.Rollback()
+					log.Printf("Error deleting associated UNT_Exams entries: %v", err)
+					errorObject.Message = "Failed to delete associated UNT_Exams entries"
+					utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
+					return
+				}
+			}
+
+			// Now we can delete the schools
+			_, err = tx.Exec("DELETE FROM Schools WHERE user_id = ?", targetUserID)
+			if err != nil {
+				tx.Rollback()
+				log.Printf("Error deleting associated schools: %v", err)
+				errorObject.Message = "Failed to delete associated schools"
+				utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
+				return
+			}
+		}
+
+		// Check if the user is referenced in Reviews table
+		var reviewCount int
+		err = tx.QueryRow("SELECT COUNT(*) FROM Reviews WHERE user_id = ?", targetUserID).Scan(&reviewCount)
+		if err != nil {
+			tx.Rollback()
+			log.Printf("Error checking Reviews associations: %v", err)
+			errorObject.Message = "Failed to check Reviews associations"
+			utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
+			return
+		}
+
+		if reviewCount > 0 {
+			_, err = tx.Exec("DELETE FROM Reviews WHERE user_id = ?", targetUserID)
+			if err != nil {
+				tx.Rollback()
+				log.Printf("Error deleting associated Reviews entries: %v", err)
+				errorObject.Message = "Failed to delete associated Reviews entries"
+				utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
+				return
+			}
+		}
+
+		// Delete the user after handling all dependencies
+		_, err = tx.Exec("DELETE FROM users WHERE id = ?", targetUserID)
+		if err != nil {
+			tx.Rollback()
+			log.Printf("Error deleting user: %v", err)
 			errorObject.Message = "Failed to delete user"
 			utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
 			return
 		}
 
-		// Ответ о успешном удалении
+		// Commit the transaction
+		if err := tx.Commit(); err != nil {
+			log.Printf("Error committing transaction: %v", err)
+			errorObject.Message = "Failed to complete user deletion"
+			utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
+			return
+		}
+
+		// Respond with success message
 		utils.ResponseJSON(w, map[string]string{"message": "Account deleted successfully"})
 	}
 }
@@ -1154,7 +1337,6 @@ func (c *Controller) EditProfile(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
-
 func (c Controller) UpdatePassword(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Structure to capture the request data
