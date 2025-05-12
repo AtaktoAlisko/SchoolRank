@@ -1144,6 +1144,36 @@ func (c Controller) DeleteAccount(db *sql.DB) http.HandlerFunc {
 				}
 			}
 
+			// Check if any schools are referenced in Reviews table (via school_id)
+			var schoolReviewCount int
+			err = tx.QueryRow(`
+				SELECT COUNT(*) FROM Reviews r
+				JOIN Schools s ON r.school_id = s.school_id
+				WHERE s.user_id = ?
+			`, targetUserID).Scan(&schoolReviewCount)
+			if err != nil {
+				tx.Rollback()
+				log.Printf("Error checking Reviews (school_id) associations: %v", err)
+				errorObject.Message = "Failed to check Reviews (school_id) associations"
+				utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
+				return
+			}
+
+			if schoolReviewCount > 0 {
+				_, err = tx.Exec(`
+					DELETE r FROM Reviews r
+					JOIN Schools s ON r.school_id = s.school_id
+					WHERE s.user_id = ?
+				`, targetUserID)
+				if err != nil {
+					tx.Rollback()
+					log.Printf("Error deleting associated Reviews (school_id) entries: %v", err)
+					errorObject.Message = "Failed to delete associated Reviews (school_id) entries"
+					utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
+					return
+				}
+			}
+
 			// Now we can delete the schools
 			_, err = tx.Exec("DELETE FROM Schools WHERE user_id = ?", targetUserID)
 			if err != nil {
@@ -1155,23 +1185,23 @@ func (c Controller) DeleteAccount(db *sql.DB) http.HandlerFunc {
 			}
 		}
 
-		// Check if the user is referenced in Reviews table
-		var reviewCount int
-		err = tx.QueryRow("SELECT COUNT(*) FROM Reviews WHERE user_id = ?", targetUserID).Scan(&reviewCount)
+		// Check if the user is referenced in Reviews table (via user_id)
+		var userReviewCount int
+		err = tx.QueryRow("SELECT COUNT(*) FROM Reviews WHERE user_id = ?", targetUserID).Scan(&userReviewCount)
 		if err != nil {
 			tx.Rollback()
-			log.Printf("Error checking Reviews associations: %v", err)
-			errorObject.Message = "Failed to check Reviews associations"
+			log.Printf("Error checking Reviews (user_id) associations: %v", err)
+			errorObject.Message = "Failed to check Reviews (user_id) associations"
 			utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
 			return
 		}
 
-		if reviewCount > 0 {
+		if userReviewCount > 0 {
 			_, err = tx.Exec("DELETE FROM Reviews WHERE user_id = ?", targetUserID)
 			if err != nil {
 				tx.Rollback()
-				log.Printf("Error deleting associated Reviews entries: %v", err)
-				errorObject.Message = "Failed to delete associated Reviews entries"
+				log.Printf("Error deleting associated Reviews (user_id) entries: %v", err)
+				errorObject.Message = "Failed to delete associated Reviews (user_id) entries"
 				utils.RespondWithError(w, http.StatusInternalServerError, errorObject)
 				return
 			}
