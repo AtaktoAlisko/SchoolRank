@@ -1040,67 +1040,164 @@ func (c *Controller) CreateUser(db *sql.DB) http.HandlerFunc {
 			Password    string `json:"password"`
 			Role        string `json:"role"`
 		}
+		var error models.Error
 
-		// Проверка токена
+		// Verify superadmin token
 		adminID, err := utils.VerifyToken(r)
 		if err != nil {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+			error.Message = "Unauthorized."
+			utils.RespondWithError(w, http.StatusUnauthorized, error)
 			return
 		}
 
-		// Проверка роли суперадмина
+		// Check superadmin role
 		var adminRole string
 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", adminID).Scan(&adminRole)
 		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching role"})
+			log.Printf("Error fetching admin role: %v", err)
+			error.Message = "Error fetching role."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
 			return
 		}
 
 		if adminRole != "superadmin" {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only superadmin can create users"})
+			error.Message = "Only superadmin can create users."
+			utils.RespondWithError(w, http.StatusForbidden, error)
 			return
 		}
 
-		// Читаем тело запроса
+		// Decode request body
 		err = json.NewDecoder(r.Body).Decode(&requestData)
 		if err != nil {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
+			error.Message = "Invalid request body."
+			utils.RespondWithError(w, http.StatusBadRequest, error)
 			return
 		}
 
-		// Валидация роли
-		if requestData.Role != "user" && requestData.Role != "schooladmin" && requestData.Role != "superadmin" {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid role"})
+		// Validate required fields
+		if requestData.Email == "" {
+			error.Message = "Email is required."
+			utils.RespondWithError(w, http.StatusBadRequest, error)
+			return
+		}
+		if requestData.Password == "" {
+			error.Message = "Password is required."
+			utils.RespondWithError(w, http.StatusBadRequest, error)
 			return
 		}
 
-		// Хешируем пароль
-		hashedPassword, err := utils.HashPassword(requestData.Password)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Password hashing failed"})
+		// Validate email format
+		if !strings.Contains(requestData.Email, "@") {
+			error.Message = "Invalid email format."
+			utils.RespondWithError(w, http.StatusBadRequest, error)
 			return
 		}
 
-		// Проверка на существование email
+		// Validate role
+		validRoles := []string{"user", "schooladmin", "superadmin"}
+		isValidRole := false
+		for _, role := range validRoles {
+			if requestData.Role == role {
+				isValidRole = true
+				break
+			}
+		}
+		if !isValidRole {
+			error.Message = "Invalid role specified."
+			utils.RespondWithError(w, http.StatusBadRequest, error)
+			return
+		}
+
+		// Validate and calculate age if DateOfBirth is provided
+		age := 0
+		if requestData.DateOfBirth != "" {
+			dob, err := time.Parse("2006-01-02", requestData.DateOfBirth)
+			if err != nil {
+				error.Message = "Invalid date format. Please use YYYY-MM-DD format."
+				utils.RespondWithError(w, http.StatusBadRequest, error)
+				return
+			}
+			now := time.Now()
+			age = now.Year() - dob.Year()
+			if now.Month() < dob.Month() || (now.Month() == dob.Month() && now.Day() < dob.Day()) {
+				age--
+			}
+		}
+
+		// Check if email already exists
 		var existingID int
 		err = db.QueryRow("SELECT id FROM users WHERE email = ?", requestData.Email).Scan(&existingID)
-		if err == nil && existingID > 0 {
-			utils.RespondWithError(w, http.StatusConflict, models.Error{Message: "Email already exists"})
+		if err == nil {
+			error.Message = "Email already exists."
+			utils.RespondWithError(w, http.StatusConflict, error)
+			return
+		} else if err != sql.ErrNoRows {
+			log.Printf("Error checking existing email: %v", err)
+			error.Message = "Server error."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
 			return
 		}
 
-		// Вставляем нового пользователя в базу
-		query := `INSERT INTO users (first_name, last_name, date_of_birth, email, password, role) 
-		          VALUES (?, ?, ?, ?, ?, ?)`
-
-		_, err = db.Exec(query, requestData.FirstName, requestData.LastName, requestData.DateOfBirth,
-			requestData.Email, hashedPassword, requestData.Role)
+		// Hash password
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(requestData.Password), bcrypt.DefaultCost)
 		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create user"})
+			log.Printf("Error hashing password: %v", err)
+			error.Message = "Server error."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
 			return
 		}
 
-		utils.ResponseJSON(w, map[string]string{"message": "User created successfully"})
+		// Generate verification token (for schema compatibility)
+		verificationToken, err := utils.GenerateVerificationToken(requestData.Email)
+		if err != nil {
+			log.Printf("Error generating verification token: %v", err)
+			error.Message = "Failed to generate verification token."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
+			return
+		}
+
+		// Set verified = true for superadmin-created users (consistent with Signup)
+		verified := 1
+		avatarURL := sql.NullString{String: "", Valid: false} // Default to NULL
+
+		// Insert new user into database
+		query := `INSERT INTO users (first_name, last_name, date_of_birth, age, email, password, role, avatar_url, verified, verification_token) 
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		result, err := db.Exec(query,
+			requestData.FirstName,
+			requestData.LastName,
+			requestData.DateOfBirth,
+			age,
+			requestData.Email,
+			hashedPassword,
+			requestData.Role,
+			avatarURL,
+			verified,
+			verificationToken)
+		if err != nil {
+			log.Printf("Error creating user: %v", err)
+			error.Message = "Failed to create user."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
+			return
+		}
+
+		// Get the created user's ID
+		userID, err := result.LastInsertId()
+		if err != nil {
+			log.Printf("Error getting last insert ID: %v", err)
+			error.Message = "Failed to retrieve user ID."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
+			return
+		}
+
+		// Prepare response
+		response := map[string]interface{}{
+			"message": "User created successfully",
+			"user_id": userID,
+			"email":   requestData.Email,
+		}
+
+		utils.ResponseJSON(w, response)
 	}
 }
 func (c Controller) Logout(w http.ResponseWriter, r *http.Request) {
