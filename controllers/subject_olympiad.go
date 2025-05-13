@@ -63,7 +63,7 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 		endDate := r.FormValue("end_date")
 		description := r.FormValue("description")
 		level := r.FormValue("level")
-		limitStr := r.FormValue("limit")
+		limitStr := r.FormValue("limit_participants")
 
 		if subjectName == "" || startDate == "" || endDate == "" || description == "" || level == "" || limitStr == "" {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "subject_name, start date, end date, description, level, and limit are required fields."})

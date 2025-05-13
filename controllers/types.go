@@ -860,14 +860,12 @@ func (c *UNTScoreController) DeleteUNTExam(db *sql.DB) http.HandlerFunc {
 }
 func (c *UNTScoreController) GetUNTBySchoolID(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Step 1: Get userID from token
 		userID, err := utils.VerifyToken(r)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
 			return
 		}
 
-		// Step 2: Check user role and school_id
 		var userRole string
 		var userSchoolID sql.NullInt64
 		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
@@ -877,21 +875,18 @@ func (c *UNTScoreController) GetUNTBySchoolID(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Step 3: Get path and query parameters
 		vars := mux.Vars(r)
 		schoolIDStr := vars["school_id"]
 		letter := r.URL.Query().Get("letter")
 		studentID := r.URL.Query().Get("student_id")
 		examType := r.URL.Query().Get("type")
 
-		// Parse schoolID from path parameter
 		schoolID, err := strconv.ParseInt(schoolIDStr, 10, 64)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Некорректный ID школы"})
 			return
 		}
 
-		// Step 4: Access control by role
 		switch userRole {
 		case "schooladmin":
 			if !userSchoolID.Valid {
@@ -903,13 +898,11 @@ func (c *UNTScoreController) GetUNTBySchoolID(db *sql.DB) http.HandlerFunc {
 				return
 			}
 		case "admin", "moderator", "superadmin":
-			// these roles can access any school
 		default:
 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "У вас нет прав для просмотра результатов UNT"})
 			return
 		}
 
-		// Step 5: Build query
 		query := `
 			SELECT 
 				e.id, 
@@ -924,7 +917,9 @@ func (c *UNTScoreController) GetUNTBySchoolID(db *sql.DB) http.HandlerFunc {
 				e.total_score,
 				e.student_id,
 				e.school_id,
-				s.letter
+				s.letter,
+				e.date,
+				e.document_url
 			FROM 
 				UNT_Exams e
 			JOIN 
@@ -939,12 +934,10 @@ func (c *UNTScoreController) GetUNTBySchoolID(db *sql.DB) http.HandlerFunc {
 			query += " AND s.letter = ?"
 			args = append(args, letter)
 		}
-
 		if studentID != "" {
 			query += " AND e.student_id = ?"
 			args = append(args, studentID)
 		}
-
 		if examType != "" {
 			query += " AND e.exam_type = ?"
 			args = append(args, strings.ToLower(examType))
@@ -952,7 +945,6 @@ func (c *UNTScoreController) GetUNTBySchoolID(db *sql.DB) http.HandlerFunc {
 
 		query += " ORDER BY e.total_score DESC, s.letter, e.student_id"
 
-		// Step 6: Execute query
 		rows, err := db.Query(query, args...)
 		if err != nil {
 			log.Printf("Ошибка при запросе результатов UNT: %v", err)
@@ -961,24 +953,24 @@ func (c *UNTScoreController) GetUNTBySchoolID(db *sql.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		// Step 7: Prepare result struct
 		type UNTSchoolResult struct {
 			ID                   int    `json:"id"`
-			ExamType             string `json:"type"`
+			ExamType             string `json:"exam_type"`
 			ReadingLiteracy      int    `json:"reading_literacy"`
 			HistoryKazakhstan    int    `json:"history_of_kazakhstan"`
 			MathematicalLiteracy int    `json:"mathematical_literacy"`
-			FirstSubjectName     string `json:"first_subject_name"`
+			FirstSubjectName     string `json:"first_subject"`
 			FirstSubjectScore    int    `json:"first_subject_score"`
-			SecondSubjectName    string `json:"second_subject_name"`
+			SecondSubjectName    string `json:"second_subject"`
 			SecondSubjectScore   int    `json:"second_subject_score"`
 			TotalScore           int    `json:"total"`
 			StudentID            int    `json:"student_id"`
 			SchoolID             int    `json:"school_id"`
 			Letter               string `json:"letter"`
+			Date                 string `json:"date"`
+			DocumentURL          string `json:"document_url"`
 		}
 
-		// Step 8: Collect results
 		var results []UNTSchoolResult
 		for rows.Next() {
 			var result UNTSchoolResult
@@ -996,6 +988,8 @@ func (c *UNTScoreController) GetUNTBySchoolID(db *sql.DB) http.HandlerFunc {
 				&result.StudentID,
 				&result.SchoolID,
 				&result.Letter,
+				&result.Date,
+				&result.DocumentURL,
 			)
 			if err != nil {
 				log.Printf("Ошибка при сканировании строки: %v", err)
@@ -1004,7 +998,6 @@ func (c *UNTScoreController) GetUNTBySchoolID(db *sql.DB) http.HandlerFunc {
 			results = append(results, result)
 		}
 
-		// Step 9: Return JSON
 		utils.ResponseJSON(w, map[string]interface{}{
 			"count": len(results),
 			"data":  results,
@@ -1306,9 +1299,9 @@ func (c *TypeController) GetFirstTypes(db *sql.DB) http.HandlerFunc {
 		query := `
         SELECT 
             ft.first_type_id, 
-            ft.first_subject AS first_subject_name, 
+            ft.first_subject AS first_subject, 
             COALESCE(ft.first_subject_score, 0) AS first_subject_score,
-            ft.second_subject AS second_subject_name, 
+            ft.second_subject AS second_subject, 
             COALESCE(ft.second_subject_score, 0) AS second_subject_score,
             COALESCE(ft.history_of_kazakhstan, 0) AS history_of_kazakhstan, 
             COALESCE(ft.mathematical_literacy, 0) AS mathematical_literacy, 

@@ -1493,43 +1493,49 @@ func (c *Controller) EditProfile(db *sql.DB) http.HandlerFunc {
 		var userUpdate models.User
 		var error models.Error
 
-		// Get user ID from token using VerifyToken
+		// Log the incoming request
+		log.Printf("Received PUT request to %s with headers: %v", r.URL.Path, r.Header)
+
+		// Get user ID from token
 		currentUserID, err := utils.VerifyToken(r)
 		if err != nil {
+			log.Printf("Token verification failed: %v", err)
 			error.Message = "Unauthorized access."
 			utils.RespondWithError(w, http.StatusUnauthorized, error)
+			return
+		}
+		log.Printf("Token verified, currentUserID: %d", currentUserID)
+
+		// Validate userID
+		if currentUserID <= 0 {
+			log.Printf("Invalid user ID from token: %d", currentUserID)
+			error.Message = "Invalid user ID from token."
+			utils.RespondWithError(w, http.StatusBadRequest, error)
 			return
 		}
 
 		// Parse target user ID from URL if provided (for superadmins)
 		targetUserID := currentUserID
 		targetUserIDParam := r.URL.Query().Get("id")
+		log.Printf("Query param 'id': %s", targetUserIDParam)
 		if targetUserIDParam != "" {
 			parsedID, err := strconv.Atoi(targetUserIDParam)
 			if err != nil {
+				log.Printf("Invalid user ID format: %v", err)
 				error.Message = "Invalid user ID format."
 				utils.RespondWithError(w, http.StatusBadRequest, error)
 				return
 			}
 			targetUserID = parsedID
 		}
-
-		// Decode request body
-		err = json.NewDecoder(r.Body).Decode(&userUpdate)
-		if err != nil {
-			error.Message = "Invalid request body."
-			utils.RespondWithError(w, http.StatusBadRequest, error)
-			return
-		}
-
-		// Log update attempt
-		log.Printf("Profile update attempt for userID: %d by userID: %d", targetUserID, currentUserID)
+		log.Printf("Target userID: %d", targetUserID)
 
 		// Check if target user exists and get current role
 		var role string
 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", targetUserID).Scan(&role)
 		if err != nil {
 			if err == sql.ErrNoRows {
+				log.Printf("User not found: %d", targetUserID)
 				error.Message = "User not found."
 				utils.RespondWithError(w, http.StatusNotFound, error)
 			} else {
@@ -1539,6 +1545,25 @@ func (c *Controller) EditProfile(db *sql.DB) http.HandlerFunc {
 			}
 			return
 		}
+		log.Printf("User role: %s", role)
+
+		// For /api/users/me, restrict 'id' query param unless superadmin
+		if r.URL.Path == "/api/users/me" && targetUserIDParam != "" && role != "superadmin" {
+			log.Printf("Query param 'id' not allowed for non-superadmin on /api/users/me")
+			error.Message = "Query param 'id' not allowed for this endpoint."
+			utils.RespondWithError(w, http.StatusBadRequest, error)
+			return
+		}
+
+		// Decode request body
+		err = json.NewDecoder(r.Body).Decode(&userUpdate)
+		if err != nil {
+			log.Printf("Invalid request body: %v", err)
+			error.Message = "Invalid request body."
+			utils.RespondWithError(w, http.StatusBadRequest, error)
+			return
+		}
+		log.Printf("Decoded user update: %+v", userUpdate)
 
 		// Start transaction
 		tx, err := db.Begin()
@@ -1570,6 +1595,7 @@ func (c *Controller) EditProfile(db *sql.DB) http.HandlerFunc {
 		if userUpdate.DateOfBirth != "" {
 			birthDate, err := time.Parse("2006-01-02", userUpdate.DateOfBirth)
 			if err != nil {
+				log.Printf("Invalid date format: %v", err)
 				error.Message = "Invalid date format. Please use YYYY-MM-DD format."
 				utils.RespondWithError(w, http.StatusBadRequest, error)
 				return
@@ -1595,6 +1621,7 @@ func (c *Controller) EditProfile(db *sql.DB) http.HandlerFunc {
 		// Build and execute query
 		query := fmt.Sprintf("UPDATE users SET %s WHERE id = ?", strings.Join(setClause, ", "))
 		args = append(args, targetUserID)
+		log.Printf("Executing query: %s with args: %v", query, args)
 
 		result, err := tx.Exec(query, args...)
 		if err != nil {
@@ -1606,6 +1633,7 @@ func (c *Controller) EditProfile(db *sql.DB) http.HandlerFunc {
 
 		rowsAffected, _ := result.RowsAffected()
 		if rowsAffected == 0 {
+			log.Printf("No rows affected for userID: %d", targetUserID)
 			error.Message = "No changes made."
 			utils.RespondWithError(w, http.StatusNotModified, error)
 			return
@@ -1619,7 +1647,7 @@ func (c *Controller) EditProfile(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Return only the success message
+		// Return success message
 		response := map[string]interface{}{
 			"message": "Profile updated successfully",
 		}

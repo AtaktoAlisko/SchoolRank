@@ -71,6 +71,7 @@ func main() {
 	SubjectOlympiadController := controllers.SubjectOlympiadController{}
 	olympiadController := &controllers.OlympiadController{}
 	eventController := controllers.EventController{}
+	EventsParticipantController := controllers.EventsParticipantController{}
 
 	router := mux.NewRouter()
 
@@ -178,12 +179,13 @@ func main() {
 	router.HandleFunc("/api/schools/{schoolId}/grades/{grade}/letters/{letter}/students", studentController.GetFilteredStudents(db)).Methods("GET")
 
 	// =======================
-	// Работа с First Types
+	// Работа с Events Participiant
 	// =======================
-	router.HandleFunc("/api/first-types", typeController.CreateFirstType(db)).Methods("POST")
-	router.HandleFunc("/api/first_types", typeController.GetFirstTypes(db)).Methods("GET")
-	router.HandleFunc("/api/schools/{school_id}/first-types", typeController.GetFirstTypesBySchool(db)).Methods("GET")
-	router.HandleFunc("/api/schools/{school_id}/first-types/average-rating", typeController.GetAverageRatingBySchool(db)).Methods("GET")
+	router.HandleFunc("/events/participants", EventsParticipantController.AddEventsParticipant(db)).Methods("POST")
+	router.HandleFunc("/events/participants/{events_id}", EventsParticipantController.UpdateEventsParticipant(db)).Methods("PUT")
+	router.HandleFunc("/events/participants/{events_id}", EventsParticipantController.GetSingleEventsParticipant(db)).Methods("GET")
+	router.HandleFunc("/events/participants/{events_id}", EventsParticipantController.DeleteEventsParticipant(db)).Methods("DELETE")
+	router.HandleFunc("/events/participants", EventsParticipantController.GetEventsParticipant(db)).Methods("GET")
 
 	// =======================
 	// Работа с Second Types
