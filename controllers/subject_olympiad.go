@@ -8,6 +8,7 @@ import (
 	"ranking-school/models"
 	"ranking-school/utils"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -187,9 +188,9 @@ func (c *SubjectOlympiadController) GetSubjectOlympiads(db *sql.DB) http.Handler
 		level := r.URL.Query().Get("level")
 
 		// Шаг 3: Строим SQL-запрос с учетом фильтров
-		query := `SELECT subject_name, date, end_date, description, photo_url, school_id, level, limit_participants
-				  FROM subject_olympiads 
-				  WHERE school_id = ?`
+		query := `SELECT subject_olympiad_id, subject_name, date, end_date, description, photo_url, school_id, level, limit_participants
+                  FROM subject_olympiads 
+                  WHERE school_id = ?`
 
 		var args []interface{}
 		args = append(args, schoolID)
@@ -213,6 +214,7 @@ func (c *SubjectOlympiadController) GetSubjectOlympiads(db *sql.DB) http.Handler
 		}
 
 		// Шаг 4: Выполнение запроса
+		log.Printf("Executing query: %s with args: %v", query, args)
 		rows, err := db.Query(query, args...)
 		if err != nil {
 			log.Println("Error querying olympiads:", err)
@@ -225,7 +227,17 @@ func (c *SubjectOlympiadController) GetSubjectOlympiads(db *sql.DB) http.Handler
 		var olympiads []models.SubjectOlympiad
 		for rows.Next() {
 			var olympiad models.SubjectOlympiad
-			err := rows.Scan(&olympiad.SubjectName, &olympiad.StartDate, &olympiad.EndDate, &olympiad.Description, &olympiad.PhotoURL, &olympiad.SchoolID, &olympiad.Level, &olympiad.Limit)
+			err := rows.Scan(
+				&olympiad.ID,
+				&olympiad.SubjectName,
+				&olympiad.StartDate,
+				&olympiad.EndDate,
+				&olympiad.Description,
+				&olympiad.PhotoURL,
+				&olympiad.SchoolID,
+				&olympiad.Level,
+				&olympiad.Limit,
+			)
 			if err != nil {
 				log.Println("Error scanning row:", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to process olympiad data"})
@@ -235,8 +247,35 @@ func (c *SubjectOlympiadController) GetSubjectOlympiads(db *sql.DB) http.Handler
 		}
 
 		// Шаг 6: Ответ в формате JSON
+		log.Printf("Found %d olympiads", len(olympiads))
 		if len(olympiads) == 0 {
-			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No olympiads found"})
+			// Try a simpler query to see if the table has any data at all
+			var count int
+			countQuery := "SELECT COUNT(*) FROM subject_olympiads"
+			err := db.QueryRow(countQuery).Scan(&count)
+			if err != nil {
+				log.Printf("Error checking table data: %v", err)
+			} else {
+				log.Printf("Total records in subject_olympiads: %d", count)
+
+				// Get list of available school_ids
+				schoolIdsQuery := "SELECT DISTINCT school_id FROM subject_olympiads"
+				rows, err := db.Query(schoolIdsQuery)
+				if err != nil {
+					log.Printf("Error getting school IDs: %v", err)
+				} else {
+					defer rows.Close()
+					var schoolIds []int
+					for rows.Next() {
+						var id int
+						rows.Scan(&id)
+						schoolIds = append(schoolIds, id)
+					}
+					log.Printf("Available school_ids in database: %v", schoolIds)
+				}
+			}
+
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No olympiads found for school_id " + schoolIDStr})
 			return
 		}
 
@@ -580,8 +619,6 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 			return
 		}
 
-		var olympiads []models.SubjectOlympiad
-
 		// SQL запрос для получения всех олимпиад с информацией о создателе и школе
 		query := `
 			SELECT 
@@ -594,45 +631,103 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 				so.school_id, 
 				so.level, 
 				so.limit_participants,
-				u.id as creator_id,
-				u.first_name as creator_first_name,
-				u.last_name as creator_last_name,
-				s.school_name
+				COALESCE(u.id, 0) as creator_id,
+				COALESCE(u.first_name, '') as creator_first_name,
+				COALESCE(u.last_name, '') as creator_last_name,
+				COALESCE(s.school_name, '') as school_name
 			FROM 
 				subject_olympiads so
 			LEFT JOIN 
 				Schools s ON so.school_id = s.school_id
 			LEFT JOIN 
 				users u ON s.user_id = u.id
-			WHERE 
-				u.role = 'schooladmin'
 		`
 
-		// Если пользователь schooladmin, показать только его олимпиады
+		// Добавляем логирование
+		log.Printf("Executing query to get all subject olympiads")
 		if userRole == "schooladmin" {
-			query += " AND u.id = ?"
-			rows, err := db.Query(query, userID)
-			if err != nil {
-				log.Println("Error fetching olympiads:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch olympiads"})
-				return
-			}
-			defer rows.Close()
-
-			olympiads = parseOlympiadsRows(rows)
-		} else {
-			// Для остальных ролей (superadmin и другие) показать все олимпиады
-			rows, err := db.Query(query)
-			if err != nil {
-				log.Println("Error fetching olympiads:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch olympiads"})
-				return
-			}
-			defer rows.Close()
-
-			olympiads = parseOlympiadsRows(rows)
+			log.Printf("Filtered by userID: %d", userID)
 		}
 
+		var rows *sql.Rows
+		// Если пользователь schooladmin, показать только его олимпиады
+		if userRole == "schooladmin" {
+			// Добавляем отдельную проверку для школьного администратора
+			schoolQuery := "SELECT school_id FROM Schools WHERE user_id = ?"
+			var schoolIDs []int
+			schoolRows, err := db.Query(schoolQuery, userID)
+			if err != nil {
+				log.Println("Error fetching schools for admin:", err)
+			} else {
+				defer schoolRows.Close()
+				for schoolRows.Next() {
+					var schoolID int
+					schoolRows.Scan(&schoolID)
+					schoolIDs = append(schoolIDs, schoolID)
+				}
+			}
+
+			if len(schoolIDs) > 0 {
+				// Строим условие IN для всех школ администратора
+				query += " WHERE so.school_id IN ("
+				args := make([]interface{}, len(schoolIDs))
+				placeholders := make([]string, len(schoolIDs))
+				for i, id := range schoolIDs {
+					placeholders[i] = "?"
+					args[i] = id
+				}
+				query += strings.Join(placeholders, ",") + ")"
+				rows, err = db.Query(query, args...)
+			} else {
+				// Если нет школ, показываем пустой результат
+				rows, err = db.Query("SELECT 1 FROM subject_olympiads WHERE 1=0") // Пустой результат
+			}
+		} else {
+			// Для остальных ролей (superadmin и другие) показать все олимпиады
+			rows, err = db.Query(query)
+		}
+
+		if err != nil {
+			log.Println("Error fetching olympiads:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch olympiads"})
+			return
+		}
+		defer rows.Close()
+
+		// Парсинг результатов запроса
+		var olympiads []models.SubjectOlympiad
+		for rows.Next() {
+			var olympiad models.SubjectOlympiad
+			err := rows.Scan(
+				&olympiad.ID,
+				&olympiad.SubjectName,
+				&olympiad.StartDate,
+				&olympiad.EndDate,
+				&olympiad.Description,
+				&olympiad.PhotoURL,
+				&olympiad.SchoolID,
+				&olympiad.Level,
+				&olympiad.Limit,
+				&olympiad.CreatorID,
+				&olympiad.CreatorFirstName,
+				&olympiad.CreatorLastName,
+				&olympiad.SchoolName,
+			)
+			if err != nil {
+				log.Println("Error scanning olympiad row:", err)
+				continue // Skip this row and continue with the next one
+			}
+			olympiads = append(olympiads, olympiad)
+		}
+
+		// Check for errors during row iteration
+		if err = rows.Err(); err != nil {
+			log.Println("Error iterating through rows:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing olympiad data"})
+			return
+		}
+
+		// Return results (empty array if no olympiads found)
 		utils.ResponseJSON(w, olympiads)
 	}
 }

@@ -9,4 +9,11 @@ type Review struct {
 	Comment    string  `json:"comment"`    // Текст отзыва
 	CreatedAt  string  `json:"created_at"` // Дата и время создания отзыва
 	SchoolName string  `json:"school_name"`
+	Likes      int     `json:"likes"` // Количество лайков
+}
+type Like struct {
+	ID        int    `json:"id"`         // Идентификатор лайка
+	ReviewID  int    `json:"review_id"`  // Идентификатор отзыва
+	UserID    int    `json:"user_id"`    // Идентификатор пользователя
+	CreatedAt string `json:"created_at"` // Дата и время создания лайка
 }

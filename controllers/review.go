@@ -10,6 +10,7 @@ import (
 	"ranking-school/utils"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 )
@@ -74,10 +75,11 @@ func (rc *ReviewController) CreateReview(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Insert review with proper error handling
+		// Insert review with Likes and CreatedAt
+		currentTime := time.Now().Format("2006-01-02 15:04:05") // Формат времени
 		result, err := db.Exec(
-			"INSERT INTO Reviews (school_id, user_id, rating, comment) VALUES (?, ?, ?, ?)",
-			review.SchoolID, review.UserID, review.Rating, review.Comment,
+			"INSERT INTO Reviews (school_id, user_id, rating, comment, likes, created_at) VALUES (?, ?, ?, ?, 0, ?)",
+			review.SchoolID, review.UserID, review.Rating, review.Comment, currentTime,
 		)
 		if err != nil {
 			log.Println("Error inserting review:", err)
@@ -85,7 +87,7 @@ func (rc *ReviewController) CreateReview(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Get the inserted ID (using the correct column 'id')
+		// Get the inserted ID
 		reviewID, err := result.LastInsertId()
 		if err != nil {
 			log.Println("Error getting last insert ID:", err)
@@ -93,13 +95,74 @@ func (rc *ReviewController) CreateReview(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Create response with the new review ID
+		// Create response
 		response := map[string]interface{}{
 			"message":   "Review created successfully",
-			"review_id": reviewID, // Use 'review_id' instead of 'id'
+			"review_id": reviewID,
 		}
 
 		utils.ResponseJSON(w, response)
+	}
+}
+func (rc *ReviewController) CreateLike(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var like models.Like
+		if err := json.NewDecoder(r.Body).Decode(&like); err != nil {
+			log.Println("Error decoding request body:", err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
+			return
+		}
+
+		userID, err := utils.VerifyToken(r) // Предполагается, что VerifyToken возвращает ID пользователя
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+			return
+		}
+
+		// Check if review exists
+		var reviewExists bool
+		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM Reviews WHERE id = ?)", like.ReviewID).Scan(&reviewExists)
+		if err != nil || !reviewExists {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Review does not exist"})
+			return
+		}
+
+		// Check if user already liked the review
+		var likeExists bool
+		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM Likes WHERE review_id = ? AND user_id = ?)",
+			like.ReviewID, userID).Scan(&likeExists)
+		if err != nil {
+			log.Println("Error checking for existing like:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking for existing like"})
+			return
+		}
+
+		if likeExists {
+			utils.RespondWithError(w, http.StatusConflict, models.Error{Message: "User has already liked this review"})
+			return
+		}
+
+		// Insert new like
+		currentTime := time.Now().Format("2006-01-02 15:04:05")
+		_, err = db.Exec(
+			"INSERT INTO Likes (review_id, user_id, created_at) VALUES (?, ?, ?)",
+			like.ReviewID, userID, currentTime,
+		)
+		if err != nil {
+			log.Println("Error inserting like:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create like"})
+			return
+		}
+
+		// Increment likes in Reviews table
+		_, err = db.Exec("UPDATE Reviews SET likes = likes + 1 WHERE id = ?", like.ReviewID)
+		if err != nil {
+			log.Println("Error updating likes:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update likes count"})
+			return
+		}
+
+		utils.ResponseJSON(w, map[string]string{"message": "Like created successfully"})
 	}
 }
 func (rc *ReviewController) GetReviewsBySchool(db *sql.DB) http.HandlerFunc {
