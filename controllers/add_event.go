@@ -1026,3 +1026,103 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
+func (ec *EventController) CountEvents(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Verify request method
+		if r.Method != http.MethodGet {
+			utils.RespondWithError(w, http.StatusMethodNotAllowed, models.Error{Message: "Method not allowed"})
+			return
+		}
+
+		// Get query parameters
+		query := r.URL.Query()
+		
+		// Create parameters map
+		params := make(map[string]string)
+		
+		// Collect filter parameters
+		params["school_id"] = query.Get("school_id")
+		params["status"] = query.Get("status")
+		params["category"] = query.Get("category")
+		params["date_from"] = query.Get("date_from")
+		params["date_to"] = query.Get("date_to")
+		
+		log.Println("CountEvents called with parameters:", params)
+
+		// Build query for counting events
+		queryBuilder := strings.Builder{}
+		queryBuilder.WriteString("SELECT COUNT(*) FROM Events WHERE 1=1")
+		
+		var args []interface{}
+		
+		// Add filters if specified
+		if schoolID := params["school_id"]; schoolID != "" {
+			schoolIDInt, err := strconv.Atoi(schoolID)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID format"})
+				return
+			}
+			queryBuilder.WriteString(" AND school_id = ?")
+			args = append(args, schoolIDInt)
+		}
+		
+		if status := params["status"]; status != "" {
+			// Validate status value
+			if status != "Upcoming" && status != "Completed" {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid status value: must be 'Upcoming' or 'Completed'"})
+				return
+			}
+			queryBuilder.WriteString(" AND status = ?")
+			args = append(args, status)
+		}
+		
+		if category := params["category"]; category != "" {
+			queryBuilder.WriteString(" AND category = ?")
+			args = append(args, category)
+		}
+		
+		// Filter by date range
+		if dateFrom := params["date_from"]; dateFrom != "" {
+			// Validate date format
+			_, err := time.Parse("2006-01-02", dateFrom)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid date_from format. Use YYYY-MM-DD"})
+				return
+			}
+			queryBuilder.WriteString(" AND date_time >= ?")
+			args = append(args, dateFrom)
+		}
+		
+		if dateTo := params["date_to"]; dateTo != "" {
+			// Validate date format
+			_, err := time.Parse("2006-01-02", dateTo)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid date_to format. Use YYYY-MM-DD"})
+				return
+			}
+			queryBuilder.WriteString(" AND date_time <= ?")
+			args = append(args, dateTo)
+		}
+		
+		// Log the final SQL query for debugging
+		finalQuery := queryBuilder.String()
+		log.Printf("Executing count query: %s with args: %v", finalQuery, args)
+		
+		// Execute the query
+		var totalCount int
+		err := db.QueryRow(finalQuery, args...).Scan(&totalCount)
+		if err != nil {
+			log.Println("Error executing count query:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to count events"})
+			return
+		}
+		
+		// Prepare response with count data and parameters used
+		response := map[string]interface{}{
+			"total_events":    totalCount,
+		}
+		
+		// Send the result
+		utils.ResponseJSON(w, response)
+	}
+}
