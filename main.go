@@ -233,6 +233,12 @@ func main() {
 	// =======================
 	router.HandleFunc("/api/contact", contactController.CreateContactRequest(db)).Methods("POST")
 
+	// =======================
+	// Dashboard (superadmiin)
+	// =======================
+	router.HandleFunc("/api/users/count", controller.CountUsers(db)).Methods("GET")
+	router.HandleFunc("/api/school-count", schoolController.GetSchoolCount(db)).Methods("GET")
+
 	// Включаем CORS
 	handler := corsMiddleware(router)
 

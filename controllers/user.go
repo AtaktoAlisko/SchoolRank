@@ -3021,3 +3021,37 @@ func (c *Controller) GetTotalUsersWithRoleCount(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
+func (c *Controller) CountUsers(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var userCount, studentCount int
+		var error models.Error
+
+		// Count users with roles 'user', 'superadmin', 'schooladmin' from users table
+		err := db.QueryRow("SELECT COUNT(*) FROM users WHERE role IN ('user', 'superadmin', 'schooladmin')").Scan(&userCount)
+		if err != nil {
+			log.Printf("Error counting users from users table: %v", err)
+			error.Message = "Server error."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
+			return
+		}
+
+		// Count users with role 'student' from student table
+		err = db.QueryRow("SELECT COUNT(*) FROM student WHERE role = 'student'").Scan(&studentCount)
+		if err != nil {
+			log.Printf("Error counting students from student table: %v", err)
+			error.Message = "Server error."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
+			return
+		}
+
+		// Sum the counts
+		totalCount := userCount + studentCount
+
+		// Prepare response
+		response := map[string]interface{}{
+			"count": totalCount,
+		}
+
+		utils.ResponseJSON(w, response)
+	}
+}

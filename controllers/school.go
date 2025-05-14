@@ -921,3 +921,28 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
+
+func (sc *SchoolController) GetSchoolCount(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        log.Println("GetSchoolCount endpoint called") // Debug log
+        
+        var count int
+        var error models.Error
+
+        // Query to count all schools
+        err := db.QueryRow("SELECT COUNT(*) FROM Schools").Scan(&count)
+        if err != nil {
+            log.Printf("Error counting schools: %v", err)
+            error.Message = "Server error."
+            utils.RespondWithError(w, http.StatusInternalServerError, error)
+            return
+        }
+
+        // Prepare response
+        response := map[string]interface{}{
+            "count": count,
+        }
+
+        utils.ResponseJSON(w, response)
+    }
+}
