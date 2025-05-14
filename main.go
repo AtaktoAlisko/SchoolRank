@@ -186,6 +186,7 @@ func main() {
 	router.HandleFunc("/events/participants/{events_id}", EventsParticipantController.GetSingleEventsParticipant(db)).Methods("GET")
 	router.HandleFunc("/events/participants/{events_id}", EventsParticipantController.DeleteEventsParticipant(db)).Methods("DELETE")
 	router.HandleFunc("/events/participants", EventsParticipantController.GetEventsParticipant(db)).Methods("GET")
+	router.HandleFunc("/events/participants/school/{school_id}", EventsParticipantController.GetEventsParticipantBySchool(db)).Methods("GET")
 
 	// =======================
 	// Работа с Second Types

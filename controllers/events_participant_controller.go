@@ -766,3 +766,114 @@ func (c *EventsParticipantController) GetSingleEventsParticipant(db *sql.DB) htt
 		utils.ResponseJSON(w, participant)
 	}
 }
+func (c *EventsParticipantController) GetEventsParticipantBySchool(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify the token
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			log.Printf("Token verification failed: %v", err)
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
+
+		// Step 2: Get user role
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil {
+			log.Printf("Error fetching user role for user ID %d: %v", userID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
+
+		// Step 3: Check access permissions
+		if userRole != "superadmin" && userRole != "schooladmin" {
+			log.Printf("Access denied for user ID %d with role %s", userID, userRole)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view event participants"})
+			return
+		}
+
+		// Step 4: Get and validate school_id from URL
+		vars := mux.Vars(r)
+		schoolID, ok := vars["school_id"]
+		if !ok {
+			log.Printf("Missing school_id parameter in request URL: %s", r.URL.String())
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Missing school_id parameter"})
+			return
+		}
+		schoolIDInt, err := strconv.Atoi(schoolID)
+		if err != nil || schoolIDInt <= 0 {
+			log.Printf("Invalid school_id format: %s, error: %v", schoolID, err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school_id format"})
+			return
+		}
+
+		// Step 5: Build query for participants by school_id
+		query := `SELECT ep.id, ep.school_id, ep.grade, ep.letter, ep.student_id, ep.events_name, 
+				ep.document, ep.category, ep.role, ep.date, 
+				s.student_id, s.first_name as student_name, s.last_name as student_lastname,
+				sch.school_name as school_name,
+				c.id as creator_id, c.first_name as creator_first_name, c.last_name as creator_last_name
+			FROM events_participants ep
+			JOIN student s ON ep.student_id = s.student_id
+			JOIN Schools sch ON ep.school_id = sch.school_id
+			JOIN users c ON ep.creator_id = c.id
+			WHERE ep.school_id = ?`
+
+		// Step 6: Execute query
+		rows, err := db.Query(query, schoolIDInt)
+		if err != nil {
+			log.Printf("Error querying participants by school_id %d: %v", schoolIDInt, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch event participants"})
+			return
+		}
+		defer rows.Close()
+
+		// Step 7: Collect participants
+		var participants []models.EventsParticipant
+		for rows.Next() {
+			var p models.EventsParticipant
+			err := rows.Scan(
+				&p.ID,
+				&p.SchoolID,
+				&p.Grade,
+				&p.Letter,
+				&p.StudentID,
+				&p.EventsName,
+				&p.Document,
+				&p.Category,
+				&p.Role,
+				&p.Date,
+				&p.StudentID,
+				&p.StudentName,
+				&p.StudentLastName,
+				&p.SchoolName,
+				&p.CreatorID,
+				&p.CreatorFirstName,
+				&p.CreatorLastName,
+			)
+			if err != nil {
+				log.Printf("Error scanning participant row: %v", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to process participant data"})
+				return
+			}
+			participants = append(participants, p)
+		}
+
+		// Check for errors during iteration
+		if err = rows.Err(); err != nil {
+			log.Printf("Error during row iteration: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch event participants"})
+			return
+		}
+
+		// Step 8: Return participants
+		if len(participants) == 0 {
+			log.Printf("No participants found for school_id %d", schoolIDInt)
+			utils.ResponseJSON(w, []models.EventsParticipant{})
+			return
+		}
+
+		log.Printf("Successfully retrieved %d participants for school_id %d", len(participants), schoolIDInt)
+		utils.ResponseJSON(w, participants)
+	}
+}
