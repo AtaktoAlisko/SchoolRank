@@ -838,3 +838,191 @@ func (c *EventController) DeleteEvent(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, map[string]string{"message": "Event deleted successfully"})
 	}
 }
+func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Verify authentication
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			log.Println("Authentication error:", err)
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Authentication required"})
+			return
+		}
+
+		// Get user details to determine role
+		user, err := utils.GetUserByID(db, userID)
+		if err != nil {
+			log.Println("Error retrieving user details:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error retrieving user information"})
+			return
+		}
+
+		// Get school_id from URL parameters
+		vars := mux.Vars(r)
+		schoolIDStr := vars["school_id"]
+		schoolID, err := strconv.Atoi(schoolIDStr)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID format"})
+			return
+		}
+
+		// Validate school exists
+		var schoolExists bool
+		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM Schools WHERE school_id = ?)", schoolID).Scan(&schoolExists)
+		if err != nil {
+			log.Println("Error checking if school exists:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking school existence"})
+			return
+		}
+		if !schoolExists {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "School not found"})
+			return
+		}
+
+		// Check permissions based on role
+		if user.Role == "schooladmin" {
+			// Verify user is associated with the school
+			var isAssociated bool
+			err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ? AND school_id = ? AND role = 'schooladmin')",
+				userID, schoolID).Scan(&isAssociated)
+			if err != nil {
+				log.Println("Error checking school association:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error validating school association"})
+				return
+			}
+			if !isAssociated {
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Not authorized to view events for this school"})
+				return
+			}
+		} else if user.Role != "superadmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Insufficient permissions"})
+			return
+		}
+
+		// Get query parameters for filtering
+		query := r.URL.Query()
+		params := map[string]string{
+			"status":    query.Get("status"),
+			"category":  query.Get("category"),
+			"date_from": query.Get("date_from"),
+			"date_to":   query.Get("date_to"),
+			"limit":     query.Get("limit"),
+			"offset":    query.Get("offset"),
+		}
+
+		// Build the SQL query
+		queryBuilder := strings.Builder{}
+		queryBuilder.WriteString(`
+			SELECT e.id, e.school_id, e.user_id, e.event_name, e.description, 
+			e.photo, e.date_time, e.start_date, e.end_date, e.category, e.location, 
+			e.status, e.limit_count, e.created_at, e.updated_at, e.created_by
+			FROM Events e
+			WHERE e.school_id = ?
+		`)
+
+		args := []interface{}{schoolID}
+
+		// Add filters
+		if params["status"] != "" {
+			if params["status"] != "Upcoming" && params["status"] != "Completed" {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid status value"})
+				return
+			}
+			queryBuilder.WriteString(" AND e.status = ?")
+			args = append(args, params["status"])
+		}
+
+		if params["category"] != "" {
+			queryBuilder.WriteString(" AND e.category = ?")
+			args = append(args, params["category"])
+		}
+
+		if params["date_from"] != "" {
+			_, err := time.Parse("2006-01-02", params["date_from"])
+			if err != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid date_from format. Use YYYY-MM-DD"})
+				return
+			}
+			queryBuilder.WriteString(" AND e.start_date >= ?")
+			args = append(args, params["date_from"])
+		}
+
+		if params["date_to"] != "" {
+			_, err := time.Parse("2006-01-02", params["date_to"])
+			if err != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid date_to format. Use YYYY-MM-DD"})
+				return
+			}
+			queryBuilder.WriteString(" AND e.end_date <= ?")
+			args = append(args, params["date_to"])
+		}
+
+		// Add sorting
+		queryBuilder.WriteString(" ORDER BY e.start_date ASC")
+
+		// Add pagination
+		if params["limit"] != "" {
+			limitInt, err := strconv.Atoi(params["limit"])
+			if err != nil || limitInt <= 0 {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid limit parameter"})
+				return
+			}
+			queryBuilder.WriteString(" LIMIT ?")
+			args = append(args, limitInt)
+
+			if params["offset"] != "" {
+				offsetInt, err := strconv.Atoi(params["offset"])
+				if err != nil || offsetInt < 0 {
+					utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid offset parameter"})
+					return
+				}
+				queryBuilder.WriteString(" OFFSET ?")
+				args = append(args, offsetInt)
+			}
+		}
+
+		// Execute query
+		rows, err := db.Query(queryBuilder.String(), args...)
+		if err != nil {
+			log.Println("Error executing events query:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch events"})
+			return
+		}
+		defer rows.Close()
+
+		// Collect results
+		var events []models.Event
+		for rows.Next() {
+			var event models.Event
+			err := rows.Scan(
+				&event.ID, &event.SchoolID, &event.UserID, &event.EventName, &event.Description,
+				&event.Photo, &event.DateTime, &event.StartDate, &event.EndDate, &event.Category,
+				&event.Location, &event.Status, &event.Limit, &event.CreatedAt, &event.UpdatedAt,
+				&event.CreatedBy,
+			)
+			if err != nil {
+				log.Println("Error scanning event row:", err)
+				continue
+			}
+			events = append(events, event)
+		}
+
+		if err = rows.Err(); err != nil {
+			log.Println("Error iterating event rows:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing events data"})
+			return
+		}
+
+		// Prepare response
+		response := map[string]interface{}{
+			"events":      events,
+			"total_count": len(events),
+			"school_id":   schoolID,
+		}
+
+		if len(events) == 0 {
+			response["message"] = "No events found for this school"
+		}
+
+		utils.ResponseJSON(w, response)
+	}
+}

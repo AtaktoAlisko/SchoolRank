@@ -226,6 +226,7 @@ func main() {
 	router.HandleFunc("/api/events", eventController.GetEvents(db)).Methods("GET")
 	router.HandleFunc("/api/events/{event_id}", eventController.UpdateEvent(db)).Methods("PUT")
 	router.HandleFunc("/api/events/{event_id}", eventController.DeleteEvent(db)).Methods("DELETE")
+	router.HandleFunc("/api/events/school/{school_id}", eventController.GetEventsBySchoolID(db)).Methods("GET")
 
 	// =======================
 	// Контактная информация
