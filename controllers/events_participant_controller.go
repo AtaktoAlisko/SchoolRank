@@ -65,15 +65,9 @@ func (c *EventsParticipantController) AddEventsParticipant(db *sql.DB) http.Hand
 			return
 		}
 
-		// Parse optional fields with defaults if not provided
-		grade := r.FormValue("grade")
-		if grade == "" {
-			grade = "N/A"
-		}
-		letter := r.FormValue("letter")
-		if letter == "" {
-			letter = "N/A"
-		}
+		// Parse optional fields, allowing empty values (NULL in DB)
+		grade := sql.NullString{String: r.FormValue("grade"), Valid: r.FormValue("grade") != ""}
+		letter := sql.NullString{String: r.FormValue("letter"), Valid: r.FormValue("letter") != ""}
 
 		// Convert string values to integers
 		schoolID, err := strconv.Atoi(schoolIDStr)
@@ -134,8 +128,8 @@ func (c *EventsParticipantController) AddEventsParticipant(db *sql.DB) http.Hand
 
 		// Step 8: Insert the event participant into the database
 		query := `INSERT INTO events_participants 
-			(school_id, grade, letter, student_id, events_name, document, category, role, date, creator_id) 
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            (school_id, grade, letter, student_id, events_name, document, category, role, date, creator_id) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 		result, err := db.Exec(query,
 			schoolID,
@@ -167,15 +161,15 @@ func (c *EventsParticipantController) AddEventsParticipant(db *sql.DB) http.Hand
 		var participant models.EventsParticipant
 
 		query = `SELECT ep.id, ep.school_id, ep.grade, ep.letter, ep.student_id, ep.events_name, 
-				ep.document, ep.category, ep.role, ep.date, 
-				s.student_id, s.first_name as student_name, s.last_name as student_lastname,
-				sch.name as school_name,
-				c.id as creator_id, c.first_name as creator_first_name, c.last_name as creator_last_name
-			FROM events_participants ep
-			JOIN student s ON ep.student_id = s.student_id
-			JOIN Schools sch ON ep.school_id = sch.id
-			JOIN users c ON ep.creator_id = c.id
-			WHERE ep.id = ?`
+                ep.document, ep.category, ep.role, ep.date, 
+                s.student_id, s.first_name as student_name, s.last_name as student_lastname,
+                sch.name as school_name,
+                c.id as creator_id, c.first_name as creator_first_name, c.last_name as creator_last_name
+            FROM events_participants ep
+            JOIN student s ON ep.student_id = s.student_id
+            JOIN Schools sch ON ep.school_id = sch.id
+            JOIN users c ON ep.creator_id = c.id
+            WHERE ep.id = ?`
 
 		err = db.QueryRow(query, participantID).Scan(
 			&participant.ID,
@@ -203,8 +197,8 @@ func (c *EventsParticipantController) AddEventsParticipant(db *sql.DB) http.Hand
 			utils.ResponseJSON(w, models.EventsParticipant{
 				ID:         int(participantID),
 				SchoolID:   schoolID,
-				Grade:      grade,
-				Letter:     letter,
+				Grade:      grade.String,  // Fixed: use grade.String instead of Grade
+				Letter:     letter.String, // Fixed: use letter.String instead of Letter
 				StudentID:  studentID,
 				EventsName: eventsName,
 				Document:   documentURL,
