@@ -19,10 +19,24 @@ type ReviewController struct{}
 
 func (rc *ReviewController) CreateReview(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify the user's token and get user ID
+		tokenUserID, err := utils.VerifyToken(r) // Returns userID directly, not claims
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
 		var review models.Review
 		if err := json.NewDecoder(r.Body).Decode(&review); err != nil {
 			log.Println("Error decoding request body:", err)
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
+			return
+		}
+
+		// Validate that token user ID matches review user ID
+		if tokenUserID != review.UserID {
+			log.Println("Token user ID doesn't match review user ID")
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only submit reviews as yourself"})
 			return
 		}
 
@@ -34,7 +48,7 @@ func (rc *ReviewController) CreateReview(db *sql.DB) http.HandlerFunc {
 
 		// Check if user exists
 		var userExists bool
-		err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)", review.UserID).Scan(&userExists)
+		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)", review.UserID).Scan(&userExists)
 		if err != nil {
 			log.Println("Error checking if user exists:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking if user exists"})
@@ -76,7 +90,7 @@ func (rc *ReviewController) CreateReview(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Insert review with Likes and CreatedAt
-		currentTime := time.Now().Format("2006-01-02 15:04:05") // Формат времени
+		currentTime := time.Now().Format("2006-01-02 15:04:05")
 		result, err := db.Exec(
 			"INSERT INTO Reviews (school_id, user_id, rating, comment, likes, created_at) VALUES (?, ?, ?, ?, 0, ?)",
 			review.SchoolID, review.UserID, review.Rating, review.Comment, currentTime,
@@ -424,5 +438,105 @@ func (rc *ReviewController) GetReviewBySchoolID(db *sql.DB) http.HandlerFunc {
 
 		// Return the list of reviews with school names
 		utils.ResponseJSON(w, reviews)
+	}
+}
+func (rc *ReviewController) DeleteReview(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify the user's token and get user ID
+		tokenUserID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		// Get the review ID from URL parameters
+		vars := mux.Vars(r)
+		reviewID, err := strconv.Atoi(vars["id"])
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid review ID"})
+			return
+		}
+
+		// Step 2: Check if the review exists and get its user_id
+		var reviewUserID int
+		var exists bool
+		err = db.QueryRow("SELECT user_id, TRUE FROM Reviews WHERE id = ?", reviewID).Scan(&reviewUserID, &exists)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Review not found"})
+				return
+			}
+			log.Println("Error checking review:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking review"})
+			return
+		}
+
+		// Step 3: Get user role to check for admin privileges
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", tokenUserID).Scan(&userRole)
+		if err != nil {
+			log.Println("Error fetching user role:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
+
+		// Step 4: Check if the user is authorized to delete the review
+		// Allow if user is the review owner OR a superadmin OR a schooladmin
+		if tokenUserID != reviewUserID && userRole != "superadmin" && userRole != "schooladmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to delete this review"})
+			return
+		}
+
+		// For schooladmin, we need to check if the review belongs to their school
+		if userRole == "schooladmin" {
+			var schoolID int
+			err = db.QueryRow("SELECT school_id FROM users WHERE id = ?", tokenUserID).Scan(&schoolID)
+			if err != nil {
+				log.Println("Error fetching school ID for admin:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking admin permissions"})
+				return
+			}
+
+			var reviewSchoolID int
+			err = db.QueryRow("SELECT school_id FROM Reviews WHERE id = ?", reviewID).Scan(&reviewSchoolID)
+			if err != nil {
+				log.Println("Error fetching review school ID:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking review details"})
+				return
+			}
+
+			if schoolID != reviewSchoolID {
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to delete reviews for this school"})
+				return
+			}
+		}
+
+		// Step 5: Delete the review
+		result, err := db.Exec("DELETE FROM Reviews WHERE id = ?", reviewID)
+		if err != nil {
+			log.Println("Error deleting review:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete review"})
+			return
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			log.Println("Error getting rows affected:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error confirming deletion"})
+			return
+		}
+
+		if rowsAffected == 0 {
+			// This shouldn't happen since we already checked if the review exists
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Review not found"})
+			return
+		}
+
+		// Step 6: Return success response
+		response := map[string]interface{}{
+			"message": "Review deleted successfully",
+		}
+
+		utils.ResponseJSON(w, response)
 	}
 }

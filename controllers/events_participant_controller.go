@@ -877,3 +877,340 @@ func (c *EventsParticipantController) GetEventsParticipantBySchool(db *sql.DB) h
 		utils.ResponseJSON(w, participants)
 	}
 }
+func (c *EventsParticipantController) CountOlympiadParticipants(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify the token
+		userID, err := utils.VerifyToken(r) // userID and err are defined here
+		if err != nil {
+			log.Printf("Token verification failed: %v", err)
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
+
+		// Step 2: Get user role
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole) // err redefined in this scope
+		if err != nil {
+			log.Printf("Error fetching user role for user ID %d: %v", userID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
+
+		// Step 3: Check access permissions
+		if userRole != "superadmin" && userRole != "schooladmin" {
+			log.Printf("Access denied for user ID %d with role %s", userID, userRole)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view olympiad statistics"})
+			return
+		}
+
+		// Step 4: Build query with optional filters
+		query := `SELECT COUNT(ep.student_id) AS total_participants`
+		countByEventQuery := `SELECT 
+            ep.events_name, 
+            COUNT(ep.student_id) AS participant_count 
+        FROM events_participants ep`
+
+		var args []interface{}
+		conditions := []string{}
+
+		// Optional filter by school_id
+		if schoolIDStr := r.URL.Query().Get("school_id"); schoolIDStr != "" {
+			schoolID, err := strconv.Atoi(schoolIDStr) // err redefined in this scope
+			if err != nil || schoolID <= 0 {
+				log.Printf("Invalid school_id format: %s, error: %v", schoolIDStr, err)
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school_id format"})
+				return
+			}
+			conditions = append(conditions, "ep.school_id = ?")
+			args = append(args, schoolID)
+			log.Printf("Filtering by school_id: %d", schoolID)
+		}
+
+		// If user is schooladmin, restrict to their school
+		if userRole == "schooladmin" {
+			var schoolID int
+			err = db.QueryRow("SELECT school_id FROM school_admins WHERE user_id = ?", userID).Scan(&schoolID) // err redefined
+			if err != nil {
+				log.Printf("Error fetching school_id for schooladmin user ID %d: %v", userID, err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching school details"})
+				return
+			}
+			conditions = append(conditions, "ep.school_id = ?")
+			args = append(args, schoolID)
+			log.Printf("Restricting schooladmin to school_id: %d", schoolID)
+		}
+
+		// Optional filter by category
+		if category := r.URL.Query().Get("category"); category != "" {
+			conditions = append(conditions, "ep.category = ?")
+			args = append(args, category)
+			log.Printf("Filtering by category: %s", category)
+		}
+
+		// Optional filter by event name
+		if eventsName := r.URL.Query().Get("events_name"); eventsName != "" {
+			conditions = append(conditions, "ep.events_name = ?")
+			args = append(args, eventsName)
+			log.Printf("Filtering by events_name: %s", eventsName)
+		}
+
+		// Optional filter by date range
+		if startDate := r.URL.Query().Get("start_date"); startDate != "" {
+			conditions = append(conditions, "ep.date >= ?")
+			args = append(args, startDate)
+		}
+
+		if endDate := r.URL.Query().Get("end_date"); endDate != "" {
+			conditions = append(conditions, "ep.date <= ?")
+			args = append(args, endDate)
+		}
+
+		// Complete the queries with FROM clause and conditions
+		query += " FROM events_participants ep"
+		countByEventQuery += " FROM events_participants ep"
+
+		// Append conditions to queries
+		if len(conditions) > 0 {
+			whereClause := " WHERE " + strings.Join(conditions, " AND ")
+			query += whereClause
+			countByEventQuery += whereClause
+		}
+
+		// Complete the group by for the second query
+		countByEventQuery += " GROUP BY ep.events_name ORDER BY participant_count DESC"
+
+		// Response structure
+		type OlympiadStats struct {
+			TotalParticipants int `json:"total_participants"`
+			EventBreakdown    []struct {
+				EventName        string `json:"event_name"`
+				ParticipantCount int    `json:"participant_count"`
+			} `json:"event_breakdown,omitempty"`
+		}
+
+		// Initialize response
+		stats := OlympiadStats{}
+
+		// Step 5: Execute the total count query
+		err = db.QueryRow(query, args...).Scan(&stats.TotalParticipants) // err redefined
+		if err != nil {
+			log.Printf("Error counting participants: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to count olympiad participants"})
+			return
+		}
+
+		// Check if we should include breakdown by event
+		includeBreakdown := r.URL.Query().Get("include_breakdown")
+		if includeBreakdown == "true" {
+			// Execute the breakdown query
+			rows, err := db.Query(countByEventQuery, args...) // err redefined
+			if err != nil {
+				log.Printf("Error querying event breakdown: %v", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch event breakdown"})
+				return
+			}
+			defer rows.Close()
+
+			// Process event breakdown results
+			for rows.Next() {
+				var eventName string
+				var count int
+				err := rows.Scan(&eventName, &count) // err redefined
+				if err != nil {
+					log.Printf("Error scanning event breakdown row: %v", err)
+					continue
+				}
+				stats.EventBreakdown = append(stats.EventBreakdown, struct {
+					EventName        string `json:"event_name"`
+					ParticipantCount int    `json:"participant_count"`
+				}{
+					EventName:        eventName,
+					ParticipantCount: count,
+				})
+			}
+
+			// Check for errors during iteration
+			if err = rows.Err(); err != nil {
+				log.Printf("Error during row iteration for event breakdown: %v", err)
+				// Continue with the total count result anyway
+			}
+		}
+
+		// Return the statistics
+		log.Printf("Successfully counted olympiad participants: %d for user ID %d", stats.TotalParticipants, userID)
+		utils.ResponseJSON(w, stats)
+	}
+}
+func (c *EventsParticipantController) CountOlympiadParticipantsBySchool(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify the token
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			log.Printf("Token verification failed: %v", err)
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
+
+		// Step 2: Get user role and school_id (if schooladmin)
+		var userRole string
+		var userSchoolID sql.NullInt64 // Use NullInt64 to handle NULL school_id
+		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+		if err != nil {
+			log.Printf("Error fetching user details for user ID %d: %v", userID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
+
+		// Step 3: Check access permissions
+		if userRole != "superadmin" && userRole != "schooladmin" {
+			log.Printf("Access denied for user ID %d with role %s", userID, userRole)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view olympiad statistics"})
+			return
+		}
+
+		// Step 4: Extract school_id from URL
+		vars := mux.Vars(r)
+		schoolIDParam := vars["school_id"]
+		schoolID, err := strconv.Atoi(schoolIDParam)
+		if err != nil || schoolID <= 0 {
+			log.Printf("Invalid school_id format: %s, error: %v", schoolIDParam, err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school_id format"})
+			return
+		}
+
+		// Step 5: Restrict schooladmin to their school
+		if userRole == "schooladmin" {
+			if !userSchoolID.Valid {
+				log.Printf("No school_id associated with schooladmin user ID %d", userID)
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "No school assigned to this admin"})
+				return
+			}
+			if int(userSchoolID.Int64) != schoolID {
+				log.Printf("Schooladmin user ID %d attempted to access school ID %d, but is assigned to school ID %d", userID, schoolID, userSchoolID.Int64)
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view this school's data"})
+				return
+			}
+		}
+
+		// Step 6: Build queries with mandatory school_id filter
+		query := `SELECT COUNT(ep.student_id) AS total_participants`
+		eventCountQuery := `SELECT COUNT(DISTINCT ep.events_name) AS event_count`
+		countByEventQuery := `SELECT 
+            ep.events_name, 
+            COUNT(ep.student_id) AS participant_count 
+        FROM events_participants ep`
+
+		var args []interface{}
+		conditions := []string{"ep.school_id = ?"} // Mandatory school_id filter
+		args = append(args, schoolID)
+
+		// Optional filter by category
+		if category := r.URL.Query().Get("category"); category != "" {
+			conditions = append(conditions, "ep.category = ?")
+			args = append(args, category)
+			log.Printf("Filtering by category: %s", category)
+		}
+
+		// Optional filter by event name
+		if eventsName := r.URL.Query().Get("events_name"); eventsName != "" {
+			conditions = append(conditions, "ep.events_name = ?")
+			args = append(args, eventsName)
+			log.Printf("Filtering by events_name: %s", eventsName)
+		}
+
+		// Optional filter by date range
+		if startDate := r.URL.Query().Get("start_date"); startDate != "" {
+			conditions = append(conditions, "ep.date >= ?")
+			args = append(args, startDate)
+			log.Printf("Filtering by start_date: %s", startDate)
+		}
+
+		if endDate := r.URL.Query().Get("end_date"); endDate != "" {
+			conditions = append(conditions, "ep.date <= ?")
+			args = append(args, endDate)
+			log.Printf("Filtering by end_date: %s", endDate)
+		}
+
+		// Complete the queries with FROM clause and conditions
+		query += " FROM events_participants ep"
+		eventCountQuery += " FROM events_participants ep"
+		countByEventQuery += " FROM events_participants ep"
+
+		// Append conditions to queries
+		if len(conditions) > 0 {
+			whereClause := " WHERE " + strings.Join(conditions, " AND ")
+			query += whereClause
+			eventCountQuery += whereClause
+			countByEventQuery += whereClause
+		}
+
+		// Complete the group by for the event breakdown query
+		countByEventQuery += " GROUP BY ep.events_name ORDER BY participant_count DESC"
+
+		// Response structure
+		type OlympiadStats struct {
+			TotalEvents       int `json:"total_events"`
+			TotalParticipants int `json:"total_participants"`
+			EventBreakdown    []struct {
+				EventName        string `json:"event_name"`
+				ParticipantCount int    `json:"participant_count"`
+			} `json:"event_breakdown,omitempty"`
+		}
+
+		// Initialize response
+		stats := OlympiadStats{}
+
+		// Step 7: Execute the event count query
+		err = db.QueryRow(eventCountQuery, args...).Scan(&stats.TotalEvents)
+		if err != nil {
+			log.Printf("Error counting events for school ID %d: %v", schoolID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to count events"})
+			return
+		}
+
+		// Step 8: Execute the participant count query
+		err = db.QueryRow(query, args...).Scan(&stats.TotalParticipants)
+		if err != nil {
+			log.Printf("Error counting participants for school ID %d: %v", schoolID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to count participants"})
+			return
+		}
+
+		// Step 9: Check if we should include breakdown by event
+		includeBreakdown := r.URL.Query().Get("include_breakdown")
+		if includeBreakdown == "true" {
+			rows, err := db.Query(countByEventQuery, args...)
+			if err != nil {
+				log.Printf("Error querying event breakdown for school ID %d: %v", schoolID, err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch event breakdown"})
+				return
+			}
+			defer rows.Close()
+
+			for rows.Next() {
+				var eventName string
+				var count int
+				err := rows.Scan(&eventName, &count)
+				if err != nil {
+					log.Printf("Error scanning event breakdown row: %v", err)
+					continue
+				}
+				stats.EventBreakdown = append(stats.EventBreakdown, struct {
+					EventName        string `json:"event_name"`
+					ParticipantCount int    `json:"participant_count"`
+				}{
+					EventName:        eventName,
+					ParticipantCount: count,
+				})
+			}
+
+			if err = rows.Err(); err != nil {
+				log.Printf("Error during row iteration for event breakdown: %v", err)
+			}
+		}
+
+		// Step 10: Return the statistics
+		log.Printf("Successfully counted %d events and %d participants for school ID %d, user ID %d", stats.TotalEvents, stats.TotalParticipants, schoolID, userID)
+		utils.ResponseJSON(w, stats)
+	}
+}

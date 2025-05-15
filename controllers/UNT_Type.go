@@ -111,6 +111,92 @@ func (sc UNTTypeController) CreateUNTType(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, "UNT Type created successfully")
 	}
 }
+func (c *UNTTypeController) GetTop3StudentsByUNT(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Define response structure
+		type TopStudent struct {
+			FullName string `json:"full_name"`
+			IIN      string `json:"iin"`
+			Grade    int    `json:"grade"`
+			Letter   string `json:"letter"`
+			UNTScore int    `json:"unt_score"`
+		}
+
+		// Query to get top 3 students by UNT score, handling both type-1 and type-2
+		query := `
+			SELECT 
+				TRIM(CONCAT(s.first_name, ' ', s.last_name, ' ', COALESCE(s.patronymic, ''))) AS full_name,
+				s.iin,
+				s.grade,
+				s.letter,
+				COALESCE(ut.total_score, ut.total_score_creative, 0) AS unt_score
+			FROM student s
+			INNER JOIN UNT_Type ut ON s.student_type_id = ut.unt_type_id
+			WHERE s.role = 'student'
+			ORDER BY COALESCE(ut.total_score, ut.total_score_creative, 0) DESC
+			LIMIT 3
+		`
+
+		// Execute query
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Printf("Error querying top students: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve top students"})
+			return
+		}
+		defer rows.Close()
+
+		// Process results
+		var topStudents []TopStudent
+		for rows.Next() {
+			var student TopStudent
+			var iin sql.NullString    // Handle nullable IIN
+			var letter sql.NullString // Handle nullable Letter
+			if err := rows.Scan(
+				&student.FullName,
+				&iin,
+				&student.Grade,
+				&letter,
+				&student.UNTScore,
+			); err != nil {
+				log.Printf("Error scanning row: %v", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse student data"})
+				return
+			}
+
+			// Assign values, handling NULLs
+			student.IIN = utils.NullStringToString(iin)
+			student.Letter = utils.NullStringToString(letter)
+
+			topStudents = append(topStudents, student)
+		}
+
+		if err = rows.Err(); err != nil {
+			log.Printf("Error iterating rows: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+			return
+		}
+
+		// Debugging: Log if no results are found
+		if len(topStudents) == 0 {
+			log.Println("No students found with valid UNT scores")
+			// Optionally, check if students or UNT_Type records exist
+			var studentCount int
+			db.QueryRow("SELECT COUNT(*) FROM student WHERE role = 'student'").Scan(&studentCount)
+			var untCount int
+			db.QueryRow("SELECT COUNT(*) FROM UNT_Type").Scan(&untCount)
+			log.Printf("Students with role='student': %d, UNT_Type records: %d", studentCount, untCount)
+		}
+
+		// Return the top 3 students
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(topStudents); err != nil {
+			log.Printf("Error encoding response: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to encode response"})
+			return
+		}
+	}
+}
 func (c *TypeController) GetUNTTypesBySchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Извлекаем school_id из параметров URL
@@ -239,82 +325,5 @@ func (c *TypeController) GetUNTTypesBySchool(db *sql.DB) http.HandlerFunc {
 		}
 
 		utils.ResponseJSON(w, types)
-	}
-}
-func (c *UNTTypeController) GetTop3StudentsByUNT(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Define response structure
-		type TopStudent struct {
-			FullName string `json:"full_name"`
-			IIN      string `json:"iin"`
-			Grade    int    `json:"grade"`
-			Letter   string `json:"letter"`
-			UNTScore int    `json:"unt_score"`
-		}
-
-		// Query to get top 3 students by UNT score
-		query := `
-            SELECT 
-                CONCAT(s.first_name, ' ', s.last_name) AS full_name,
-                s.iin,
-                s.grade,
-                s.letter,
-                COALESCE(
-                    CASE 
-                        WHEN ut.type = 'type-1' THEN ut.total_score 
-                        WHEN ut.type = 'type-2' THEN ut.total_score_creative 
-                    END, 
-                    0
-                ) AS unt_score
-            FROM student s
-            INNER JOIN UNT_Type ut ON s.student_type_id = ut.unt_type_id
-            WHERE s.role = 'student'
-            ORDER BY unt_score DESC
-            LIMIT 3
-        `
-
-		// Execute query
-		rows, err := db.Query(query)
-		if err != nil {
-			log.Printf("Error querying top students: %v", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve top students"})
-			return
-		}
-		defer rows.Close()
-
-		// Process results
-		var topStudents []TopStudent
-		for rows.Next() {
-			var student TopStudent
-			var iin sql.NullString    // Handle nullable IIN
-			var letter sql.NullString // Handle nullable Letter
-			if err := rows.Scan(
-				&student.FullName,
-				&iin,
-				&student.Grade,
-				&letter,
-				&student.UNTScore,
-			); err != nil {
-				log.Printf("Error scanning row: %v", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse student data"})
-				return
-			}
-
-			// Assign values, handling NULLs
-			student.IIN = utils.NullStringToString(iin)
-			student.Letter = utils.NullStringToString(letter)
-
-			topStudents = append(topStudents, student)
-		}
-
-		if err = rows.Err(); err != nil {
-			log.Printf("Error iterating rows: %v", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
-			return
-		}
-
-		// Return the top 3 students
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(topStudents)
 	}
 }

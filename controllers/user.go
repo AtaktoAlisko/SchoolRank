@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -812,6 +813,7 @@ func (c *Controller) UpdateUser(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var userUpdate models.User
 		var error models.Error
+		var rawRequest map[string]interface{}
 
 		// Check if the request is from a superadmin
 		authHeader := r.Header.Get("Authorization")
@@ -836,9 +838,24 @@ func (c *Controller) UpdateUser(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Decode request body
-		err = json.NewDecoder(r.Body).Decode(&userUpdate)
+		// Read the request body into a byte slice
+		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
+			error.Message = "Failed to read request body."
+			utils.RespondWithError(w, http.StatusBadRequest, error)
+			return
+		}
+		defer r.Body.Close()
+
+		// Decode raw JSON to check provided fields
+		if err := json.Unmarshal(bodyBytes, &rawRequest); err != nil {
+			error.Message = "Invalid request body."
+			utils.RespondWithError(w, http.StatusBadRequest, error)
+			return
+		}
+
+		// Decode into userUpdate struct
+		if err := json.Unmarshal(bodyBytes, &userUpdate); err != nil {
 			error.Message = "Invalid request body."
 			utils.RespondWithError(w, http.StatusBadRequest, error)
 			return
@@ -867,7 +884,8 @@ func (c *Controller) UpdateUser(db *sql.DB) http.HandlerFunc {
 		args := []interface{}{}
 		argCount := 1
 
-		if userUpdate.Password != "" {
+		// Only update password if it was explicitly provided in the request
+		if _, hasPassword := rawRequest["password"]; hasPassword && userUpdate.Password != "" {
 			hash, err := bcrypt.GenerateFromPassword([]byte(userUpdate.Password), bcrypt.DefaultCost)
 			if err != nil {
 				log.Printf("Error hashing password: %v", err)
@@ -3055,7 +3073,148 @@ func (c *Controller) CountUsers(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
-func (c *Controller) GetMonthlyRegistrations(db *sql.DB) http.HandlerFunc {
+
+func (oc *OlympiadController) GetMonthlyRegistrations(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify the token
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Authorization header is required"})
+			return
+		}
+
+		tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
+		token, err := utils.ParseToken(tokenString)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok || !token.Valid {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
+
+		role, ok := claims["role"].(string)
+		if !ok || (role != "superadmin" && role != "schooladmin") {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Insufficient permissions"})
+			return
+		}
+
+		// Step 2: Extract school_id from URL
+		vars := mux.Vars(r)
+		schoolIDParam := vars["school_id"]
+		schoolID, err := strconv.Atoi(schoolIDParam)
+		if err != nil || schoolID <= 0 {
+			log.Printf("Invalid school_id format: %s, error: %v", schoolIDParam, err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school_id format"})
+			return
+		}
+
+		// Step 3: Restrict schooladmin to their school
+		if role == "schooladmin" {
+			userSchoolID, ok := claims["school_id"].(float64) // JWT claims often store numbers as float64
+			if !ok || int(userSchoolID) <= 0 {
+				log.Printf("No valid school_id associated with schooladmin")
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "No school assigned to this admin"})
+				return
+			}
+			if int(userSchoolID) != schoolID {
+				log.Printf("Schooladmin attempted to access school ID %d, but is assigned to school ID %d", schoolID, int(userSchoolID))
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view this school's data"})
+				return
+			}
+		}
+
+		// Step 4: Get year parameter, default to current year
+		yearParam := r.URL.Query().Get("year")
+		targetYear := time.Now().Year()
+		if yearParam != "" {
+			parsedYear, err := strconv.Atoi(yearParam)
+			if err == nil && parsedYear > 0 {
+				targetYear = parsedYear
+			}
+		}
+
+		// Step 5: Query to count students by month
+		query := `
+            SELECT 
+                MONTHNAME(date) AS month_name,
+                COUNT(student_id) AS participant_count
+            FROM Olympiads
+            WHERE school_id = ? AND YEAR(date) = ?
+            GROUP BY MONTH(date)
+            ORDER BY MONTH(date)
+        `
+
+		rows, err := db.Query(query, schoolID, targetYear)
+		if err != nil {
+			log.Printf("Error executing query for school ID %d, year %d: %v", schoolID, targetYear, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve monthly statistics"})
+			return
+		}
+		defer rows.Close()
+
+		// Step 6: Initialize counts for each month
+		monthCounts := map[string]int{
+			"Januarycount":   0,
+			"Februarycount":  0,
+			"Marchcount":     0,
+			"Aprilcount":     0,
+			"Maycount":       0,
+			"Junecount":      0,
+			"Julycount":      0,
+			"Augustcount":    0,
+			"Septembercount": 0,
+			"Octobercount":   0,
+			"Novembercount":  0,
+			"Decembercount":  0,
+		}
+
+		// Step 7: Process query results
+		for rows.Next() {
+			var monthName string
+			var count int
+			err := rows.Scan(&monthName, &count)
+			if err != nil {
+				log.Printf("Error scanning row: %v", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing monthly data"})
+				return
+			}
+			// Map full month names to count keys
+			monthKey := map[string]string{
+				"January":   "Januarycount",
+				"February":  "Februarycount",
+				"March":     "Marchcount",
+				"April":     "Aprilcount",
+				"May":       "Maycount",
+				"June":      "Junecount",
+				"July":      "Julycount",
+				"August":    "Augustcount",
+				"September": "Septembercount",
+				"October":   "Octobercount",
+				"November":  "Novembercount",
+				"December":  "Decembercount",
+			}
+			if key, exists := monthKey[monthName]; exists {
+				monthCounts[key] = count
+			}
+		}
+
+		// Step 8: Check for errors from iterating over rows
+		if err = rows.Err(); err != nil {
+			log.Printf("Error processing query results: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing data"})
+			return
+		}
+
+		// Step 9: Return the response
+		log.Printf("Successfully retrieved monthly olympiad stats for school ID %d, year %d: %+v", schoolID, targetYear, monthCounts)
+		utils.ResponseJSON(w, monthCounts)
+	}
+}
+func (c *Controller) CountUsersByRole(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check authorization (only admins should access this)
 		authHeader := r.Header.Get("Authorization")
@@ -3086,80 +3245,56 @@ func (c *Controller) GetMonthlyRegistrations(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Get year parameter, default to current year
-		yearParam := r.URL.Query().Get("year")
-		targetYear := time.Now().Year() // Default to current year
-		if yearParam != "" {
-			parsedYear, err := strconv.Atoi(yearParam)
-			if err == nil && parsedYear > 0 {
-				targetYear = parsedYear
-			}
-		}
+		var superAdminCount, schoolAdminCount, studentCount, userCount int
+		var error models.Error
 
-		// Initialize response structure
-		type MonthlyData struct {
-			Month     string `json:"month"`
-			ShortName string `json:"shortName"`
-			Count     int    `json:"count"`
-		}
-
-		months := []string{"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"}
-		shortMonths := []string{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
-
-		// Create result slice with all months initialized to zero counts
-		result := make([]MonthlyData, 12)
-		for i := 0; i < 12; i++ {
-			result[i] = MonthlyData{
-				Month:     months[i],
-				ShortName: shortMonths[i],
-				Count:     0,
-			}
-		}
-
-		// Build query with role filter for specific roles
-		query := `
-            SELECT MONTH(created_at) as month, COUNT(*) as count 
-            FROM users 
-            WHERE YEAR(created_at) = ? 
-            AND role IN ('user', 'schooladmin', 'superadmin', 'student')
-        `
-		args := []interface{}{targetYear}
-
-		// Group by month
-		query += " GROUP BY MONTH(created_at)"
-
-		// Execute query
-		rows, err := db.Query(query, args...)
+		// Count superadmins from users table
+		err = db.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'superadmin'").Scan(&superAdminCount)
 		if err != nil {
-			log.Printf("Error querying monthly registrations: %v", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
-			return
-		}
-		defer rows.Close()
-
-		// Process results
-		for rows.Next() {
-			var month int
-			var count int
-			if err := rows.Scan(&month, &count); err != nil {
-				log.Printf("Error scanning row: %v", err)
-				continue
-			}
-
-			// Month in SQL is 1-indexed, so adjust to 0-indexed for array
-			if month >= 1 && month <= 12 {
-				result[month-1].Count = count
-			}
-		}
-
-		if err = rows.Err(); err != nil {
-			log.Printf("Error iterating rows: %v", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+			log.Printf("Error counting superadmins: %v", err)
+			error.Message = "Server error counting superadmins."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
 			return
 		}
 
-		// Return only the detailedData array
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(result)
+		// Count schooladmins from users table
+		err = db.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'schooladmin'").Scan(&schoolAdminCount)
+		if err != nil {
+			log.Printf("Error counting schooladmins: %v", err)
+			error.Message = "Server error counting schooladmins."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
+			return
+		}
+
+		// Count regular users from users table
+		err = db.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'user'").Scan(&userCount)
+		if err != nil {
+			log.Printf("Error counting regular users: %v", err)
+			error.Message = "Server error counting regular users."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
+			return
+		}
+
+		// Count students
+		// Note: Based on the provided code, students might be in either the users table or the student table
+		// This query assumes students are marked with role='student' in the student table
+		err = db.QueryRow("SELECT COUNT(*) FROM student WHERE role = 'student'").Scan(&studentCount)
+		if err != nil {
+			log.Printf("Error counting students: %v", err)
+			error.Message = "Server error counting students."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
+			return
+		}
+
+		// Prepare response structure
+		response := map[string]interface{}{
+			"superadmin":  superAdminCount,
+			"schooladmin": schoolAdminCount,
+			"student":     studentCount,
+			"user":        userCount,
+		}
+
+		// Send response
+		utils.ResponseJSON(w, response)
 	}
 }

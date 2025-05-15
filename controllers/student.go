@@ -1821,3 +1821,39 @@ func (sfc *StudentController) GetFilteredStudents(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, students)
 	}
 }
+func (c *StudentController) GetStudentsCountBySchool(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Extract school_id from URL parameters
+		vars := mux.Vars(r)
+		schoolIDParam := vars["school_id"]
+		schoolID, err := strconv.Atoi(schoolIDParam) // Convert school_id from string to integer
+		if err != nil {
+			log.Printf("Error converting school_id: %v", err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+			return
+		}
+
+		// Query to count students by school_id
+		var studentCount int
+		err = db.QueryRow("SELECT COUNT(*) FROM student WHERE school_id = ?", schoolID).Scan(&studentCount)
+		if err != nil {
+			log.Printf("SQL Error: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to count students"})
+			return
+		}
+
+		// Response structure
+		type StudentCountResponse struct {
+			TotalStudents int `json:"total_students"`
+		}
+
+		// Create response
+		response := StudentCountResponse{
+			TotalStudents: studentCount,
+		}
+
+		// Return the count
+		log.Printf("Successfully counted %d students for school ID %d", studentCount, schoolID)
+		utils.ResponseJSON(w, response)
+	}
+}

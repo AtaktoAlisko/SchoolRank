@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt"
 	"github.com/gorilla/mux"
 )
 
@@ -684,7 +685,7 @@ func (oc *OlympiadController) GetOlympiadById(db *sql.DB) http.HandlerFunc {
 		// Получаем school_id из URL-параметра
 		vars := mux.Vars(r)
 		schoolIDParam, schoolIDExists := vars["school_id"]
-		
+
 		// Получаем остальные параметры запроса
 		studentID := r.URL.Query().Get("student_id")
 		level := r.URL.Query().Get("level")
@@ -1552,4 +1553,497 @@ func (soc *SubjectOlympiadController) GetAllSubOlypmiadNamePicture(db *sql.DB) h
 
 		utils.ResponseJSON(w, olympiads)
 	}
+}
+func (oc *OlympiadController) GetCountParticipantsOlympiadBySchoolID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify the token
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			log.Printf("Token verification failed: %v", err)
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
+
+		// Step 2: Get user role and school_id
+		var userRole string
+		var userSchoolID sql.NullInt64
+		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+		if err != nil {
+			log.Printf("Error fetching user details for user ID %d: %v", userID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
+
+		// Step 3: Check access permissions
+		if userRole != "superadmin" && userRole != "schooladmin" {
+			log.Printf("Access denied for user ID %d with role %s", userID, userRole)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view olympiad statistics"})
+			return
+		}
+
+		// Step 4: Extract school_id from URL
+		vars := mux.Vars(r)
+		schoolIDParam := vars["school_id"]
+		schoolID, err := strconv.Atoi(schoolIDParam)
+		if err != nil || schoolID <= 0 {
+			log.Printf("Invalid school_id format: %s, error: %v", schoolIDParam, err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school_id format"})
+			return
+		}
+
+		// Step 5: Restrict schooladmin to their school
+		if userRole == "schooladmin" {
+			if !userSchoolID.Valid {
+				log.Printf("No school_id associated with schooladmin user ID %d", userID)
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "No school assigned to this admin"})
+				return
+			}
+			if int(userSchoolID.Int64) != schoolID {
+				log.Printf("Schooladmin user ID %d attempted to access school ID %d, but is assigned to school ID %d", userID, schoolID, userSchoolID.Int64)
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view this school's data"})
+				return
+			}
+		}
+
+		// Step 6: Build queries
+		olympiadCountQuery := `SELECT COUNT(DISTINCT olympiad_name) AS olympiad_count FROM Olympiads WHERE school_id = ?`
+		participantCountQuery := `SELECT COUNT(student_id) AS participant_count FROM Olympiads WHERE school_id = ?`
+		countByOlympiadQuery := `SELECT olympiad_name, COUNT(student_id) AS participant_count 
+                                FROM Olympiads WHERE school_id = ? 
+                                GROUP BY olympiad_name ORDER BY participant_count DESC`
+
+		// Response structure
+		type OlympiadStats struct {
+			TotalOlympiads    int `json:"total_olympiads"`
+			TotalParticipants int `json:"total_participants"`
+			OlympiadBreakdown []struct {
+				OlympiadName     string `json:"olympiad_name"`
+				ParticipantCount int    `json:"participant_count"`
+			} `json:"olympiad_breakdown,omitempty"`
+		}
+
+		// Initialize response
+		stats := OlympiadStats{}
+
+		// Step 7: Execute the olympiad count query
+		err = db.QueryRow(olympiadCountQuery, schoolID).Scan(&stats.TotalOlympiads)
+		if err != nil {
+			log.Printf("Error counting olympiads for school ID %d: %v", schoolID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to count olympiads"})
+			return
+		}
+
+		// Step 8: Execute the participant count query
+		err = db.QueryRow(participantCountQuery, schoolID).Scan(&stats.TotalParticipants)
+		if err != nil {
+			log.Printf("Error counting participants for school ID %d: %v", schoolID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to count participants"})
+			return
+		}
+
+		// Step 9: Check if we should include breakdown by olympiad
+		includeBreakdown := r.URL.Query().Get("include_breakdown")
+		if includeBreakdown == "true" {
+			rows, err := db.Query(countByOlympiadQuery, schoolID)
+			if err != nil {
+				log.Printf("Error querying olympiad breakdown for school ID %d: %v", schoolID, err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch olympiad breakdown"})
+				return
+			}
+			defer rows.Close()
+
+			for rows.Next() {
+				var olympiadName string
+				var count int
+				err := rows.Scan(&olympiadName, &count)
+				if err != nil {
+					log.Printf("Error scanning olympiad breakdown row: %v", err)
+					continue
+				}
+				stats.OlympiadBreakdown = append(stats.OlympiadBreakdown, struct {
+					OlympiadName     string `json:"olympiad_name"`
+					ParticipantCount int    `json:"participant_count"`
+				}{
+					OlympiadName:     olympiadName,
+					ParticipantCount: count,
+				})
+			}
+
+			if err = rows.Err(); err != nil {
+				log.Printf("Error during row iteration for olympiad breakdown: %v", err)
+			}
+		}
+
+		// Step 10: Return the statistics
+		log.Printf("Successfully counted %d olympiads and %d participants for school ID %d, user ID %d", stats.TotalOlympiads, stats.TotalParticipants, schoolID, userID)
+		utils.ResponseJSON(w, stats)
+	}
+}
+func (oc *OlympiadController) GetOlympiadPrizeStatsBySchoolID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify the token
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			log.Printf("Token verification failed: %v", err)
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
+
+		// Step 2: Get user role and school_id
+		var userRole string
+		var userSchoolID sql.NullInt64
+		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+		if err != nil {
+			log.Printf("Error fetching user details for user ID %d: %v", userID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
+
+		// Step 3: Check access permissions
+		if userRole != "superadmin" && userRole != "schooladmin" {
+			log.Printf("Access denied for user ID %d with role %s", userID, userRole)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view olympiad statistics"})
+			return
+		}
+
+		// Step 4: Extract school_id from URL
+		vars := mux.Vars(r)
+		schoolIDParam := vars["school_id"]
+		schoolID, err := strconv.Atoi(schoolIDParam)
+		if err != nil || schoolID <= 0 {
+			log.Printf("Invalid school_id format: %s, error: %v", schoolIDParam, err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school_id format"})
+			return
+		}
+
+		// Step 5: Restrict schooladmin to their school
+		if userRole == "schooladmin" {
+			if !userSchoolID.Valid {
+				log.Printf("No school_id associated with schooladmin user ID %d", userID)
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "No school assigned to this admin"})
+				return
+			}
+			if int(userSchoolID.Int64) != schoolID {
+				log.Printf("Schooladmin user ID %d attempted to access school ID %d, but is assigned to school ID %d", userID, schoolID, userSchoolID.Int64)
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view this school's data"})
+				return
+			}
+		}
+
+		// Step 6: Query to count students by olympiad_place (1, 2, 3)
+		query := `
+            SELECT 
+                olympiad_place,
+                COUNT(*) AS place_count
+            FROM Olympiads
+            WHERE school_id = ? AND olympiad_place IN (1, 2, 3)
+            GROUP BY olympiad_place
+            ORDER BY olympiad_place
+        `
+
+		rows, err := db.Query(query, schoolID)
+		if err != nil {
+			log.Printf("Error executing query for school ID %d: %v", schoolID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve prize statistics"})
+			return
+		}
+		defer rows.Close()
+
+		// Step 7: Initialize counts for 1st, 2nd, and 3rd places
+		placeCounts := map[string]int{
+			"1 place": 0,
+			"2 place": 0,
+			"3 place": 0,
+		}
+
+		// Step 8: Process query results
+		for rows.Next() {
+			var place, count int
+			err := rows.Scan(&place, &count)
+			if err != nil {
+				log.Printf("Error scanning row: %v", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing prize data"})
+				return
+			}
+			placeCounts[placeToString(place)] = count
+		}
+
+		// Step 9: Check for errors from iterating over rows
+		if err = rows.Err(); err != nil {
+			log.Printf("Error processing query results: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing data"})
+			return
+		}
+
+		// Step 10: Return the response
+		log.Printf("Successfully retrieved prize stats for school ID %d: %+v", schoolID, placeCounts)
+		utils.ResponseJSON(w, placeCounts)
+	}
+}
+func (oc *OlympiadController) GetOlympiadMonthlyStatsBySchoolID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify the token
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Authorization header is required"})
+			return
+		}
+
+		tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
+		token, err := utils.ParseToken(tokenString)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok || !token.Valid {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
+
+		role, ok := claims["role"].(string)
+		if !ok || (role != "superadmin" && role != "schooladmin") {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Insufficient permissions"})
+			return
+		}
+
+		// Step 2: Extract school_id from URL
+		vars := mux.Vars(r)
+		schoolIDParam := vars["school_id"]
+		schoolID, err := strconv.Atoi(schoolIDParam)
+		if err != nil || schoolID <= 0 {
+			log.Printf("Invalid school_id format: %s, error: %v", schoolIDParam, err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school_id format"})
+			return
+		}
+
+		// Step 3: Restrict schooladmin to their school
+		if role == "schooladmin" {
+			userSchoolID, ok := claims["school_id"].(float64) // JWT claims often store numbers as float64
+			if !ok || int(userSchoolID) <= 0 {
+				log.Printf("No valid school_id associated with schooladmin")
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "No school assigned to this admin"})
+				return
+			}
+			if int(userSchoolID) != schoolID {
+				log.Printf("Schooladmin attempted to access school ID %d, but is assigned to school ID %d", schoolID, int(userSchoolID))
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view this school's data"})
+				return
+			}
+		}
+
+		// Step 4: Get year parameter, default to current year
+		yearParam := r.URL.Query().Get("year")
+		targetYear := time.Now().Year()
+		if yearParam != "" {
+			parsedYear, err := strconv.Atoi(yearParam)
+			if err == nil && parsedYear > 0 {
+				targetYear = parsedYear
+			}
+		}
+
+		// Step 5: Query to count students by month
+		query := `
+            SELECT 
+                MONTHNAME(date) AS month_name,
+                COUNT(student_id) AS participant_count
+            FROM Olympiads
+            WHERE school_id = ? AND YEAR(date) = ?
+            GROUP BY MONTH(date)
+            ORDER BY MONTH(date)
+        `
+
+		rows, err := db.Query(query, schoolID, targetYear)
+		if err != nil {
+			log.Printf("Error executing query for school ID %d, year %d: %v", schoolID, targetYear, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve monthly statistics"})
+			return
+		}
+		defer rows.Close()
+
+		// Step 6: Initialize counts for each month
+		monthCounts := map[string]int{
+			"Januarycount":   0,
+			"Februarycount":  0,
+			"Marchcount":     0,
+			"Aprilcount":     0,
+			"Maycount":       0,
+			"Junecount":      0,
+			"Julycount":      0,
+			"Augustcount":    0,
+			"Septembercount": 0,
+			"Octobercount":   0,
+			"Novembercount":  0,
+			"Decembercount":  0,
+		}
+
+		// Step 7: Process query results
+		for rows.Next() {
+			var monthName string
+			var count int
+			err := rows.Scan(&monthName, &count)
+			if err != nil {
+				log.Printf("Error scanning row: %v", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing monthly data"})
+				return
+			}
+			// Map full month names to count keys
+			monthKey := map[string]string{
+				"January":   "Januarycount",
+				"February":  "Februarycount",
+				"March":     "Marchcount",
+				"April":     "Aprilcount",
+				"May":       "Maycount",
+				"June":      "Junecount",
+				"July":      "Julycount",
+				"August":    "Augustcount",
+				"September": "Septembercount",
+				"October":   "Octobercount",
+				"November":  "Novembercount",
+				"December":  "Decembercount",
+			}
+			if key, exists := monthKey[monthName]; exists {
+				monthCounts[key] = count
+			}
+		}
+
+		// Step 8: Check for errors from iterating over rows
+		if err = rows.Err(); err != nil {
+			log.Printf("Error processing query results: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing data"})
+			return
+		}
+
+		// Step 9: Return the response
+		log.Printf("Successfully retrieved monthly olympiad stats for school ID %d, year %d: %+v", schoolID, targetYear, monthCounts)
+		utils.ResponseJSON(w, monthCounts)
+	}
+}
+func placeToString(place int) string {
+	switch place {
+	case 1:
+		return "1 place"
+	case 2:
+		return "2 place"
+	case 3:
+		return "3 place"
+	default:
+		return ""
+	}
+}
+func (oc *OlympiadController) GetOlympiadMonthlyStats(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Step 1: Verify the token
+        authHeader := r.Header.Get("Authorization")
+        if authHeader == "" {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Authorization header is required"})
+            return
+        }
+
+        tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
+        token, err := utils.ParseToken(tokenString)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+            return
+        }
+
+        claims, ok := token.Claims.(jwt.MapClaims)
+        if !ok || !token.Valid {
+            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+            return
+        }
+
+        role, ok := claims["role"].(string)
+        if !ok || (role != "superadmin" && role != "schooladmin") {
+            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Insufficient permissions"})
+            return
+        }
+
+        // Step 2: Get year parameter, default to current year
+        yearParam := r.URL.Query().Get("year")
+        targetYear := time.Now().Year()
+        if yearParam != "" {
+            parsedYear, err := strconv.Atoi(yearParam)
+            if err == nil && parsedYear > 0 {
+                targetYear = parsedYear
+            }
+        }
+
+        // Step 3: Query to count students by month across all schools
+        query := `
+            SELECT 
+                MONTHNAME(date) AS month_name,
+                COUNT(student_id) AS participant_count
+            FROM Olympiads
+            WHERE YEAR(date) = ?
+            GROUP BY MONTH(date)
+            ORDER BY MONTH(date)
+        `
+
+        rows, err := db.Query(query, targetYear)
+        if err != nil {
+            log.Printf("Error executing query for year %d: %v", targetYear, err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve monthly statistics"})
+            return
+        }
+        defer rows.Close()
+
+        // Step 4: Initialize counts for each month
+        monthCounts := map[string]int{
+            "Januarycount":   0,
+            "Februarycount":  0,
+            "Marchcount":     0,
+            "Aprilcount":     0,
+            "Maycount":       0,
+            "Junecount":      0,
+            "Julycount":      0,
+            "Augustcount":    0,
+            "Septembercount": 0,
+            "Octobercount":   0,
+            "Novembercount":  0,
+            "Decembercount":  0,
+        }
+
+        // Step 5: Process query results
+        for rows.Next() {
+            var monthName string
+            var count int
+            err := rows.Scan(&monthName, &count)
+            if err != nil {
+                log.Printf("Error scanning row: %v", err)
+                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing monthly data"})
+                return
+            }
+            // Map full month names to count keys
+            monthKey := map[string]string{
+                "January":   "Januarycount",
+                "February":  "Februarycount",
+                "March":     "Marchcount",
+                "April":     "Aprilcount",
+                "May":       "Maycount",
+                "June":      "Junecount",
+                "July":      "Julycount",
+                "August":    "Augustcount",
+                "September": "Septembercount",
+                "October":   "Octobercount",
+                "November":  "Novembercount",
+                "December":  "Decembercount",
+            }
+            if key, exists := monthKey[monthName]; exists {
+                monthCounts[key] = count
+            }
+        }
+
+        // Step 6: Check for errors from iterating over rows
+        if err = rows.Err(); err != nil {
+            log.Printf("Error processing query results: %v", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing data"})
+            return
+        }
+
+        // Step 7: Return the response
+        log.Printf("Successfully retrieved monthly olympiad stats for year %d: %+v", targetYear, monthCounts)
+        utils.ResponseJSON(w, monthCounts)
+    }
 }

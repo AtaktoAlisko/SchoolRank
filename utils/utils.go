@@ -492,8 +492,6 @@ func UploadFileToS3Compat(file multipart.File, fileName string, isAvatar bool) (
 	}
 	return UploadFileToS3(file, fileName, fileType)
 }
-
-// GetUserIDFromToken extracts the user ID from the JWT token in the Authorization header
 func GetUserIDFromToken(r *http.Request) (int, error) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {

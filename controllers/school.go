@@ -921,7 +921,6 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
-
 func (sc *SchoolController) GetSchoolCount(db *sql.DB) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         log.Println("GetSchoolCount endpoint called") // Debug log
