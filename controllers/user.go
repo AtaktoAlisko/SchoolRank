@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -813,7 +812,6 @@ func (c *Controller) UpdateUser(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var userUpdate models.User
 		var error models.Error
-		var rawRequest map[string]interface{}
 
 		// Check if the request is from a superadmin
 		authHeader := r.Header.Get("Authorization")
@@ -838,24 +836,9 @@ func (c *Controller) UpdateUser(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Read the request body into a byte slice
-		bodyBytes, err := io.ReadAll(r.Body)
+		// Decode request body
+		err = json.NewDecoder(r.Body).Decode(&userUpdate)
 		if err != nil {
-			error.Message = "Failed to read request body."
-			utils.RespondWithError(w, http.StatusBadRequest, error)
-			return
-		}
-		defer r.Body.Close()
-
-		// Decode raw JSON to check provided fields
-		if err := json.Unmarshal(bodyBytes, &rawRequest); err != nil {
-			error.Message = "Invalid request body."
-			utils.RespondWithError(w, http.StatusBadRequest, error)
-			return
-		}
-
-		// Decode into userUpdate struct
-		if err := json.Unmarshal(bodyBytes, &userUpdate); err != nil {
 			error.Message = "Invalid request body."
 			utils.RespondWithError(w, http.StatusBadRequest, error)
 			return
@@ -884,8 +867,7 @@ func (c *Controller) UpdateUser(db *sql.DB) http.HandlerFunc {
 		args := []interface{}{}
 		argCount := 1
 
-		// Only update password if it was explicitly provided in the request
-		if _, hasPassword := rawRequest["password"]; hasPassword && userUpdate.Password != "" {
+		if userUpdate.Password != "" {
 			hash, err := bcrypt.GenerateFromPassword([]byte(userUpdate.Password), bcrypt.DefaultCost)
 			if err != nil {
 				log.Printf("Error hashing password: %v", err)
@@ -1728,6 +1710,16 @@ func (c Controller) UpdatePassword(db *sql.DB) http.HandlerFunc {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(map[string]string{"message": "Incorrect current password."})
+			return
+		}
+
+		// Check if the new password is the same as the current password
+		err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(requestData.NewPassword))
+		if err == nil {
+			// If the new password matches the current hashed password, reject the update
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"message": "New password cannot be the same as the current password."})
 			return
 		}
 
