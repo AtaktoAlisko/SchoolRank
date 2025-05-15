@@ -7,12 +7,11 @@ type Event struct {
 	EventName   string `json:"event_name"`
 	Description string `json:"description"`
 	Photo       string `json:"photo"`
-	DateTime    string `json:"date_time"`
 	StartDate   string `json:"start_date"`
 	EndDate     string `json:"end_date"`
 	Category    string `json:"category"`
 	Location    string `json:"location"`
-	Status      string `json:"status"`
+	Grade       int    `json:"grade"`
 	Limit       int    `json:"limit"`
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`

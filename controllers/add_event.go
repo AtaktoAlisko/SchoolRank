@@ -68,14 +68,21 @@ func (ec *EventController) AddEvent(db *sql.DB) http.HandlerFunc {
 		// Get standard form fields
 		event.EventName = r.FormValue("event_name")
 		event.Description = r.FormValue("description")
-		event.DateTime = r.FormValue("date_time")
 		event.Category = r.FormValue("category")
 		event.Location = r.FormValue("location")
-		event.Status = r.FormValue("status")
-
-		// Get new form fields
 		event.StartDate = r.FormValue("start_date")
 		event.EndDate = r.FormValue("end_date")
+
+		// Parse grade
+		gradeStr := r.FormValue("grade")
+		if gradeStr != "" {
+			grade, err := strconv.Atoi(gradeStr)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade format"})
+				return
+			}
+			event.Grade = grade
+		}
 
 		// Parse limit
 		limitStr := r.FormValue("limit")
@@ -89,9 +96,9 @@ func (ec *EventController) AddEvent(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Validate required fields
-		if event.EventName == "" || event.Location == "" || event.Status == "" {
+		if event.EventName == "" || event.Location == "" {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{
-				Message: "Missing required fields: event_name, location, and status are required",
+				Message: "Missing required fields: event_name and location are required",
 			})
 			return
 		}
@@ -135,14 +142,6 @@ func (ec *EventController) AddEvent(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Validate status value
-		if event.Status != "Upcoming" && event.Status != "Completed" {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{
-				Message: "Invalid status value: must be 'Upcoming' or 'Completed'",
-			})
-			return
-		}
-
 		// Handle file upload for photo
 		file, handler, err := r.FormFile("photo")
 		if err != nil && err != http.ErrMissingFile {
@@ -173,8 +172,6 @@ func (ec *EventController) AddEvent(db *sql.DB) http.HandlerFunc {
 		// Validate school access based on role
 		if role == "schooladmin" {
 			// For schooladmin: check if they can add events for this school
-
-			// First, make sure school_id is provided
 			if event.SchoolID <= 0 {
 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{
 					Message: "School ID is required for school administrators",
@@ -234,24 +231,25 @@ func (ec *EventController) AddEvent(db *sql.DB) http.HandlerFunc {
 		err = db.QueryRow("SELECT username FROM users WHERE id = ?", userID).Scan(&createdBy)
 		if err != nil {
 			log.Println("Error fetching username:", err)
-			// Continue with empty creator name
 			createdBy = ""
 		}
 		event.CreatedBy = createdBy
 
 		// Set timestamps
 		now := time.Now().Format("2006-01-02 15:04:05")
+		event.CreatedAt = now
+		event.UpdatedAt = now
 
 		// Insert event with proper error handling
 		result, err := db.Exec(
 			`INSERT INTO Events (
-				school_id, user_id, event_name, description, photo, 
-				date_time, start_date, end_date, category, location, 
-				status, limit_count, created_at, updated_at, created_by
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                school_id, user_id, event_name, description, photo, 
+                start_date, end_date, category, location, 
+                grade, limit_count, created_at, updated_at, created_by
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			event.SchoolID, event.UserID, event.EventName, event.Description, event.Photo,
-			event.DateTime, event.StartDate, event.EndDate, event.Category, event.Location,
-			event.Status, event.Limit, now, now, event.CreatedBy,
+			event.StartDate, event.EndDate, event.Category, event.Location,
+			event.Grade, event.Limit, now, now, event.CreatedBy,
 		)
 
 		if err != nil {
@@ -298,14 +296,14 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 		// Собираем основные параметры
 		params["id"] = query.Get("id")
 		params["school_id"] = query.Get("school_id")
-		params["status"] = query.Get("status")
+		params["grade"] = query.Get("grade")
 		params["category"] = query.Get("category")
 		params["date_from"] = query.Get("date_from")
 		params["date_to"] = query.Get("date_to")
 		params["limit"] = query.Get("limit")
 		params["offset"] = query.Get("offset")
 
-		// Добавляем все остальные параметры, которые могут быть переданы
+		// Добавляем все остальные параметры
 		for key, values := range query {
 			if _, exists := params[key]; !exists && len(values) > 0 {
 				params[key] = values[0]
@@ -327,7 +325,7 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 		// Переменные для основных параметров
 		eventID := params["id"]
 		schoolID := params["school_id"]
-		status := params["status"]
+		grade := params["grade"]
 		category := params["category"]
 		dateFrom := params["date_from"]
 		dateTo := params["date_to"]
@@ -352,10 +350,9 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 				return
 			}
 
-			// Добавляем информацию о параметрах в ответ
+			// Формируем ответ без parameters_used
 			response := map[string]interface{}{
-				"event":           event,
-				"parameters_used": params,
+				"event": event,
 			}
 			utils.ResponseJSON(w, response)
 			return
@@ -364,13 +361,13 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 		// Строим запрос для получения списка событий
 		queryBuilder := strings.Builder{}
 		queryBuilder.WriteString(`
-			SELECT e.id, e.school_id, e.user_id, e.event_name, e.description, 
-			e.photo, e.date_time, e.category, e.location, e.status, 
-			e.created_at, e.updated_at, u.email AS created_by
-			FROM Events e
-			LEFT JOIN users u ON e.user_id = u.id
-			WHERE 1=1
-		`)
+            SELECT e.id, e.school_id, e.user_id, e.event_name, e.description, 
+            e.photo, e.start_date, e.end_date, e.category, e.location, 
+            e.grade, e.limit_count, e.created_at, e.updated_at, u.email AS created_by
+            FROM Events e
+            LEFT JOIN users u ON e.user_id = u.id
+            WHERE 1=1
+        `)
 
 		var args []interface{}
 
@@ -385,14 +382,14 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 			args = append(args, schoolIDInt)
 		}
 
-		if status != "" {
-			// Проверяем корректность статуса
-			if status != "Upcoming" && status != "Completed" {
-				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid status value"})
+		if grade != "" {
+			gradeInt, err := strconv.Atoi(grade)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade format"})
 				return
 			}
-			queryBuilder.WriteString(" AND e.status = ?")
-			args = append(args, status)
+			queryBuilder.WriteString(" AND e.grade = ?")
+			args = append(args, gradeInt)
 		}
 
 		if category != "" {
@@ -400,31 +397,29 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 			args = append(args, category)
 		}
 
-		// Фильтр по датам
+		// Фильтр по датам (start_date)
 		if dateFrom != "" {
-			// Проверяем формат даты
 			_, err := time.Parse("2006-01-02", dateFrom)
 			if err != nil {
 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid date_from format. Use YYYY-MM-DD"})
 				return
 			}
-			queryBuilder.WriteString(" AND e.date_time >= ?")
+			queryBuilder.WriteString(" AND e.start_date >= ?")
 			args = append(args, dateFrom)
 		}
 
 		if dateTo != "" {
-			// Проверяем формат даты
 			_, err := time.Parse("2006-01-02", dateTo)
 			if err != nil {
 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid date_to format. Use YYYY-MM-DD"})
 				return
 			}
-			queryBuilder.WriteString(" AND e.date_time <= ?")
+			queryBuilder.WriteString(" AND e.end_date <= ?")
 			args = append(args, dateTo)
 		}
 
-		// Добавляем сортировку по дате - сначала показываем ближайшие события
-		queryBuilder.WriteString(" ORDER BY e.date_time ASC")
+		// Добавляем сортировку по start_date
+		queryBuilder.WriteString(" ORDER BY e.start_date ASC")
 
 		// Добавляем пагинацию
 		if limit != "" {
@@ -447,7 +442,7 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 			}
 		}
 
-		// Логируем финальный SQL запрос для отладки
+		// Логируем финальный SQL запрос
 		finalQuery := queryBuilder.String()
 		log.Printf("Executing SQL query: %s with args: %v", finalQuery, args)
 
@@ -466,8 +461,9 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 			var event models.Event
 			err := rows.Scan(
 				&event.ID, &event.SchoolID, &event.UserID, &event.EventName, &event.Description,
-				&event.Photo, &event.DateTime, &event.Category, &event.Location, &event.Status,
-				&event.CreatedAt, &event.UpdatedAt, &event.CreatedBy,
+				&event.Photo, &event.StartDate, &event.EndDate, &event.Category,
+				&event.Location, &event.Grade, &event.Limit, &event.CreatedAt, &event.UpdatedAt,
+				&event.CreatedBy,
 			)
 			if err != nil {
 				log.Println("Error scanning event row:", err)
@@ -482,18 +478,16 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Подготавливаем ответ с данными о событиях и использованными параметрами
+		// Подготавливаем ответ без parameters_used
 		response := map[string]interface{}{
-			"events":          events,
-			"parameters_used": params,
-			"total_count":     len(events),
+			"events":      events,
+			"total_count": len(events),
 		}
 
 		if len(events) == 0 {
 			response["message"] = "No events found for the specified criteria"
 		}
 
-		// Отправляем результат
 		utils.ResponseJSON(w, response)
 	}
 }
@@ -509,7 +503,7 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 
 		// Получаем роль пользователя
 		var userRole string
-		var userSchoolID sql.NullInt64 // Changed to sql.NullInt64 to handle NULL values
+		var userSchoolID sql.NullInt64
 		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
 		if err != nil {
 			log.Println("Error fetching user role:", err)
@@ -527,7 +521,6 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 		vars := mux.Vars(r)
 		eventIDStr := vars["id"]
 		if eventIDStr == "" {
-			// Check for "event_id" parameter as shown in the router registration
 			eventIDStr = vars["event_id"]
 		}
 
@@ -537,7 +530,7 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Проверяем, существует ли событие и получаем текущие данные, включая путь к фото
+		// Проверяем, существует ли событие
 		var existingEvent models.Event
 		var eventSchoolID int
 		var eventCreatorID int
@@ -552,14 +545,13 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Event not found"})
 			} else {
 				log.Println("Error fetching event:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking event existence"})
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking occasion existence"})
 			}
 			return
 		}
 
 		// Проверяем права доступа для schooladmin
 		if userRole == "schooladmin" {
-			// Убедимся, что school_id не NULL перед сравнением
 			if !userSchoolID.Valid || int(userSchoolID.Int64) != eventSchoolID {
 				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You don't have permission to update this event"})
 				return
@@ -567,7 +559,7 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Parse multipart form
-		if err := r.ParseMultipartForm(10 << 20); err != nil { // 10MB max
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
 			log.Println("Error parsing form:", err)
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid form data"})
 			return
@@ -589,20 +581,7 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 			updatedEvent.Description = description
 		}
 
-		if dateTime := r.FormValue("date_time"); dateTime != "" {
-			// Проверяем формат даты
-			_, err := time.Parse("2006-01-02 15:04:05", dateTime)
-			if err != nil {
-				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid date format. Use YYYY-MM-DD HH:MM:SS"})
-				return
-			}
-			updateFields["date_time"] = dateTime
-			updatedEvent.DateTime = dateTime
-		}
-
-		// Обработка полей дат
 		if startDate := r.FormValue("start_date"); startDate != "" {
-			// Проверяем формат даты
 			dateFormats := []string{"2006-01-02", "2006-01-02 15:04:05"}
 			validFormat := false
 
@@ -623,7 +602,6 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 		}
 
 		if endDate := r.FormValue("end_date"); endDate != "" {
-			// Проверяем формат даты
 			dateFormats := []string{"2006-01-02", "2006-01-02 15:04:05"}
 			validFormat := false
 
@@ -641,6 +619,16 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 			}
 			updateFields["end_date"] = endDate
 			updatedEvent.EndDate = endDate
+		}
+
+		if gradeStr := r.FormValue("grade"); gradeStr != "" {
+			grade, err := strconv.Atoi(gradeStr)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade format"})
+				return
+			}
+			updateFields["grade"] = grade
+			updatedEvent.Grade = grade
 		}
 
 		if limitStr := r.FormValue("limit"); limitStr != "" {
@@ -663,26 +651,14 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 			updatedEvent.Location = location
 		}
 
-		if status := r.FormValue("status"); status != "" {
-			// Проверяем корректность статуса
-			if status != "Upcoming" && status != "Completed" {
-				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid status value: must be 'Upcoming' or 'Completed'"})
-				return
-			}
-			updateFields["status"] = status
-			updatedEvent.Status = status
-		}
-
-		// Обработка фото, если оно загружено
+		// Обработка фото
 		file, handler, err := r.FormFile("photo")
 		if err == nil {
 			defer file.Close()
 
-			// Создаем уникальное имя файла для S3
 			fileExt := filepath.Ext(handler.Filename)
 			photoFileName := fmt.Sprintf("event_%d_%d%s", eventID, time.Now().UnixNano(), fileExt)
 
-			// Загружаем файл в S3 с использованием case "schoolphoto"
 			photoURL, err := utils.UploadFileToS3(file, photoFileName, "schoolphoto")
 			if err != nil {
 				log.Println("Error uploading photo to S3:", err)
@@ -690,24 +666,20 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 				return
 			}
 
-			// Обновляем путь к фото
 			updateFields["photo"] = photoURL
 			updatedEvent.Photo = photoURL
 
-			// Если фото уже было и хранится в S3 (URL содержит amazonaws.com),
-			// можно попробовать удалить его
 			if currentPhotoURL != "" && strings.Contains(currentPhotoURL, "amazonaws.com") {
-				// Пытаемся удалить старое фото из S3, но продолжаем, даже если возникла ошибка
 				err = utils.DeleteFileFromS3(currentPhotoURL)
 				if err != nil {
 					log.Println("Error deleting old photo from S3:", err)
-					// Продолжаем выполнение, не останавливаем процесс обновления
 				}
 			}
 		}
 
 		// Добавляем поле updated_at
-		updateFields["updated_at"] = time.Now().Format("2006-01-02 15:04:05")
+		now := time.Now().Format("2006-01-02 15:04:05")
+		updateFields["updated_at"] = now
 
 		// Если нет полей для обновления
 		if len(updateFields) == 0 {
@@ -715,9 +687,9 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Строим SQL запрос для обновления
+		// Строим SQL запрос
 		query := "UPDATE Events SET "
-		args := make([]interface{}, 0, len(updateFields)+1) // +1 для ID в WHERE
+		args := make([]interface{}, 0, len(updateFields)+1)
 
 		i := 0
 		for field, value := range updateFields {
@@ -746,24 +718,23 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Получаем обновленное событие для ответа
+		// Получаем обновленное событие
 		var updated models.Event
 		err = db.QueryRow(`
-			SELECT id, school_id, user_id, event_name, description, 
-			photo, date_time, start_date, end_date, category, location, status, 
-			limit_count as limit, created_at, updated_at, created_by
-			FROM Events 
-			WHERE id = ?
-		`, eventID).Scan(
+            SELECT id, school_id, user_id, event_name, description, 
+            photo, start_date, end_date, category, location, 
+            grade, limit_count as limit, created_at, updated_at, created_by
+            FROM Events 
+            WHERE id = ?
+        `, eventID).Scan(
 			&updated.ID, &updated.SchoolID, &updated.UserID, &updated.EventName, &updated.Description,
-			&updated.Photo, &updated.DateTime, &updated.StartDate, &updated.EndDate,
-			&updated.Category, &updated.Location, &updated.Status,
-			&updated.Limit, &updated.CreatedAt, &updated.UpdatedAt, &updated.CreatedBy,
+			&updated.Photo, &updated.StartDate, &updated.EndDate,
+			&updated.Category, &updated.Location, &updated.Grade, &updated.Limit,
+			&updated.CreatedAt, &updated.UpdatedAt, &updated.CreatedBy,
 		)
 
 		if err != nil {
 			log.Println("Error fetching updated event:", err)
-			// Отправляем базовый успешный ответ, если не можем получить обновленное событие
 			utils.ResponseJSON(w, map[string]interface{}{
 				"message":  "Event updated successfully",
 				"event_id": eventID,
@@ -771,7 +742,7 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Отправляем ответ с обновленным событием
+		// Отправляем ответ
 		utils.ResponseJSON(w, map[string]interface{}{
 			"message": "Event updated successfully",
 			"event":   updated,
@@ -782,18 +753,18 @@ func getEventByID(db *sql.DB, id int) (models.Event, error) {
 	var event models.Event
 
 	query := `
-		SELECT e.id, e.school_id, e.user_id, e.event_name, e.description, 
-		e.photo, e.date_time, e.category, e.location, e.status, 
-		e.created_at, e.updated_at, u.email AS created_by
-		FROM Events e
-		LEFT JOIN users u ON e.user_id = u.id
-		WHERE e.id = ?
-	`
+        SELECT e.id, e.school_id, e.user_id, e.event_name, e.description, 
+        e.photo, e.start_date, e.end_date, e.category, e.location, 
+        e.grade, e.limit_count, e.created_at, e.updated_at, u.email AS created_by
+        FROM Events e
+        LEFT JOIN users u ON e.user_id = u.id
+        WHERE e.id = ?
+    `
 
 	err := db.QueryRow(query, id).Scan(
 		&event.ID, &event.SchoolID, &event.UserID, &event.EventName, &event.Description,
-		&event.Photo, &event.DateTime, &event.Category, &event.Location, &event.Status,
-		&event.CreatedAt, &event.UpdatedAt, &event.CreatedBy,
+		&event.Photo, &event.StartDate, &event.EndDate, &event.Category, &event.Location,
+		&event.Grade, &event.Limit, &event.CreatedAt, &event.UpdatedAt, &event.CreatedBy,
 	)
 
 	if err != nil {
@@ -807,34 +778,43 @@ func (c *EventController) DeleteEvent(db *sql.DB) http.HandlerFunc {
 		// Проверка токена
 		_, err := utils.VerifyToken(r)
 		if err != nil {
+			log.Println("Invalid token:", err)
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token."})
 			return
 		}
 
-		// Получение ID события из URL-параметра
+		// Получение ID события из URL
 		vars := mux.Vars(r)
 		eventIDStr, ok := vars["event_id"]
 		if !ok {
+			log.Println("Missing event ID")
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Event ID is required"})
 			return
 		}
 
-		// Преобразование string ID в int
 		eventID, err := strconv.Atoi(eventIDStr)
 		if err != nil {
+			log.Println("Invalid event ID format:", eventIDStr)
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid event ID format"})
 			return
 		}
 
-		// Удаление события из базы данных
-		_, err = db.Exec("DELETE FROM events WHERE id = ?", eventID)
+		// Удаление события
+		res, err := db.Exec("DELETE FROM Events WHERE id = ?", eventID)
 		if err != nil {
-			log.Println("Error deleting event:", err)
+			log.Printf("Error deleting event with ID %d: %v", eventID, err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete event"})
 			return
 		}
 
-		// Отправка успешного ответа
+		rowsAffected, _ := res.RowsAffected()
+		if rowsAffected == 0 {
+			log.Printf("No event found with ID %d", eventID)
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Event not found"})
+			return
+		}
+
+		log.Printf("Event with ID %d deleted successfully", eventID)
 		utils.ResponseJSON(w, map[string]string{"message": "Event deleted successfully"})
 	}
 }
@@ -901,7 +881,7 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 		// Get query parameters for filtering
 		query := r.URL.Query()
 		params := map[string]string{
-			"status":    query.Get("status"),
+			"grade":     query.Get("grade"),
 			"category":  query.Get("category"),
 			"date_from": query.Get("date_from"),
 			"date_to":   query.Get("date_to"),
@@ -912,23 +892,24 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 		// Build the SQL query
 		queryBuilder := strings.Builder{}
 		queryBuilder.WriteString(`
-			SELECT e.id, e.school_id, e.user_id, e.event_name, e.description, 
-			e.photo, e.date_time, e.start_date, e.end_date, e.category, e.location, 
-			e.status, e.limit_count, e.created_at, e.updated_at, e.created_by
-			FROM Events e
-			WHERE e.school_id = ?
-		`)
+            SELECT e.id, e.school_id, e.user_id, e.event_name, e.description, 
+            e.photo, e.start_date, e.end_date, e.category, e.location, 
+            e.grade, e.limit_count, e.created_at, e.updated_at, e.created_by
+            FROM Events e
+            WHERE e.school_id = ?
+        `)
 
 		args := []interface{}{schoolID}
 
 		// Add filters
-		if params["status"] != "" {
-			if params["status"] != "Upcoming" && params["status"] != "Completed" {
-				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid status value"})
+		if params["grade"] != "" {
+			gradeInt, err := strconv.Atoi(params["grade"])
+			if err != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade format"})
 				return
 			}
-			queryBuilder.WriteString(" AND e.status = ?")
-			args = append(args, params["status"])
+			queryBuilder.WriteString(" AND e.grade = ?")
+			args = append(args, gradeInt)
 		}
 
 		if params["category"] != "" {
@@ -995,8 +976,8 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 			var event models.Event
 			err := rows.Scan(
 				&event.ID, &event.SchoolID, &event.UserID, &event.EventName, &event.Description,
-				&event.Photo, &event.DateTime, &event.StartDate, &event.EndDate, &event.Category,
-				&event.Location, &event.Status, &event.Limit, &event.CreatedAt, &event.UpdatedAt,
+				&event.Photo, &event.StartDate, &event.EndDate, &event.Category,
+				&event.Location, &event.Grade, &event.Limit, &event.CreatedAt, &event.UpdatedAt,
 				&event.CreatedBy,
 			)
 			if err != nil {
@@ -1036,25 +1017,25 @@ func (ec *EventController) CountEvents(db *sql.DB) http.HandlerFunc {
 
 		// Get query parameters
 		query := r.URL.Query()
-		
+
 		// Create parameters map
 		params := make(map[string]string)
-		
+
 		// Collect filter parameters
 		params["school_id"] = query.Get("school_id")
 		params["status"] = query.Get("status")
 		params["category"] = query.Get("category")
 		params["date_from"] = query.Get("date_from")
 		params["date_to"] = query.Get("date_to")
-		
+
 		log.Println("CountEvents called with parameters:", params)
 
 		// Build query for counting events
 		queryBuilder := strings.Builder{}
 		queryBuilder.WriteString("SELECT COUNT(*) FROM Events WHERE 1=1")
-		
+
 		var args []interface{}
-		
+
 		// Add filters if specified
 		if schoolID := params["school_id"]; schoolID != "" {
 			schoolIDInt, err := strconv.Atoi(schoolID)
@@ -1065,7 +1046,7 @@ func (ec *EventController) CountEvents(db *sql.DB) http.HandlerFunc {
 			queryBuilder.WriteString(" AND school_id = ?")
 			args = append(args, schoolIDInt)
 		}
-		
+
 		if status := params["status"]; status != "" {
 			// Validate status value
 			if status != "Upcoming" && status != "Completed" {
@@ -1075,12 +1056,12 @@ func (ec *EventController) CountEvents(db *sql.DB) http.HandlerFunc {
 			queryBuilder.WriteString(" AND status = ?")
 			args = append(args, status)
 		}
-		
+
 		if category := params["category"]; category != "" {
 			queryBuilder.WriteString(" AND category = ?")
 			args = append(args, category)
 		}
-		
+
 		// Filter by date range
 		if dateFrom := params["date_from"]; dateFrom != "" {
 			// Validate date format
@@ -1092,7 +1073,7 @@ func (ec *EventController) CountEvents(db *sql.DB) http.HandlerFunc {
 			queryBuilder.WriteString(" AND date_time >= ?")
 			args = append(args, dateFrom)
 		}
-		
+
 		if dateTo := params["date_to"]; dateTo != "" {
 			// Validate date format
 			_, err := time.Parse("2006-01-02", dateTo)
@@ -1103,11 +1084,11 @@ func (ec *EventController) CountEvents(db *sql.DB) http.HandlerFunc {
 			queryBuilder.WriteString(" AND date_time <= ?")
 			args = append(args, dateTo)
 		}
-		
+
 		// Log the final SQL query for debugging
 		finalQuery := queryBuilder.String()
 		log.Printf("Executing count query: %s with args: %v", finalQuery, args)
-		
+
 		// Execute the query
 		var totalCount int
 		err := db.QueryRow(finalQuery, args...).Scan(&totalCount)
@@ -1116,12 +1097,12 @@ func (ec *EventController) CountEvents(db *sql.DB) http.HandlerFunc {
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to count events"})
 			return
 		}
-		
+
 		// Prepare response with count data and parameters used
 		response := map[string]interface{}{
-			"total_events":    totalCount,
+			"total_events": totalCount,
 		}
-		
+
 		// Send the result
 		utils.ResponseJSON(w, response)
 	}

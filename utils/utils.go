@@ -529,3 +529,9 @@ func GetUserIDFromToken(r *http.Request) (int, error) {
 
 	return int(userIDFloat), nil
 }
+func NullStringToString(ns sql.NullString) string {
+	if ns.Valid {
+		return ns.String
+	}
+	return ""
+}

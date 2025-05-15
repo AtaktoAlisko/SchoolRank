@@ -3055,3 +3055,111 @@ func (c *Controller) CountUsers(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
+func (c *Controller) GetMonthlyRegistrations(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Check authorization (only admins should access this)
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Authorization header is required"})
+			return
+		}
+
+		// Parse token
+		tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
+		token, err := utils.ParseToken(tokenString)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		// Verify token is valid and user has proper role
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok || !token.Valid {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
+
+		// Check if user has admin role
+		role, ok := claims["role"].(string)
+		if !ok || (role != "superadmin" && role != "schooladmin") {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Insufficient permissions"})
+			return
+		}
+
+		// Get year parameter, default to current year
+		yearParam := r.URL.Query().Get("year")
+		targetYear := time.Now().Year() // Default to current year
+		if yearParam != "" {
+			parsedYear, err := strconv.Atoi(yearParam)
+			if err == nil && parsedYear > 0 {
+				targetYear = parsedYear
+			}
+		}
+
+		// Initialize response structure
+		type MonthlyData struct {
+			Month     string `json:"month"`
+			ShortName string `json:"shortName"`
+			Count     int    `json:"count"`
+		}
+
+		months := []string{"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"}
+		shortMonths := []string{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
+
+		// Create result slice with all months initialized to zero counts
+		result := make([]MonthlyData, 12)
+		for i := 0; i < 12; i++ {
+			result[i] = MonthlyData{
+				Month:     months[i],
+				ShortName: shortMonths[i],
+				Count:     0,
+			}
+		}
+
+		// Build query with role filter for specific roles
+		query := `
+            SELECT MONTH(created_at) as month, COUNT(*) as count 
+            FROM users 
+            WHERE YEAR(created_at) = ? 
+            AND role IN ('user', 'schooladmin', 'superadmin', 'student')
+        `
+		args := []interface{}{targetYear}
+
+		// Group by month
+		query += " GROUP BY MONTH(created_at)"
+
+		// Execute query
+		rows, err := db.Query(query, args...)
+		if err != nil {
+			log.Printf("Error querying monthly registrations: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+			return
+		}
+		defer rows.Close()
+
+		// Process results
+		for rows.Next() {
+			var month int
+			var count int
+			if err := rows.Scan(&month, &count); err != nil {
+				log.Printf("Error scanning row: %v", err)
+				continue
+			}
+
+			// Month in SQL is 1-indexed, so adjust to 0-indexed for array
+			if month >= 1 && month <= 12 {
+				result[month-1].Count = count
+			}
+		}
+
+		if err = rows.Err(); err != nil {
+			log.Printf("Error iterating rows: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+			return
+		}
+
+		// Return only the detailedData array
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+	}
+}
