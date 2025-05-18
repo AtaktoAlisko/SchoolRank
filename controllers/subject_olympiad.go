@@ -173,7 +173,7 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 			return
 		}
 
-		// Шаг 3: Запрос к базе данных для получения олимпиады
+		// Шаг 3: Запрос к базе данных для получения олимпиады с количеством участников
 		query := `
 			SELECT 
 				so.subject_olympiad_id,
@@ -187,15 +187,23 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 				so.creator_id,
 				u.first_name as creator_first_name,
 				u.last_name as creator_last_name,
-				s.school_name
+				s.school_name,
+				COUNT(reg.olympiads_registrations_id) as current_participants
 			FROM 
 				subject_olympiads so
 			LEFT JOIN 
 				users u ON so.creator_id = u.id
 			LEFT JOIN 
 				Schools s ON so.school_id = s.school_id
+			LEFT JOIN 
+				olympiad_registrations reg ON so.subject_olympiad_id = reg.subject_olympiad_id 
+				AND reg.status = 'registered'
 			WHERE 
 				so.subject_olympiad_id = ?
+			GROUP BY 
+				so.subject_olympiad_id, so.subject_name, so.date, so.end_date, so.description, 
+				so.school_id, so.level, so.limit_participants, so.creator_id, 
+				u.first_name, u.last_name, s.school_name
 		`
 
 		var olympiad models.SubjectOlympiad
@@ -204,6 +212,7 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 		var creatorFirstName sql.NullString
 		var creatorLastName sql.NullString
 		var schoolName sql.NullString
+		var currentParticipants int
 
 		err = db.QueryRow(query, olympiadID).Scan(
 			&olympiad.ID,
@@ -218,6 +227,7 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 			&creatorFirstName,
 			&creatorLastName,
 			&schoolName,
+			&currentParticipants,
 		)
 
 		if err != nil {
@@ -274,8 +284,19 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 			olympiad.EndDate = ""
 		}
 
-		log.Printf("Successfully retrieved olympiad with ID %d", olympiadID)
-		utils.ResponseJSON(w, olympiad)
+		// Шаг 7: Создаем расширенную структуру ответа с информацией об участниках
+		type SubjectOlympiadWithParticipants struct {
+			models.SubjectOlympiad
+			ParticipantInfo string `json:"participants"` // Format: "current/limit"
+		}
+
+		response := SubjectOlympiadWithParticipants{
+			SubjectOlympiad: olympiad,
+			ParticipantInfo: fmt.Sprintf("%d/%d", currentParticipants, olympiad.Limit),
+		}
+
+		log.Printf("Successfully retrieved olympiad with ID %d (participants: %s)", olympiadID, response.ParticipantInfo)
+		utils.ResponseJSON(w, response)
 	}
 }
 func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.HandlerFunc {

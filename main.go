@@ -219,7 +219,6 @@ func main() {
 	router.HandleFunc("/api/subject-olympiadsAll/{subject_olympiad_id}", SubjectOlympiadController.GetOlympiadsBySubjectID(db)).Methods("GET")
 	// router.HandleFunc("/api/api/subject-olympiadsAll", SubjectOlympiadController.GetSubjectOlympiadsByNamePhoto(db)).Methods("GET")
 	router.HandleFunc("/api/olympiads/by-subject", SubjectOlympiadController.GetOlympiadsBySubjectName(db)).Methods("GET")
-
 	router.HandleFunc("/api/subject-olympiads/{school_id}", SubjectOlympiadController.GetSubjectOlympiad(db)).Methods("GET")
 	router.HandleFunc("/api/subject-olympiads/{id}", SubjectOlympiadController.EditOlympiadsCreated(db)).Methods("PUT")
 	router.HandleFunc("/api/subject-olympiads/{id}", SubjectOlympiadController.DeleteSubjectOlympiad(db)).Methods("DELETE")
