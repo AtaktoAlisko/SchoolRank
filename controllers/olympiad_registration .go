@@ -217,7 +217,8 @@ func (c *OlympiadRegistrationController) GetOlympiadRegistrations(db *sql.DB) ht
 				   r.school_id,
 				   s.first_name, s.last_name, s.patronymic, s.grade, s.letter,
 				   sch.school_name,
-				   o.subject_name, o.date, o.end_date, o.level
+				   o.subject_name, o.date, o.end_date, o.level,
+				   r.score, r.olympiad_place
 			FROM olympiad_registrations r
 			JOIN student s ON r.student_id = s.student_id
 			JOIN subject_olympiads o ON r.subject_olympiad_id = o.subject_olympiad_id
@@ -276,6 +277,8 @@ func (c *OlympiadRegistrationController) GetOlympiadRegistrations(db *sql.DB) ht
 			var regDateStr string
 			var olympiadEnd sql.NullString
 			var level sql.NullString
+			var score sql.NullInt64
+			var olympiadPlace sql.NullInt64
 
 			err := rows.Scan(
 				&reg.OlympiadsRegistrationsID,
@@ -294,6 +297,8 @@ func (c *OlympiadRegistrationController) GetOlympiadRegistrations(db *sql.DB) ht
 				&reg.OlympiadStartDate,
 				&olympiadEnd,
 				&level,
+				&score,
+				&olympiadPlace,
 			)
 			if err != nil {
 				log.Printf("Scan error: %v", err)
@@ -306,6 +311,12 @@ func (c *OlympiadRegistrationController) GetOlympiadRegistrations(db *sql.DB) ht
 			}
 			if level.Valid {
 				reg.Level = level.String
+			}
+			if score.Valid {
+				reg.Score = int(score.Int64)
+			}
+			if olympiadPlace.Valid {
+				reg.OlympiadPlace = int(olympiadPlace.Int64)
 			}
 
 			registrations = append(registrations, reg)

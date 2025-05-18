@@ -122,7 +122,7 @@ func main() {
 
 	//superadmin
 	router.HandleFunc("/api/schools", schoolController.CreateSchool(db)).Methods("POST")
-	router.HandleFunc("/api/schools/{id}", schoolController.UpdateSchool(db)).Methods("PUT")
+	router.HandleFunc("/api/schools/{id}", schoolController.UpdateSchool(db)).Methods("PATCH")
 	router.HandleFunc("/api/schools/{id}", schoolController.DeleteSchool(db)).Methods("DELETE")
 	router.HandleFunc("/api/schools", schoolController.GetAllSchools(db)).Methods("GET")
 	router.HandleFunc("/api/schools/student", schoolController.GetAllStudents(db)).Methods("GET")
