@@ -8,6 +8,7 @@ import (
 	"ranking-school/models"
 	"ranking-school/utils"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -150,112 +151,131 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 		utils.ResponseJSON(w, olympiad)
 	}
 }
-func (c *SubjectOlympiadController) GetSubjectOlympiads(db *sql.DB) http.HandlerFunc {
+func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Шаг 1: Получение school_id из URL
-		schoolIDStr := mux.Vars(r)["school_id"]
-		schoolID, err := strconv.Atoi(schoolIDStr)
-		if err != nil || schoolID <= 0 {
-			log.Printf("⚠️ Invalid or missing school_id in URL: '%s'. Using default value 1", schoolIDStr)
-			schoolID = 1 // значение по умолчанию
-		}
-
-		// Шаг 2: Извлечение параметров фильтрации из строки запроса
-		subjectName := r.URL.Query().Get("subject_name")
-		startDate := r.URL.Query().Get("start_date")
-		endDate := r.URL.Query().Get("end_date")
-		level := r.URL.Query().Get("level")
-
-		// Шаг 3: Строим SQL-запрос с учетом фильтров
-		query := `SELECT subject_olympiad_id, subject_name, date, end_date, description, school_id, level, limit_participants
-                  FROM subject_olympiads 
-                  WHERE school_id = ?`
-
-		var args []interface{}
-		args = append(args, schoolID)
-
-		if subjectName != "" {
-			query += " AND subject_name LIKE ?"
-			args = append(args, "%"+subjectName+"%")
-		}
-		if startDate != "" {
-			query += " AND date >= ?"
-			args = append(args, startDate)
-		}
-		if endDate != "" {
-			query += " AND end_date <= ?"
-			args = append(args, endDate)
-		}
-		if level != "" {
-			query += " AND level = ?"
-			args = append(args, level)
-		}
-
-		// Шаг 4: Выполнение запроса
-		log.Printf("Executing query: %s with args: %v", query, args)
-		rows, err := db.Query(query, args...)
+		// Шаг 1: Проверка токена
+		_, err := utils.VerifyToken(r)
 		if err != nil {
-			log.Println("Error querying olympiads:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve olympiads"})
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
 			return
 		}
-		defer rows.Close()
 
-		// Шаг 5: Чтение результатов
-		var olympiads []models.SubjectOlympiad
-		for rows.Next() {
-			var olympiad models.SubjectOlympiad
-			err := rows.Scan(
-				&olympiad.ID,
-				&olympiad.SubjectName,
-				&olympiad.StartDate,
-				&olympiad.EndDate,
-				&olympiad.Description,
-				&olympiad.SchoolID,
-				&olympiad.Level,
-				&olympiad.Limit,
-			)
-			if err != nil {
-				log.Println("Error scanning row:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to process olympiad data"})
+		// Шаг 2: Получение olympiad_id из URL
+		olympiadIDStr := r.URL.Path[len("/api/subject-olympiads/"):]
+		// Удаляем все после слеша, если есть дополнительные пути
+		if slashIndex := strings.Index(olympiadIDStr, "/"); slashIndex != -1 {
+			olympiadIDStr = olympiadIDStr[:slashIndex]
+		}
+
+		olympiadID, err := strconv.Atoi(olympiadIDStr)
+		if err != nil || olympiadID <= 0 {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid olympiad ID"})
+			return
+		}
+
+		// Шаг 3: Запрос к базе данных для получения олимпиады
+		query := `
+			SELECT 
+				so.subject_olympiad_id,
+				so.subject_name,
+				so.date as start_date,
+				so.end_date,
+				so.description,
+				so.school_id,
+				so.level,
+				so.limit_participants,
+				so.creator_id,
+				u.first_name as creator_first_name,
+				u.last_name as creator_last_name,
+				s.school_name
+			FROM 
+				subject_olympiads so
+			LEFT JOIN 
+				users u ON so.creator_id = u.id
+			LEFT JOIN 
+				Schools s ON so.school_id = s.school_id
+			WHERE 
+				so.subject_olympiad_id = ?
+		`
+
+		var olympiad models.SubjectOlympiad
+		var endDate sql.NullString
+		var creatorID sql.NullInt64
+		var creatorFirstName sql.NullString
+		var creatorLastName sql.NullString
+		var schoolName sql.NullString
+
+		err = db.QueryRow(query, olympiadID).Scan(
+			&olympiad.ID,
+			&olympiad.SubjectName,
+			&olympiad.StartDate,
+			&endDate,
+			&olympiad.Description,
+			&olympiad.SchoolID,
+			&olympiad.Level,
+			&olympiad.Limit,
+			&creatorID,
+			&creatorFirstName,
+			&creatorLastName,
+			&schoolName,
+		)
+
+		if err != nil {
+			if err == sql.ErrNoRows {
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Olympiad not found"})
 				return
 			}
-			olympiads = append(olympiads, olympiad)
-		}
-
-		// Шаг 6: Ответ в формате JSON
-		log.Printf("Found %d olympiads", len(olympiads))
-		if len(olympiads) == 0 {
-			var count int
-			countQuery := "SELECT COUNT(*) FROM subject_olympiads"
-			err := db.QueryRow(countQuery).Scan(&count)
-			if err != nil {
-				log.Printf("Error checking table data: %v", err)
-			} else {
-				log.Printf("Total records in subject_olympiads: %d", count)
-
-				// Get list of available school_ids
-				schoolIdsQuery := "SELECT DISTINCT school_id FROM subject_olympiads"
-				rows, err := db.Query(schoolIdsQuery)
-				if err != nil {
-					log.Printf("Error getting school IDs: %v", err)
-				} else {
-					defer rows.Close()
-					var schoolIds []int
-					for rows.Next() {
-						var id int
-						rows.Scan(&id)
-						schoolIds = append(schoolIds, id)
-					}
-					log.Printf("Available school_ids in database: %v", schoolIds)
-				}
-			}
-
-			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No olympiads found for school_id " + schoolIDStr})
+			log.Println("Error fetching olympiad:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching olympiad details"})
 			return
 		}
 
-		utils.ResponseJSON(w, olympiads)
+		// Шаг 4: Обработка nullable полей
+		if endDate.Valid {
+			olympiad.EndDate = endDate.String
+		} else {
+			// Если end_date не указана, используем start_date + 1 день
+			startDate, parseErr := time.Parse("2006-01-02", olympiad.StartDate)
+			if parseErr == nil {
+				olympiad.EndDate = startDate.AddDate(0, 0, 1).Format("2006-01-02")
+			}
+		}
+
+		if creatorID.Valid {
+			olympiad.CreatorID = int(creatorID.Int64)
+		}
+
+		if creatorFirstName.Valid {
+			olympiad.CreatorFirstName = creatorFirstName.String
+		}
+
+		if creatorLastName.Valid {
+			olympiad.CreatorLastName = creatorLastName.String
+		}
+
+		if schoolName.Valid {
+			olympiad.SchoolName = schoolName.String
+		}
+
+		// Шаг 5: Проверка на истечение срока
+		currentTime := time.Now()
+		endDateParsed, err := time.Parse("2006-01-02", olympiad.EndDate)
+		if err != nil {
+			log.Printf("Error parsing end date '%s': %v", olympiad.EndDate, err)
+			olympiad.Expired = false
+		} else {
+			olympiad.Expired = currentTime.After(endDateParsed)
+		}
+
+		// Шаг 6: Если олимпиада истекла, не возвращаем end_date (благодаря omitempty)
+		if olympiad.Expired {
+			// Поле EndDate будет скрыто благодаря тегу omitempty в структуре
+			// при условии, что мы установим пустое значение
+			olympiad.EndDate = ""
+		}
+
+		log.Printf("Successfully retrieved olympiad with ID %d", olympiadID)
+		utils.ResponseJSON(w, olympiad)
 	}
 }
 func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.HandlerFunc {
