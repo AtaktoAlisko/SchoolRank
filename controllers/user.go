@@ -3095,7 +3095,6 @@ func (c *Controller) CountUsers(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
-
 func (c *Controller) CountUsersByRole(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check authorization (only admins should access this)

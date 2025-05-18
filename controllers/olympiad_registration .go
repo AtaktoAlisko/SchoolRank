@@ -66,11 +66,14 @@ func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.Handle
 		var olympiad models.SubjectOlympiad
 		var endDateStr sql.NullString
 		var limit sql.NullInt64
+		var creatorSchoolID int
 
+		// Get olympiad details including the creator's school ID
 		err = db.QueryRow(`
-			SELECT subject_olympiad_id, subject_name, date, end_date, limit_participants
-			FROM subject_olympiads WHERE subject_olympiad_id = ?`, request.SubjectOlympiadID).Scan(
-			&olympiad.ID, &olympiad.SubjectName, &olympiad.StartDate, &endDateStr, &limit)
+			SELECT so.subject_olympiad_id, so.subject_name, so.date, so.end_date, so.limit_participants, so.school_id
+			FROM subject_olympiads so
+			WHERE so.subject_olympiad_id = ?`, request.SubjectOlympiadID).Scan(
+			&olympiad.ID, &olympiad.SubjectName, &olympiad.StartDate, &endDateStr, &limit, &creatorSchoolID)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Subject olympiad not found"})
 			return
@@ -89,12 +92,25 @@ func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.Handle
 			olympiad.Limit = 100
 		}
 
+		// Check if registration period has ended
 		parsedEndDate, _ := time.Parse("2006-01-02", olympiad.EndDate)
 		if time.Now().After(parsedEndDate) {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Registration period has ended"})
 			return
 		}
 
+		// Check if student is already registered
+		var exists int
+		err = db.QueryRow(`
+			SELECT COUNT(*) FROM olympiad_registrations
+			WHERE student_id = ? AND subject_olympiad_id = ? AND status = 'registered'`,
+			student.ID, request.SubjectOlympiadID).Scan(&exists)
+		if err != nil || exists > 0 {
+			utils.RespondWithError(w, http.StatusConflict, models.Error{Message: "Already registered"})
+			return
+		}
+
+		// Check overall registration limit
 		var currentCount int
 		err = db.QueryRow(`
 			SELECT COUNT(*) FROM olympiad_registrations
@@ -109,16 +125,32 @@ func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.Handle
 			return
 		}
 
-		var exists int
-		err = db.QueryRow(`
-			SELECT COUNT(*) FROM olympiad_registrations
-			WHERE student_id = ? AND subject_olympiad_id = ? AND status = 'registered'`,
-			student.ID, request.SubjectOlympiadID).Scan(&exists)
-		if err != nil || exists > 0 {
-			utils.RespondWithError(w, http.StatusConflict, models.Error{Message: "Already registered"})
-			return
+		// Check school-specific limits
+		const maxStudentsFromCreatorSchool = 2 // Maximum students allowed from the creator school
+
+		if student.SchoolID == creatorSchoolID {
+			// This student is from the creator school, check if limit is reached
+			var schoolStudentsCount int
+			err = db.QueryRow(`
+				SELECT COUNT(*) FROM olympiad_registrations r
+				JOIN student s ON r.student_id = s.student_id
+				WHERE r.subject_olympiad_id = ? 
+				AND s.school_id = ? 
+				AND r.status = 'registered'`,
+				request.SubjectOlympiadID, creatorSchoolID).Scan(&schoolStudentsCount)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+				return
+			}
+
+			if schoolStudentsCount >= maxStudentsFromCreatorSchool {
+				utils.RespondWithError(w, http.StatusConflict,
+					models.Error{Message: "Maximum limit for your school has been reached"})
+				return
+			}
 		}
 
+		// All checks passed, proceed with registration
 		now := time.Now()
 		result, err := db.Exec(`
 			INSERT INTO olympiad_registrations 
@@ -186,9 +218,7 @@ func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.Handle
 		utils.ResponseJSON(w, registration)
 	}
 }
-
 // controllers/olympiad_registration.go
-
 func (c *OlympiadRegistrationController) GetOlympiadRegistrations(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, err := utils.VerifyToken(r)

@@ -72,6 +72,7 @@ func main() {
 	SubjectOlympiadController := controllers.SubjectOlympiadController{}
 	eventController := controllers.EventController{}
 	EventsParticipantController := controllers.EventsParticipantController{}
+	EventsRegistrationController := controllers.EventsRegistrationController{}
 
 	router := mux.NewRouter()
 
@@ -197,15 +198,28 @@ func main() {
 	router.HandleFunc("/api/{school_id}/combined-average-rating", untScoreController.GetCombinedAverageRating(db)).Methods("GET")
 
 	// =======================
-	// Crud для олимпиад
+	// Event registration routes
 	// =======================
+	router.HandleFunc("/students/{student_id}/events/register", EventsRegistrationController.RegisterForEvent(db)).Methods("POST")
+	router.HandleFunc("/api/event-registrations/{id}/status", EventsRegistrationController.UpdateEventRegistrationStatus(db)).Methods("PATCH")
+	router.HandleFunc("/api/event-registrations", EventsRegistrationController.GetEventRegistrations(db)).Methods("GET")
+	router.HandleFunc("/api/event-registrations/{id}", EventsRegistrationController.DeleteEventRegistrationByID(db)).Methods("DELETE")
+
+	// router.HandleFunc("/event-registrations/{event_registration_id}/status", eventController.UpdateEventRegistrationStatus(db)).Methods("PUT")
+	// router.HandleFunc("/events/{event_id}/registrations", eventController.GetEventRegistrations(db)).Methods("GET")
+	// router.HandleFunc("/students/{student_id}/event-registrations", eventController.GetStudentEventRegistrations(db)).Methods("GET")
+	// router.HandleFunc("/my-event-registrations", eventController.GetStudentEventRegistrations(db)).Methods("GET") // для студентов
 
 	// =======================
 	// Добавление олимпиад
 	// =======================
 
 	router.HandleFunc("/api/subject-olympiads/create/{school_id}", SubjectOlympiadController.CreateSubjectOlympiad(db)).Methods("POST")
-	router.HandleFunc("/api/subject-olympiadsAll", SubjectOlympiadController.GetAllSubjectOlympiads(db)).Methods("GET")
+	router.HandleFunc("/api/subject-olympiads", SubjectOlympiadController.GetAllSubjectOlympiads(db)).Methods("GET")
+	router.HandleFunc("/api/subject-olympiadsAll/{subject_olympiad_id}", SubjectOlympiadController.GetOlympiadsBySubjectID(db)).Methods("GET")
+	// router.HandleFunc("/api/api/subject-olympiadsAll", SubjectOlympiadController.GetSubjectOlympiadsByNamePhoto(db)).Methods("GET")
+	router.HandleFunc("/api/olympiads/by-subject", SubjectOlympiadController.GetOlympiadsBySubjectName(db)).Methods("GET")
+
 	router.HandleFunc("/api/subject-olympiads/{school_id}", SubjectOlympiadController.GetSubjectOlympiads(db)).Methods("GET")
 	router.HandleFunc("/api/subject-olympiads/{id}", SubjectOlympiadController.EditOlympiadsCreated(db)).Methods("PUT")
 	router.HandleFunc("/api/subject-olympiads/{id}", SubjectOlympiadController.DeleteSubjectOlympiad(db)).Methods("DELETE")
