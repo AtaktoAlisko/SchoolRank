@@ -177,8 +177,8 @@ func (c *SubjectOlympiadController) GetSubjectOlympiads(db *sql.DB) http.Handler
 		schoolIDStr := mux.Vars(r)["school_id"]
 		schoolID, err := strconv.Atoi(schoolIDStr)
 		if err != nil || schoolID <= 0 {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid or missing school_id in URL"})
-			return
+			log.Printf("⚠️ Invalid or missing school_id in URL: '%s'. Using default value 1", schoolIDStr)
+			schoolID = 1 // значение по умолчанию
 		}
 
 		// Шаг 2: Извлечение параметров фильтрации из строки запроса
@@ -195,7 +195,6 @@ func (c *SubjectOlympiadController) GetSubjectOlympiads(db *sql.DB) http.Handler
 		var args []interface{}
 		args = append(args, schoolID)
 
-		// Добавляем фильтры в запрос, если они были переданы
 		if subjectName != "" {
 			query += " AND subject_name LIKE ?"
 			args = append(args, "%"+subjectName+"%")
@@ -249,7 +248,6 @@ func (c *SubjectOlympiadController) GetSubjectOlympiads(db *sql.DB) http.Handler
 		// Шаг 6: Ответ в формате JSON
 		log.Printf("Found %d olympiads", len(olympiads))
 		if len(olympiads) == 0 {
-			// Try a simpler query to see if the table has any data at all
 			var count int
 			countQuery := "SELECT COUNT(*) FROM subject_olympiads"
 			err := db.QueryRow(countQuery).Scan(&count)
@@ -731,8 +729,6 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 		utils.ResponseJSON(w, olympiads)
 	}
 }
-
-// Вспомогательная функция для парсинга результатов запроса
 func parseOlympiadsRows(rows *sql.Rows) []models.SubjectOlympiad {
 	var olympiads []models.SubjectOlympiad
 

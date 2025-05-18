@@ -135,37 +135,38 @@ func ParseToken(tokenString string) (*jwt.Token, error) {
 func VerifyToken(r *http.Request) (int, error) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
-		return 0, errors.New("Authorization header missing")
+		return 0, errors.New("authorization header is required")
 	}
 
-	parts := strings.Split(authHeader, " ")
-	if len(parts) != 2 || parts[0] != "Bearer" {
-		return 0, errors.New("Invalid Authorization header format")
+	tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
+	if tokenString == "" {
+		return 0, errors.New("token is missing")
 	}
 
-	tokenString := parts[1]
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("Unexpected signing method")
+			return nil, jwt.ErrSignatureInvalid
 		}
-		return []byte(os.Getenv("SECRET")), nil
+		secret := os.Getenv("SECRET")
+		if secret == "" {
+			return nil, errors.New("SECRET environment variable is not set")
+		}
+		return []byte(secret), nil
 	})
-	if err != nil || !token.Valid {
-		return 0, errors.New("Invalid or expired token")
+
+	if err != nil {
+		return 0, err
 	}
 
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return 0, errors.New("Invalid token claims")
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		userID, ok := claims["user_id"].(float64)
+		if !ok {
+			return 0, errors.New("invalid user_id in token")
+		}
+		return int(userID), nil
 	}
 
-	// Extract userID
-	userIDFloat, ok := claims["user_id"].(float64)
-	if !ok {
-		return 0, errors.New("user_id not found in token")
-	}
-
-	return int(userIDFloat), nil // Return the userID (int), not the whole struct
+	return 0, errors.New("invalid token")
 }
 func GenerateRefreshToken(user models.User, expiration time.Duration) (string, error) {
 	secret := os.Getenv("SECRET")
@@ -533,3 +534,4 @@ func NullStringToString(ns sql.NullString) string {
 	}
 	return ""
 }
+

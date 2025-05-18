@@ -2829,44 +2829,74 @@ func (c *Controller) GetSchoolAdminsWithoutSchools(db *sql.DB) http.HandlerFunc 
 }
 func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Get token from Authorization header
+		var errorObject models.Error
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Authorization header is required"})
+			errorObject.Message = "Authorization header is required"
+			utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
 			return
 		}
 
-		// Typically, the token is prefixed with "Bearer "
 		tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
-
-		// Parse and validate the token
-		token, err := utils.ParseToken(tokenString)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+		if tokenString == "" {
+			errorObject.Message = "Token is missing"
+			utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
 			return
 		}
 
-		// Check if token is valid
+		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, jwt.ErrSignatureInvalid
+			}
+			secret := os.Getenv("SECRET")
+			if secret == "" {
+				log.Println("SECRET environment variable is not set")
+				return nil, jwt.ErrSignatureInvalid
+			}
+			return []byte(secret), nil
+		})
+
+		if err != nil {
+			log.Printf("Token parsing error: %v", err)
+			if err == jwt.ErrSignatureInvalid {
+				errorObject.Message = "Invalid token signature"
+			} else if ve, ok := err.(*jwt.ValidationError); ok && ve.Errors&jwt.ValidationErrorExpired != 0 {
+				errorObject.Message = "Token has expired"
+			} else {
+				errorObject.Message = "Invalid token"
+			}
+			utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
+			return
+		}
+
 		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-			// Check expiration time explicitly to ensure it's enforced
 			expTime := time.Unix(int64(claims["exp"].(float64)), 0)
 			if time.Now().After(expTime) {
-				utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Token expired"})
+				errorObject.Message = "Token has expired"
+				utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
 				return
 			}
 
-			// Add user information to request context for further handlers
-			userID := int(claims["user_id"].(float64))
-			role := claims["role"].(string)
+			userID, ok := claims["user_id"].(float64)
+			if !ok {
+				errorObject.Message = "Invalid user_id in token"
+				utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
+				return
+			}
 
-			// Create a context with user information
-			ctx := context.WithValue(r.Context(), "user_id", userID)
+			role, ok := claims["role"].(string)
+			if !ok {
+				errorObject.Message = "Invalid role in token"
+				utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
+				return
+			}
+
+			ctx := context.WithValue(r.Context(), "user_id", int(userID))
 			ctx = context.WithValue(ctx, "role", role)
-
-			// Continue with the next handler with the updated context
 			next.ServeHTTP(w, r.WithContext(ctx))
 		} else {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			errorObject.Message = "Invalid token claims"
+			utils.RespondWithError(w, http.StatusUnauthorized, errorObject)
 		}
 	})
 }
@@ -3066,146 +3096,6 @@ func (c *Controller) CountUsers(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func (oc *OlympiadController) GetMonthlyRegistrations(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Step 1: Verify the token
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Authorization header is required"})
-			return
-		}
-
-		tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
-		token, err := utils.ParseToken(tokenString)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
-			return
-		}
-
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok || !token.Valid {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
-			return
-		}
-
-		role, ok := claims["role"].(string)
-		if !ok || (role != "superadmin" && role != "schooladmin") {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Insufficient permissions"})
-			return
-		}
-
-		// Step 2: Extract school_id from URL
-		vars := mux.Vars(r)
-		schoolIDParam := vars["school_id"]
-		schoolID, err := strconv.Atoi(schoolIDParam)
-		if err != nil || schoolID <= 0 {
-			log.Printf("Invalid school_id format: %s, error: %v", schoolIDParam, err)
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school_id format"})
-			return
-		}
-
-		// Step 3: Restrict schooladmin to their school
-		if role == "schooladmin" {
-			userSchoolID, ok := claims["school_id"].(float64) // JWT claims often store numbers as float64
-			if !ok || int(userSchoolID) <= 0 {
-				log.Printf("No valid school_id associated with schooladmin")
-				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "No school assigned to this admin"})
-				return
-			}
-			if int(userSchoolID) != schoolID {
-				log.Printf("Schooladmin attempted to access school ID %d, but is assigned to school ID %d", schoolID, int(userSchoolID))
-				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view this school's data"})
-				return
-			}
-		}
-
-		// Step 4: Get year parameter, default to current year
-		yearParam := r.URL.Query().Get("year")
-		targetYear := time.Now().Year()
-		if yearParam != "" {
-			parsedYear, err := strconv.Atoi(yearParam)
-			if err == nil && parsedYear > 0 {
-				targetYear = parsedYear
-			}
-		}
-
-		// Step 5: Query to count students by month
-		query := `
-            SELECT 
-                MONTHNAME(date) AS month_name,
-                COUNT(student_id) AS participant_count
-            FROM Olympiads
-            WHERE school_id = ? AND YEAR(date) = ?
-            GROUP BY MONTH(date)
-            ORDER BY MONTH(date)
-        `
-
-		rows, err := db.Query(query, schoolID, targetYear)
-		if err != nil {
-			log.Printf("Error executing query for school ID %d, year %d: %v", schoolID, targetYear, err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve monthly statistics"})
-			return
-		}
-		defer rows.Close()
-
-		// Step 6: Initialize counts for each month
-		monthCounts := map[string]int{
-			"Januarycount":   0,
-			"Februarycount":  0,
-			"Marchcount":     0,
-			"Aprilcount":     0,
-			"Maycount":       0,
-			"Junecount":      0,
-			"Julycount":      0,
-			"Augustcount":    0,
-			"Septembercount": 0,
-			"Octobercount":   0,
-			"Novembercount":  0,
-			"Decembercount":  0,
-		}
-
-		// Step 7: Process query results
-		for rows.Next() {
-			var monthName string
-			var count int
-			err := rows.Scan(&monthName, &count)
-			if err != nil {
-				log.Printf("Error scanning row: %v", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing monthly data"})
-				return
-			}
-			// Map full month names to count keys
-			monthKey := map[string]string{
-				"January":   "Januarycount",
-				"February":  "Februarycount",
-				"March":     "Marchcount",
-				"April":     "Aprilcount",
-				"May":       "Maycount",
-				"June":      "Junecount",
-				"July":      "Julycount",
-				"August":    "Augustcount",
-				"September": "Septembercount",
-				"October":   "Octobercount",
-				"November":  "Novembercount",
-				"December":  "Decembercount",
-			}
-			if key, exists := monthKey[monthName]; exists {
-				monthCounts[key] = count
-			}
-		}
-
-		// Step 8: Check for errors from iterating over rows
-		if err = rows.Err(); err != nil {
-			log.Printf("Error processing query results: %v", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing data"})
-			return
-		}
-
-		// Step 9: Return the response
-		log.Printf("Successfully retrieved monthly olympiad stats for school ID %d, year %d: %+v", schoolID, targetYear, monthCounts)
-		utils.ResponseJSON(w, monthCounts)
-	}
-}
 func (c *Controller) CountUsersByRole(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check authorization (only admins should access this)

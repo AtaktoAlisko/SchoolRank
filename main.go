@@ -68,8 +68,8 @@ func main() {
 	studentController := controllers.StudentController{}
 	reviewController := controllers.ReviewController{}
 	contactController := &controllers.ContactUsController{}
+	OlympiadRegistrationController := controllers.OlympiadRegistrationController{}
 	SubjectOlympiadController := controllers.SubjectOlympiadController{}
-	olympiadController := &controllers.OlympiadController{}
 	eventController := controllers.EventController{}
 	EventsParticipantController := controllers.EventsParticipantController{}
 
@@ -92,7 +92,7 @@ func main() {
 	// =======================
 	router.HandleFunc("/api/users/me", controller.GetMe(db)).Methods("GET")
 	router.HandleFunc("/api/users", controller.GetAllUsers(db)).Methods("GET")
-	router.HandleFunc("/api/users/{user_id}", controller.UpdateUser(db)).Methods("PUT")
+	router.HandleFunc("/api/users/{user_id}", controller.UpdateUser(db)).Methods("PATCH")
 	router.HandleFunc("/api/users/total", controller.GetTotalUsersWithRoleCount(db)).Methods("GET")
 	router.HandleFunc("/api/users", controller.CreateUser(db)).Methods("POST")
 	router.HandleFunc("/api/users/me", controller.EditProfile(db)).Methods("PUT")
@@ -199,14 +199,9 @@ func main() {
 	// =======================
 	// Crud для олимпиад
 	// =======================
-	router.HandleFunc("/api/olympiads", olympiadController.CreateOlympiad(db)).Methods("POST")
-	router.HandleFunc("/api/olympiads", olympiadController.GetOlympiad(db)).Methods("GET")
-	router.HandleFunc("/api/olympiads/{school_id}", olympiadController.GetOlympiadById(db)).Methods("GET")
-	router.HandleFunc("/api/olympiads/{olympiad_id}", olympiadController.DeleteOlympiad(db)).Methods("DELETE")
-	router.HandleFunc("/api/olympiads/{olympiad_id}", olympiadController.UpdateOlympiad(db)).Methods("PUT")
 
 	// =======================
-	// Итоговый рейтинг по олимппиадам
+	// Добавление олимпиад
 	// =======================
 
 	router.HandleFunc("/api/subject-olympiads/create/{school_id}", SubjectOlympiadController.CreateSubjectOlympiad(db)).Methods("POST")
@@ -215,8 +210,6 @@ func main() {
 	router.HandleFunc("/api/subject-olympiads/{id}", SubjectOlympiadController.EditOlympiadsCreated(db)).Methods("PUT")
 	router.HandleFunc("/api/subject-olympiads/{id}", SubjectOlympiadController.DeleteSubjectOlympiad(db)).Methods("DELETE")
 
-	router.HandleFunc("/api/subject-olympiadsAll/GetAll", SubjectOlympiadController.GetAllSubOlypmiad(db)).Methods("GET")
-	router.HandleFunc("/api/subject-olympiads/GetAllNamePicture", SubjectOlympiadController.GetAllSubOlypmiadNamePicture(db)).Methods("GET")
 	// =======================
 	// Контактная информация
 	// =======================
@@ -231,13 +224,19 @@ func main() {
 	// =======================
 	router.HandleFunc("/api/contact", contactController.CreateContactRequest(db)).Methods("POST")
 
+	router.HandleFunc("/api/olympiads/register", OlympiadRegistrationController.RegisterStudent(db)).Methods("POST")
+	router.HandleFunc("/api/olympiads/registrations", OlympiadRegistrationController.GetOlympiadRegistrations(db)).Methods("GET")
+	router.HandleFunc("/api/olympiads/register/{id}", OlympiadRegistrationController.UpdateRegistrationStatus(db)).Methods("PATCH")
+	router.HandleFunc("/api/olympiads/registrations/{id}/place", OlympiadRegistrationController.AssignPlaceToRegistration(db)).Methods("PATCH")
+	router.HandleFunc("/api/olympiads/register/{id}", OlympiadRegistrationController.DeleteRegistration(db)).Methods("DELETE")
+	router.HandleFunc("/api/olympiads/total-rating/{school_id}", OlympiadRegistrationController.GetTotalOlympiadRating(db)).Methods("GET")
+
 	// =======================
 	// Dashboard (superadmin)
 	// =======================
 	router.HandleFunc("/api/users/count", controller.CountUsers(db)).Methods("GET")
 	router.HandleFunc("/api/school-count", schoolController.GetSchoolCount(db)).Methods("GET")
 	router.HandleFunc("/api/events/count", eventController.CountEvents(db)).Methods("GET")
-	router.HandleFunc("/api/stats/monthly-registrations", olympiadController.GetOlympiadMonthlyStats(db)).Methods("GET")
 	router.HandleFunc("/api/get-top-3-students-by-unt", untScoreController.GetTop3UNTStudents(db)).Methods("GET")
 	router.HandleFunc("/api/count-users-by-role", controller.CountUsersByRole(db)).Methods("GET")
 	router.HandleFunc("/api/countAllOlympiads", EventsParticipantController.CountOlympiadParticipants(db)).Methods("GET")
@@ -247,10 +246,7 @@ func main() {
 	// =======================
 	router.HandleFunc("/api/schools/count/{school_id}/students", studentController.GetStudentsCountBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/event-stats", EventsParticipantController.CountOlympiadParticipantsBySchool(db)).Methods("GET")
-	router.HandleFunc("/api/schools/{school_id}/olympiad-stats", olympiadController.GetCountParticipantsOlympiadBySchoolID(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/top-3-unt-students", untScoreController.GetTop3UNTStudentsBySchoolID(db)).Methods("GET")
-	router.HandleFunc("/api/schools/{school_id}/olympiad-prize-stats", olympiadController.GetOlympiadPrizeStatsBySchoolID(db)).Methods("GET")
-	router.HandleFunc("/api/schools/{school_id}/olympiad-monthly-stats", olympiadController.GetOlympiadMonthlyStatsBySchoolID(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/reviews/average-rating", reviewController.GetAverageRating(db)).Methods("GET")
 
 	// Включаем CORS
@@ -264,7 +260,7 @@ func main() {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
 		if r.Method == http.MethodOptions {
