@@ -158,6 +158,7 @@ func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.Handle
 			VALUES (?, ?, ?, 'registered', ?)`,
 			student.ID, request.SubjectOlympiadID, now.Format("2006-01-02 15:04:05"), student.SchoolID)
 		if err != nil {
+			log.Printf("Failed to insert registration: %v", err) // Added for debugging
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Registration failed"})
 			return
 		}
@@ -194,6 +195,7 @@ func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.Handle
 			&olympiadLevel,
 		)
 		if err != nil {
+			// Fallback response if query fails
 			utils.ResponseJSON(w, models.OlympiadRegistration{
 				OlympiadsRegistrationsID: int(regID),
 				StudentID:                student.ID,
@@ -218,6 +220,7 @@ func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.Handle
 		utils.ResponseJSON(w, registration)
 	}
 }
+
 // controllers/olympiad_registration.go
 func (c *OlympiadRegistrationController) GetOlympiadRegistrations(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

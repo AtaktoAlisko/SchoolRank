@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"database/sql"
-	"fmt"
 	"log"
 	"net/http"
 	"ranking-school/models"
@@ -287,15 +286,17 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 		// Шаг 7: Создаем расширенную структуру ответа с информацией об участниках
 		type SubjectOlympiadWithParticipants struct {
 			models.SubjectOlympiad
-			ParticipantInfo string `json:"participants"` // Format: "current/limit"
+			Location     string `json:"location"`     // Добавляем поле location
+			Participants int    `json:"participants"` // Только количество участников
 		}
 
 		response := SubjectOlympiadWithParticipants{
 			SubjectOlympiad: olympiad,
-			ParticipantInfo: fmt.Sprintf("%d/%d", currentParticipants, olympiad.Limit),
+			Location:        olympiad.Description, // Используем поле Description как Location
+			Participants:    currentParticipants,  // Только количество участников
 		}
 
-		log.Printf("Successfully retrieved olympiad with ID %d (participants: %s)", olympiadID, response.ParticipantInfo)
+		log.Printf("Successfully retrieved olympiad with ID %d (participants: %d)", olympiadID, currentParticipants)
 		utils.ResponseJSON(w, response)
 	}
 }
@@ -803,7 +804,7 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 				Schools s ON so.school_id = s.school_id
 			LEFT JOIN 
 				olympiad_registrations reg ON so.subject_olympiad_id = reg.subject_olympiad_id 
-				AND reg.status = 'registered'
+				AND reg.status = 'accepted'
 			WHERE 
 				so.subject_name = ?
 			GROUP BY 
@@ -822,16 +823,16 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 		}
 		defer rows.Close()
 
-		// Define olympiad structure with participant count
+		// Define olympiad structure with participant count as a simple number
 		type OlympiadData struct {
-			ID              int    `json:"subject_olympiad_id"`
-			StartDate       string `json:"start_date"`
-			EndDate         string `json:"end_date,omitempty"` // Only included if not expired
-			Location        string `json:"location"`
-			Limit           int    `json:"limit_participants"`
-			Level           string `json:"level"`
-			Expired         bool   `json:"expired"`
-			ParticipantInfo string `json:"participants"` // Format: "current/limit"
+			ID           int    `json:"subject_olympiad_id"`
+			StartDate    string `json:"start_date"`
+			EndDate      string `json:"end_date,omitempty"` // Only included if not expired
+			Location     string `json:"location"`
+			Limit        int    `json:"limit_participants"`
+			Level        string `json:"level"`
+			Expired      bool   `json:"expired"`
+			Participants int    `json:"participants"` // Changed to simple integer
 		}
 
 		// Define school with olympiads structure
@@ -852,7 +853,7 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 			var endDateStr sql.NullString
 			var currentParticipants int
 
-			// Scan the row - FIXED: Changed ¤tParticipants to &currentParticipants
+			// Scan the row
 			err := rows.Scan(
 				&olympiad.ID,
 				&olympiad.StartDate,
@@ -862,7 +863,7 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 				&olympiad.Level,
 				&schoolID,
 				&schoolName,
-				&currentParticipants, // FIXED: This was ¤tParticipants
+				&currentParticipants,
 			)
 			if err != nil {
 				log.Println("Error scanning row:", err)
@@ -873,13 +874,12 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 			if endDateStr.Valid {
 				olympiad.EndDate = endDateStr.String
 			} else {
-				// Default to start date + 1 day if end_date is NULL
 				start, _ := time.Parse("2006-01-02", olympiad.StartDate)
 				olympiad.EndDate = start.AddDate(0, 0, 1).Format("2006-01-02")
 			}
 
-			// Format participant info as "current/limit"
-			olympiad.ParticipantInfo = fmt.Sprintf("%d/%d", currentParticipants, olympiad.Limit)
+			// Set participants as a simple number
+			olympiad.Participants = currentParticipants
 
 			// Parse end date to check if it's expired
 			endDate, err := time.Parse("2006-01-02", olympiad.EndDate)
