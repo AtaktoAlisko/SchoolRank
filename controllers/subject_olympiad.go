@@ -933,3 +933,105 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 		utils.ResponseJSON(w, response)
 	}
 }
+func (c *SubjectOlympiadController) GetAllSubjectOlympiadsSchool(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
+
+		// Extract schoolID from URL path parameter
+		vars := mux.Vars(r)
+		schoolID := vars["school_id"]
+
+		subject := r.URL.Query().Get("subject")
+
+		// Updated query to include all the necessary fields
+		query := `
+			SELECT 
+				so.subject_olympiad_id, 
+				so.subject_name, 
+				so.date, 
+				so.end_date, 
+				so.description,
+				so.school_id,
+				so.level,
+				so.limit_participants,
+				COALESCE(so.creator_id, 0) as creator_id,
+				COALESCE(u.first_name, '') as creator_first_name,
+				COALESCE(u.last_name, '') as creator_last_name,
+				COALESCE(s.school_name, '') as school_name
+			FROM 
+				subject_olympiads so
+			LEFT JOIN 
+				users u ON so.creator_id = u.id
+			LEFT JOIN 
+				Schools s ON so.school_id = s.school_id
+		`
+
+		var rows *sql.Rows
+		var params []interface{}
+		var conditions []string
+
+		if subject != "" {
+			conditions = append(conditions, "so.subject_name = ?")
+			params = append(params, subject)
+		}
+
+		if schoolID != "" {
+			conditions = append(conditions, "so.school_id = ?")
+			params = append(params, schoolID)
+		}
+
+		if len(conditions) > 0 {
+			query += " WHERE " + strings.Join(conditions, " AND ")
+			rows, err = db.Query(query, params...)
+		} else {
+			rows, err = db.Query(query)
+		}
+
+		if err != nil {
+			log.Println("Query error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Query failed"})
+			return
+		}
+		defer rows.Close()
+
+		var olympiads []models.SubjectOlympiad
+		for rows.Next() {
+			var o models.SubjectOlympiad
+			if err := rows.Scan(
+				&o.ID,
+				&o.SubjectName,
+				&o.StartDate,
+				&o.EndDate,
+				&o.Description,
+				&o.SchoolID,
+				&o.Level,
+				&o.Limit,
+				&o.CreatorID,
+				&o.CreatorFirstName,
+				&o.CreatorLastName,
+				&o.SchoolName,
+			); err != nil {
+				log.Println("Scan error:", err)
+				continue
+			}
+
+			// Check if olympiad is expired
+			currentTime := time.Now()
+			endDate, err := time.Parse("2006-01-02", o.EndDate)
+			if err != nil {
+				log.Printf("Error parsing end date '%s': %v", o.EndDate, err)
+				o.Expired = false
+			} else {
+				o.Expired = currentTime.After(endDate)
+			}
+
+			olympiads = append(olympiads, o)
+		}
+
+		utils.ResponseJSON(w, olympiads)
+	}
+}
