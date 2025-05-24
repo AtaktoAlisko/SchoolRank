@@ -248,6 +248,7 @@ func main() {
 	router.HandleFunc("/api/olympiads/registrations/{id}/place", OlympiadRegistrationController.AssignPlaceToRegistration(db)).Methods("POST")
 	router.HandleFunc("/api/olympiads/register/{id}", OlympiadRegistrationController.DeleteRegistration(db)).Methods("DELETE")
 	router.HandleFunc("/api/olympiads/total-rating/{school_id}", OlympiadRegistrationController.GetTotalOlympiadRating(db)).Methods("GET")
+	router.HandleFunc("/api/olympiads/participants-count", OlympiadRegistrationController.GetOverallOlympiadParticipationCount(db)).Methods("GET")
 
 	// =======================
 	// Dashboard (superadmin)

@@ -848,3 +848,33 @@ func calculateOlympiadRatingByLevel(db *sql.DB, schoolID int, level string, weig
 
 	return weightedScore
 }
+func (c *OlympiadRegistrationController) GetOverallOlympiadParticipationCount(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Авторизация
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+			return
+		}
+
+		// Проверка роли
+		var role string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&role)
+		if err != nil || (role != "schooladmin" && role != "superadmin") {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Access denied"})
+			return
+		}
+
+		// Подсчёт всех регистраций
+		var total int
+		err = db.QueryRow("SELECT COUNT(*) FROM olympiad_registrations").Scan(&total)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to count registrations"})
+			return
+		}
+
+		utils.ResponseJSON(w, map[string]int{
+			"overall_total_participations": total,
+		})
+	}
+}
