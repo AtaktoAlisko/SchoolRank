@@ -3,9 +3,11 @@ package controllers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"math"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -480,7 +482,6 @@ func (c *OlympiadRegistrationController) UpdateRegistrationStatus(db *sql.DB) ht
 }
 func (c *OlympiadRegistrationController) AssignPlaceToRegistration(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Авторизация
 		userID, err := utils.VerifyToken(r)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
@@ -495,7 +496,6 @@ func (c *OlympiadRegistrationController) AssignPlaceToRegistration(db *sql.DB) h
 			return
 		}
 
-		// ID регистрации
 		idStr := mux.Vars(r)["id"]
 		regID, err := strconv.Atoi(idStr)
 		if err != nil || regID <= 0 {
@@ -503,26 +503,65 @@ func (c *OlympiadRegistrationController) AssignPlaceToRegistration(db *sql.DB) h
 			return
 		}
 
-		// Парсинг тела запроса
-		var body struct {
-			Place int `json:"place"`
+		// Parse multipart form data (up to 10 MB)
+		err = r.ParseMultipartForm(10 << 20)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Failed to parse form data"})
+			return
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Place < 1 || body.Place > 3 {
+
+		// Get place from form data
+		placeStr := r.FormValue("place")
+		place, err := strconv.Atoi(placeStr)
+		if err != nil || place < 1 || place > 3 {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Place must be 1, 2, or 3"})
 			return
 		}
 
-		// Получаем данные о регистрации + олимпиаде
+		// Handle file upload
+		file, fileHeader, err := r.FormFile("document")
+		var documentURL string
+		if err == nil {
+			defer file.Close()
+
+			// Validate file type
+			allowedTypes := map[string]bool{
+				"image/jpeg":      true,
+				"image/png":       true,
+				"image/jpg":       true,
+				"application/pdf": true,
+			}
+			contentType := fileHeader.Header.Get("Content-Type")
+			if !allowedTypes[contentType] {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid file type. Only JPEG, PNG, and PDF files are allowed"})
+				return
+			}
+
+			// Generate file name
+			fileExt := filepath.Ext(fileHeader.Filename)
+			fileName := fmt.Sprintf("olympiad_doc_%d_%s%s", regID, time.Now().Format("20060102150405"), fileExt)
+
+			// Upload file to S3
+			documentURL, err = utils.UploadFileToS3(file, fileName, "olympiaddoc")
+			if err != nil {
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: fmt.Sprintf("Failed to upload document to S3: %v", err)})
+				return
+			}
+		} else if err != http.ErrMissingFile {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Error reading document file"})
+			return
+		}
+
+		// Fetch registration details
 		var schoolID, subjectOlympiadID int
 		var status string
 		var createdBy sql.NullInt64
-
 		err = db.QueryRow(`
-			SELECT r.school_id, r.status, r.subject_olympiad_id, o.created_by
-			FROM olympiad_registrations r
-			JOIN subject_olympiads o ON r.subject_olympiad_id = o.subject_olympiad_id
-			WHERE r.olympiads_registrations_id = ?
-		`, regID).Scan(&schoolID, &status, &subjectOlympiadID, &createdBy)
+            SELECT r.school_id, r.status, r.subject_olympiad_id, o.created_by
+            FROM olympiad_registrations r
+            JOIN subject_olympiads o ON r.subject_olympiad_id = o.subject_olympiad_id
+            WHERE r.olympiads_registrations_id = ?
+        `, regID).Scan(&schoolID, &status, &subjectOlympiadID, &createdBy)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Registration not found"})
 			return
@@ -533,37 +572,25 @@ func (c *OlympiadRegistrationController) AssignPlaceToRegistration(db *sql.DB) h
 			return
 		}
 
+		// Check access for schooladmin
 		if role == "schooladmin" {
 			hasAccess := false
-
 			if userSchoolID.Valid && schoolID == int(userSchoolID.Int64) {
 				hasAccess = true
 			} else if createdBy.Valid && int(createdBy.Int64) == userID {
 				hasAccess = true
 			}
-
 			if !hasAccess {
 				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only assign places for your school or olympiads you created"})
 				return
 			}
 		}
 
-		// Баллы по месту
-		score := 0
-		switch body.Place {
-		case 1:
-			score = 50
-		case 2:
-			score = 30
-		case 3:
-			score = 20
-		}
-
-		// Проверка: место уже было выставлено?
+		// Check if place is already assigned
 		var existingPlace sql.NullInt64
 		err = db.QueryRow(`
-			SELECT olympiad_place FROM olympiad_registrations WHERE olympiads_registrations_id = ?
-		`, regID).Scan(&existingPlace)
+            SELECT olympiad_place FROM olympiad_registrations WHERE olympiads_registrations_id = ?
+        `, regID).Scan(&existingPlace)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to check existing place"})
 			return
@@ -573,16 +600,53 @@ func (c *OlympiadRegistrationController) AssignPlaceToRegistration(db *sql.DB) h
 			return
 		}
 
-		// Обновление заявки
-		_, err = db.Exec(`
-			UPDATE olympiad_registrations SET olympiad_place = ?, score = ? WHERE olympiads_registrations_id = ?
-		`, body.Place, score, regID)
+		// Calculate score based on place
+		score := 0
+		switch place {
+		case 1:
+			score = 50
+		case 2:
+			score = 30
+		case 3:
+			score = 20
+		}
+
+		// Update database
+		var query string
+		var args []interface{}
+		if documentURL != "" {
+			query = `
+                UPDATE olympiad_registrations 
+                SET olympiad_place = ?, score = ?, document_url = ? 
+                WHERE olympiads_registrations_id = ?
+            `
+			args = []interface{}{place, score, documentURL, regID}
+		} else {
+			query = `
+                UPDATE olympiad_registrations 
+                SET olympiad_place = ?, score = ? 
+                WHERE olympiads_registrations_id = ?
+            `
+			args = []interface{}{place, score, regID}
+		}
+
+		_, err = db.Exec(query, args...)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to assign place"})
 			return
 		}
 
-		utils.ResponseJSON(w, map[string]string{"message": "Place assigned successfully"})
+		// Prepare response
+		response := map[string]interface{}{
+			"message": "Place assigned successfully",
+			"place":   place,
+			"score":   score,
+		}
+		if documentURL != "" {
+			response["document_url"] = documentURL
+		}
+
+		utils.ResponseJSON(w, response)
 	}
 }
 func (c *OlympiadRegistrationController) DeleteRegistration(db *sql.DB) http.HandlerFunc {

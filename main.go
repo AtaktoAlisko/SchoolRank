@@ -200,10 +200,13 @@ func main() {
 	// =======================
 	// Event registration routes
 	// =======================
-	router.HandleFunc("/students/{student_id}/events/register", EventsRegistrationController.RegisterForEvent(db)).Methods("POST")
-	router.HandleFunc("/api/event-registrations/{id}/status", EventsRegistrationController.UpdateEventRegistrationStatus(db)).Methods("PATCH")
+	router.HandleFunc("/events/register", EventsRegistrationController.RegisterForEvent(db)).Methods("POST")
+	router.HandleFunc("/api/event-registrations/{id}", EventsRegistrationController.UpdateEventRegistrationStatus(db)).Methods("PATCH")
 	router.HandleFunc("/api/event-registrations", EventsRegistrationController.GetEventRegistrations(db)).Methods("GET")
 	router.HandleFunc("/api/event-registrations/{id}", EventsRegistrationController.DeleteEventRegistrationByID(db)).Methods("DELETE")
+	router.HandleFunc("/api/my-registrations/{id}", EventsRegistrationController.DeleteMyEventRegistration(db)).Methods("DELETE")
+	router.HandleFunc("/api/event-registrations/{id}/approve-or-cancel", EventsRegistrationController.ApproveOrCancelEventRegistration(db)).Methods("PATCH")
+	router.HandleFunc("/api/school-ranking", EventsRegistrationController.GetSchoolRanking(db)).Methods("GET")
 
 	// router.HandleFunc("/event-registrations/{event_registration_id}/status", eventController.UpdateEventRegistrationStatus(db)).Methods("PUT")
 	// router.HandleFunc("/events/{event_id}/registrations", eventController.GetEventRegistrations(db)).Methods("GET")
@@ -242,7 +245,7 @@ func main() {
 	router.HandleFunc("/api/olympiads/register", OlympiadRegistrationController.RegisterStudent(db)).Methods("POST")
 	router.HandleFunc("/api/olympiads/registrations", OlympiadRegistrationController.GetOlympiadRegistrations(db)).Methods("GET")
 	router.HandleFunc("/api/olympiads/register/{id}", OlympiadRegistrationController.UpdateRegistrationStatus(db)).Methods("PATCH")
-	router.HandleFunc("/api/olympiads/registrations/{id}/place", OlympiadRegistrationController.AssignPlaceToRegistration(db)).Methods("PATCH")
+	router.HandleFunc("/api/olympiads/registrations/{id}/place", OlympiadRegistrationController.AssignPlaceToRegistration(db)).Methods("POST")
 	router.HandleFunc("/api/olympiads/register/{id}", OlympiadRegistrationController.DeleteRegistration(db)).Methods("DELETE")
 	router.HandleFunc("/api/olympiads/total-rating/{school_id}", OlympiadRegistrationController.GetTotalOlympiadRating(db)).Methods("GET")
 

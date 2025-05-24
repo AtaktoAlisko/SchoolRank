@@ -322,19 +322,19 @@ func (ec *EventController) AddEvent(db *sql.DB) http.HandlerFunc {
 }
 func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Проверяем, что используется метод GET
+		// Check that GET method is used
 		if r.Method != http.MethodGet {
 			utils.RespondWithError(w, http.StatusMethodNotAllowed, models.Error{Message: "Method not allowed"})
 			return
 		}
 
-		// Получаем параметры запроса
+		// Get query parameters
 		query := r.URL.Query()
 
-		// Создаем map для хранения всех параметров
+		// Create map to store all parameters
 		params := make(map[string]string)
 
-		// Собираем основные параметры
+		// Collect main parameters
 		params["id"] = query.Get("id")
 		params["school_id"] = query.Get("school_id")
 		params["grade"] = query.Get("grade")
@@ -342,19 +342,20 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 		params["date_to"] = query.Get("date_to")
 		params["limit"] = query.Get("limit")
 		params["offset"] = query.Get("offset")
-		params["category"] = query.Get("category") // Renamed from type
+		params["category"] = query.Get("category")
+		params["location"] = query.Get("location")
 
-		// Добавляем все остальные параметры
+		// Add all other parameters
 		for key, values := range query {
 			if _, exists := params[key]; !exists && len(values) > 0 {
 				params[key] = values[0]
 			}
 		}
 
-		// Логируем все параметры
+		// Log all parameters
 		log.Println("GetEvents called with parameters:", params)
 
-		// Если запрошен debug режим, возвращаем все параметры
+		// If debug mode is requested, return all parameters
 		if query.Get("debug") == "true" {
 			utils.ResponseJSON(w, map[string]interface{}{
 				"message":    "Debug mode: showing all parameters",
@@ -363,7 +364,7 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Переменные для основных параметров
+		// Variables for main parameters
 		eventID := params["id"]
 		schoolID := params["school_id"]
 		grade := params["grade"]
@@ -371,9 +372,10 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 		dateTo := params["date_to"]
 		limit := params["limit"]
 		offset := params["offset"]
-		eventCategory := params["category"] // Renamed from eventType
+		eventCategory := params["category"]
+		location := params["location"]
 
-		// Если указан конкретный ID события - получаем только его
+		// If a specific event ID is provided, fetch only that event
 		if eventID != "" {
 			id, err := strconv.Atoi(eventID)
 			if err != nil {
@@ -391,7 +393,7 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 				return
 			}
 
-			// Формируем ответ без parameters_used
+			// Form response without parameters_used
 			response := map[string]interface{}{
 				"event": event,
 			}
@@ -399,12 +401,12 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Строим запрос для получения списка событий
+		// Build query for fetching list of events
 		queryBuilder := strings.Builder{}
 		queryBuilder.WriteString(`
             SELECT e.id, e.school_id, e.user_id, e.event_name, e.description, 
             e.photo, e.start_date, e.end_date, e.location, 
-            e.grade, e.limit_count as limit, e.participants, e.limit_participants, e.created_at, e.updated_at, 
+            e.grade, e.limit_count as ` + "`limit`" + `, e.participants, e.limit_participants, e.created_at, e.updated_at, 
             u.email AS created_by, e.category, s.school_name
             FROM Events e
             LEFT JOIN users u ON e.user_id = u.id
@@ -414,7 +416,7 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 
 		var args []interface{}
 
-		// Добавляем фильтры, если они указаны
+		// Add filters if provided
 		if schoolID != "" {
 			schoolIDInt, err := strconv.Atoi(schoolID)
 			if err != nil {
@@ -435,7 +437,7 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 			args = append(args, gradeInt)
 		}
 
-		// Фильтр по category (previously type)
+		// Filter by category
 		if eventCategory != "" {
 			allowedCategories := []string{"Science", "Humanities", "Sport", "Creative"}
 			validCategory := false
@@ -455,7 +457,13 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 			args = append(args, eventCategory)
 		}
 
-		// Фильтр по датам (start_date)
+		// Filter by location (case-insensitive partial match)
+		if location != "" {
+			queryBuilder.WriteString(" AND LOWER(e.location) LIKE ?")
+			args = append(args, "%"+strings.ToLower(location)+"%")
+		}
+
+		// Filter by dates (start_date)
 		if dateFrom != "" {
 			_, err := time.Parse("2006-01-02", dateFrom)
 			if err != nil {
@@ -476,10 +484,10 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 			args = append(args, dateTo)
 		}
 
-		// Добавляем сортировку по start_date
+		// Add sorting by start_date
 		queryBuilder.WriteString(" ORDER BY e.start_date ASC")
 
-		// Добавляем пагинацию
+		// Add pagination
 		if limit != "" {
 			limitInt, err := strconv.Atoi(limit)
 			if err != nil || limitInt <= 0 {
@@ -500,11 +508,11 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 			}
 		}
 
-		// Логируем финальный SQL запрос
+		// Log final SQL query
 		finalQuery := queryBuilder.String()
 		log.Printf("Executing SQL query: %s with args: %v", finalQuery, args)
 
-		// Выполняем запрос
+		// Execute query
 		rows, err := db.Query(finalQuery, args...)
 		if err != nil {
 			log.Println("Error executing events query:", err)
@@ -513,7 +521,7 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		// Собираем результаты
+		// Collect results
 		var events []models.Event
 		for rows.Next() {
 			var event models.Event
@@ -536,7 +544,7 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Подготавливаем ответ без parameters_used
+		// Prepare response
 		response := map[string]interface{}{
 			"events":      events,
 			"total_count": len(events),
@@ -1403,6 +1411,7 @@ func getEventByID(db *sql.DB, id int) (models.Event, error) {
 	}
 	return event, nil
 }
+
 // func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 // 	return func(w http.ResponseWriter, r *http.Request) {
 // 		// Verify authentication
@@ -1436,8 +1445,8 @@ func getEventByID(db *sql.DB, id int) (models.Event, error) {
 // 		// Build the SQL query
 // 		queryBuilder := strings.Builder{}
 // 		queryBuilder.WriteString(`
-//             SELECT e.id, e.school_id, e.user_id, e.event_name, e.description, 
-//             e.photo, e.participants, e.limit_count as limit, e.limit_participants, e.start_date, e.end_date, 
+//             SELECT e.id, e.school_id, e.user_id, e.event_name, e.description,
+//             e.photo, e.participants, e.limit_count as limit, e.limit_participants, e.start_date, e.end_date,
 //             e.location, e.grade, e.created_at, e.updated_at, u.email AS created_by, e.category, s.school_name
 //             FROM Events e
 //             LEFT JOIN users u ON e.user_id = u.id

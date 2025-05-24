@@ -1035,3 +1035,81 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiadsSchool(db *sql.DB) htt
 		utils.ResponseJSON(w, olympiads)
 	}
 }
+func (c *SubjectOlympiadController) GetRegisteredStudentsByMonth(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify token
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token."})
+			return
+		}
+
+		// Step 2: Fetch user role
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil {
+			log.Println("Error fetching user role:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
+
+		// Step 3: Check superadmin access
+		if userRole != "superadmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only superadmin can access this endpoint"})
+			return
+		}
+
+		// Step 4: Query to count registered students by month
+		query := `
+			SELECT 
+				DATE_FORMAT(so.date, '%Y-%m') as month,
+				COUNT(DISTINCT reg.student_id) as registered_students
+			FROM 
+				subject_olympiads so
+			LEFT JOIN 
+				olympiad_registrations reg ON so.subject_olympiad_id = reg.subject_olympiad_id 
+				AND reg.status = 'registered'
+			GROUP BY 
+				DATE_FORMAT(so.date, '%Y-%m')
+			ORDER BY 
+				month DESC
+		`
+
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println("Error querying registered students by month:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching registration data"})
+			return
+		}
+		defer rows.Close()
+
+		// Step 5: Prepare response structure
+		type MonthlyRegistration struct {
+			Month              string `json:"month"`
+			RegisteredStudents int    `json:"registered_students"`
+		}
+
+		var registrations []MonthlyRegistration
+		for rows.Next() {
+			var reg MonthlyRegistration
+			err := rows.Scan(&reg.Month, &reg.RegisteredStudents)
+			if err != nil {
+				log.Println("Error scanning registration data:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing registration data"})
+				return
+			}
+			registrations = append(registrations, reg)
+		}
+
+		// Check for errors from iterating over rows
+		if err = rows.Err(); err != nil {
+			log.Println("Error iterating over rows:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing registration data"})
+			return
+		}
+
+		// Step 6: Return the result
+		log.Printf("Successfully retrieved registration data for superadmin (userID: %d)", userID)
+		utils.ResponseJSON(w, registrations)
+	}
+}

@@ -23,6 +23,7 @@ type OlympiadRegistration struct {
 	OlympiadStartDate string `json:"olympiad_start_date"`
 	OlympiadEndDate   string `json:"olympiad_end_date"`
 	OlympiadPlace     int    `json:"olympiad_place,omitempty"`
+	DocumentURL       string `json:"document_url,omitempty"`
 	Score             int    `json:"score,omitempty"`
 	Level             string `json:"level"`
 }
