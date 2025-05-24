@@ -152,154 +152,84 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 }
 func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Шаг 1: Проверка токена
-		_, err := utils.VerifyToken(r)
+		// Проверка токена
+		userID, err := utils.VerifyToken(r)
 		if err != nil {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			log.Println("Ошибка проверки токена:", err)
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Неверный токен"})
 			return
 		}
+		log.Printf("Проверенный userID: %d", userID)
 
-		// Шаг 2: Получение olympiad_id из URL
-		olympiadIDStr := r.URL.Path[len("/api/subject-olympiads/"):]
-		// Удаляем все после слеша, если есть дополнительные пути
-		if slashIndex := strings.Index(olympiadIDStr, "/"); slashIndex != -1 {
-			olympiadIDStr = olympiadIDStr[:slashIndex]
-		}
-
+		// Получение ID из URL
+		vars := mux.Vars(r)
+		olympiadIDStr := vars["olympiad_id"]
 		olympiadID, err := strconv.Atoi(olympiadIDStr)
 		if err != nil || olympiadID <= 0 {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid olympiad ID"})
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Неверный ID олимпиады"})
 			return
 		}
 
-		// Шаг 3: Запрос к базе данных для получения олимпиады с количеством участников
+		// Подготовка переменных
+		var olympiad models.SubjectOlympiad
+		var firstName, lastName, schoolName sql.NullString
+
 		query := `
 			SELECT 
 				so.subject_olympiad_id,
 				so.subject_name,
-				so.date as start_date,
+				so.date,
 				so.end_date,
 				so.description,
 				so.school_id,
 				so.level,
 				so.limit_participants,
-				so.creator_id,
-				u.first_name as creator_first_name,
-				u.last_name as creator_last_name,
+				COALESCE(so.creator_id, 0),
+				u.first_name,
+				u.last_name,
 				s.school_name,
-				COUNT(reg.olympiads_registrations_id) as current_participants
-			FROM 
-				subject_olympiads so
-			LEFT JOIN 
-				users u ON so.creator_id = u.id
-			LEFT JOIN 
-				Schools s ON so.school_id = s.school_id
-			LEFT JOIN 
-				olympiad_registrations reg ON so.subject_olympiad_id = reg.subject_olympiad_id 
-				AND reg.status = 'registered'
-			WHERE 
-				so.subject_olympiad_id = ?
-			GROUP BY 
-				so.subject_olympiad_id, so.subject_name, so.date, so.end_date, so.description, 
-				so.school_id, so.level, so.limit_participants, so.creator_id, 
-				u.first_name, u.last_name, s.school_name
+				CASE WHEN so.end_date < CURRENT_DATE THEN true ELSE false END AS expired
+			FROM subject_olympiads so
+			LEFT JOIN users u ON so.creator_id = u.id
+			LEFT JOIN Schools s ON so.school_id = s.school_id
+			WHERE so.subject_olympiad_id = ?
 		`
-
-		var olympiad models.SubjectOlympiad
-		var endDate sql.NullString
-		var creatorID sql.NullInt64
-		var creatorFirstName sql.NullString
-		var creatorLastName sql.NullString
-		var schoolName sql.NullString
-		var currentParticipants int
 
 		err = db.QueryRow(query, olympiadID).Scan(
 			&olympiad.ID,
 			&olympiad.SubjectName,
 			&olympiad.StartDate,
-			&endDate,
+			&olympiad.EndDate,
 			&olympiad.Description,
 			&olympiad.SchoolID,
 			&olympiad.Level,
 			&olympiad.Limit,
-			&creatorID,
-			&creatorFirstName,
-			&creatorLastName,
+			&olympiad.CreatorID,
+			&firstName,
+			&lastName,
 			&schoolName,
-			&currentParticipants,
+			&olympiad.Expired,
 		)
 
-		if err != nil {
-			if err == sql.ErrNoRows {
-				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Olympiad not found"})
-				return
-			}
-			log.Println("Error fetching olympiad:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching olympiad details"})
+		if err == sql.ErrNoRows {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Олимпиада не найдена"})
+			return
+		} else if err != nil {
+			log.Println("Ошибка запроса:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Ошибка запроса к базе данных"})
 			return
 		}
 
-		// Шаг 4: Обработка nullable полей
-		if endDate.Valid {
-			olympiad.EndDate = endDate.String
-		} else {
-			// Если end_date не указана, используем start_date + 1 день
-			startDate, parseErr := time.Parse("2006-01-02", olympiad.StartDate)
-			if parseErr == nil {
-				olympiad.EndDate = startDate.AddDate(0, 0, 1).Format("2006-01-02")
-			}
-		}
+		// Обработка null-значений
+		olympiad.CreatorFirstName = utils.NullStringToString(firstName)
+		olympiad.CreatorLastName = utils.NullStringToString(lastName)
+		olympiad.SchoolName = utils.NullStringToString(schoolName)
 
-		if creatorID.Valid {
-			olympiad.CreatorID = int(creatorID.Int64)
-		}
-
-		if creatorFirstName.Valid {
-			olympiad.CreatorFirstName = creatorFirstName.String
-		}
-
-		if creatorLastName.Valid {
-			olympiad.CreatorLastName = creatorLastName.String
-		}
-
-		if schoolName.Valid {
-			olympiad.SchoolName = schoolName.String
-		}
-
-		// Шаг 5: Проверка на истечение срока
-		currentTime := time.Now()
-		endDateParsed, err := time.Parse("2006-01-02", olympiad.EndDate)
-		if err != nil {
-			log.Printf("Error parsing end date '%s': %v", olympiad.EndDate, err)
-			olympiad.Expired = false
-		} else {
-			olympiad.Expired = currentTime.After(endDateParsed)
-		}
-
-		// Шаг 6: Если олимпиада истекла, не возвращаем end_date (благодаря omitempty)
-		if olympiad.Expired {
-			// Поле EndDate будет скрыто благодаря тегу omitempty в структуре
-			// при условии, что мы установим пустое значение
-			olympiad.EndDate = ""
-		}
-
-		// Шаг 7: Создаем расширенную структуру ответа с информацией об участниках
-		type SubjectOlympiadWithParticipants struct {
-			models.SubjectOlympiad
-			Location     string `json:"location"`     // Добавляем поле location
-			Participants int    `json:"participants"` // Только количество участников
-		}
-
-		response := SubjectOlympiadWithParticipants{
-			SubjectOlympiad: olympiad,
-			Location:        olympiad.Description, // Используем поле Description как Location
-			Participants:    currentParticipants,  // Только количество участников
-		}
-
-		log.Printf("Successfully retrieved olympiad with ID %d (participants: %d)", olympiadID, currentParticipants)
-		utils.ResponseJSON(w, response)
+		log.Printf("DEBUG: %+v", olympiad)
+		utils.ResponseJSON(w, olympiad)
 	}
 }
+
 func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Step 1: Verify token
@@ -604,52 +534,101 @@ func (c *SubjectOlympiadController) DeleteSubjectOlympiad(db *sql.DB) http.Handl
 }
 func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		_, err := utils.VerifyToken(r)
+		// Step 1: Verify token
+		userID, err := utils.VerifyToken(r)
 		if err != nil {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token."})
 			return
 		}
 
-		subject := r.URL.Query().Get("subject")
-		query := `
-			SELECT subject_olympiad_id, subject_name, date, end_date, description
-			FROM subject_olympiads
-		`
-		var rows *sql.Rows
-		if subject != "" {
-			query += " WHERE subject_name = ?"
-			rows, err = db.Query(query, subject)
-		} else {
-			rows, err = db.Query(query)
-		}
+		// Step 2: Get user role
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
 		if err != nil {
-			log.Println("Query error:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Query failed"})
+			log.Println("Error fetching user role:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
+
+		// Step 3: Check permissions
+		if userRole != "superadmin" && userRole != "schooladmin" && userRole != "teacher" && userRole != "student" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view olympiads"})
+			return
+		}
+
+		// Step 4: Build query based on user role
+		query := `
+            SELECT so.id, so.subject_name, so.date, so.end_date, so.description, 
+                   so.school_id, so.level, so.limit_participants, 
+                   u.id as creator_id, u.first_name, u.last_name, s.name as school_name
+            FROM subject_olympiads so
+            LEFT JOIN users u ON so.creator_id = u.id
+            LEFT JOIN Schools s ON so.school_id = s.id
+        `
+		var rows *sql.Rows
+
+		if userRole == "superadmin" {
+			// Superadmin can see all olympiads
+			rows, err = db.Query(query)
+		} else {
+			// Other roles can only see olympiads for their school
+			var schoolID int
+			err = db.QueryRow("SELECT school_id FROM users WHERE id = ?", userID).Scan(&schoolID)
+			if err != nil {
+				log.Println("Error fetching user school_id:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user school details"})
+				return
+			}
+			query += " WHERE so.school_id = ?"
+			rows, err = db.Query(query, schoolID)
+		}
+
+		if err != nil {
+			log.Println("Error querying olympiads:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch olympiads"})
 			return
 		}
 		defer rows.Close()
 
+		// Step 5: Collect olympiads
 		var olympiads []models.SubjectOlympiad
 		for rows.Next() {
-			var o models.SubjectOlympiad
-			if err := rows.Scan(&o.ID, &o.SubjectName, &o.StartDate, &o.EndDate, &o.Description); err != nil {
-				continue
+			var olympiad models.SubjectOlympiad
+			err := rows.Scan(
+				&olympiad.ID,
+				&olympiad.SubjectName,
+				&olympiad.StartDate,
+				&olympiad.EndDate,
+				&olympiad.Description,
+				&olympiad.SchoolID,
+				&olympiad.Level,
+				&olympiad.Limit,
+				&olympiad.CreatorID,
+				&olympiad.CreatorFirstName,
+				&olympiad.CreatorLastName,
+				&olympiad.SchoolName,
+			)
+			if err != nil {
+				log.Println("Error scanning olympiad row:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing olympiad data"})
+				return
 			}
-			olympiads = append(olympiads, o)
+			olympiads = append(olympiads, olympiad)
 		}
 
+		// Step 6: Check for errors in row iteration
+		if err = rows.Err(); err != nil {
+			log.Println("Error iterating over olympiad rows:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing olympiad data"})
+			return
+		}
+
+		// Step 7: Return the list of olympiads
 		utils.ResponseJSON(w, olympiads)
 	}
 }
 func (c *SubjectOlympiadController) GetOlympiadsBySubjectID(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Verify token
-		_, err := utils.VerifyToken(r)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
-			return
-		}
-
 		// Extract subject_olympiad_id from URL parameters
 		vars := mux.Vars(r)
 		subjectOlympiadID, ok := vars["subject_olympiad_id"]
