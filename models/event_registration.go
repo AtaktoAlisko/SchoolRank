@@ -18,7 +18,7 @@ type EventRegistration struct {
 	StudentPatronymic string `json:"student_patronymic"`
 	StudentGrade      string `json:"student_grade"`
 	StudentLetter     string `json:"student_letter"`
-
+	StudentRole       string `json:"student_role"`
 	// School data from Schools table
 	SchoolName string `json:"school_name"`
 

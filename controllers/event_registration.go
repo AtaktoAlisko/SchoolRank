@@ -188,7 +188,6 @@ func (ec *EventsRegistrationController) RegisterForEvent(db *sql.DB) http.Handle
 		utils.ResponseJSON(w, registration)
 	}
 }
-
 func (ec *EventsRegistrationController) UpdateEventRegistrationStatus(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, err := utils.VerifyToken(r)
@@ -352,9 +351,9 @@ func (ec *EventsRegistrationController) GetEventRegistrations(db *sql.DB) http.H
 			rows, err = db.Query(`
                 SELECT r.event_registration_id, r.student_id, r.event_id, r.registration_date, r.status,
                        r.school_id,
-                       s.first_name, s.last_name, s.patronymic, s.grade, s.letter,
+                       s.first_name, s.last_name, s.patronymic, s.grade, s.letter, s.role,
                        sc.school_name,
-                       e.event_name, e.start_date, e.end_date
+                       e.event_name, e.start_date, e.end_date, e.category
                 FROM EventRegistrations r
                 JOIN student s ON r.student_id = s.student_id
                 JOIN Schools sc ON r.school_id = sc.school_id
@@ -364,9 +363,9 @@ func (ec *EventsRegistrationController) GetEventRegistrations(db *sql.DB) http.H
 			rows, err = db.Query(`
                 SELECT r.event_registration_id, r.student_id, r.event_id, r.registration_date, r.status,
                        r.school_id,
-                       s.first_name, s.last_name, s.patronymic, s.grade, s.letter,
+                       s.first_name, s.last_name, s.patronymic, s.grade, s.letter, s.role,
                        sc.school_name,
-                       e.event_name, e.start_date, e.end_date
+                       e.event_name, e.start_date, e.end_date, e.category
                 FROM EventRegistrations r
                 JOIN student s ON r.student_id = s.student_id
                 JOIN Schools sc ON r.school_id = sc.school_id
@@ -388,6 +387,8 @@ func (ec *EventsRegistrationController) GetEventRegistrations(db *sql.DB) http.H
 			var endDate sql.NullString
 			var schoolName sql.NullString
 			var status sql.NullString
+			var studentRole sql.NullString
+			var eventCategory sql.NullString
 
 			err := rows.Scan(
 				&reg.EventRegistrationID,
@@ -401,10 +402,12 @@ func (ec *EventsRegistrationController) GetEventRegistrations(db *sql.DB) http.H
 				&reg.StudentPatronymic,
 				&reg.StudentGrade,
 				&reg.StudentLetter,
+				&studentRole,
 				&schoolName,
 				&reg.EventName,
 				&reg.EventStartDate,
 				&endDate,
+				&eventCategory,
 			)
 			if err != nil {
 				log.Printf("Error scanning registration: %v", err)
@@ -412,8 +415,8 @@ func (ec *EventsRegistrationController) GetEventRegistrations(db *sql.DB) http.H
 			}
 
 			// Log raw scanned values for debugging
-			log.Printf("Scanned: regDateStr=%s, status=%v, schoolName=%v, endDate=%v",
-				regDateStr, status, schoolName, endDate)
+			log.Printf("Scanned: regDateStr=%s, status=%v, schoolName=%v, endDate=%v, studentRole=%v, eventCategory=%v",
+				regDateStr, status, schoolName, endDate, studentRole, eventCategory)
 
 			reg.RegistrationDate, _ = time.Parse("2006-01-02 15:04:05", regDateStr)
 			if status.Valid {
@@ -424,6 +427,12 @@ func (ec *EventsRegistrationController) GetEventRegistrations(db *sql.DB) http.H
 			}
 			if schoolName.Valid {
 				reg.SchoolName = schoolName.String
+			}
+			if studentRole.Valid {
+				reg.StudentRole = studentRole.String
+			}
+			if eventCategory.Valid {
+				reg.EventCategory = eventCategory.String
 			}
 
 			registrations = append(registrations, reg)
