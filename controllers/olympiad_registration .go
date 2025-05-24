@@ -222,8 +222,6 @@ func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.Handle
 		utils.ResponseJSON(w, registration)
 	}
 }
-
-// controllers/olympiad_registration.go
 func (c *OlympiadRegistrationController) GetOlympiadRegistrations(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, err := utils.VerifyToken(r)
@@ -365,7 +363,6 @@ func (c *OlympiadRegistrationController) GetOlympiadRegistrations(db *sql.DB) ht
 		utils.ResponseJSON(w, registrations)
 	}
 }
-
 func (c *OlympiadRegistrationController) UpdateRegistrationStatus(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, err := utils.VerifyToken(r)
@@ -785,7 +782,6 @@ func (c *OlympiadRegistrationController) GetTotalOlympiadRating(db *sql.DB) http
 		}
 	}
 }
-
 func calculateOlympiadRatingByLevel(db *sql.DB, schoolID int, level string, weight float64) float64 {
 	query := `
 		SELECT o.olympiad_place, o.score
@@ -868,5 +864,72 @@ func (c *OlympiadRegistrationController) GetOverallOlympiadParticipationCount(db
 		utils.ResponseJSON(w, map[string]int{
 			"overall_total_participations": total,
 		})
+	}
+}
+
+func (c *OlympiadRegistrationController) GetRegistrationsByMonth(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Авторизация
+		_, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+			return
+		}
+
+		// SQL-запрос для группировки регистраций по месяцам
+		query := `
+            SELECT 
+                MONTHNAME(registration_date) AS month_name, 
+                COUNT(*) AS registration_count
+            FROM olympiad_registrations
+            GROUP BY MONTH(registration_date), month_name
+            ORDER BY MONTH(registration_date)
+        `
+
+		rows, err := db.Query(query)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch registrations by month"})
+			return
+		}
+		defer rows.Close()
+
+		// Создаем map для хранения результатов
+		registrationsByMonth := make(map[string]int)
+
+		// Инициализируем все месяцы с нулевым значением
+		monthMap := map[string]string{
+			"January":   "Januarycount",
+			"February":  "Februarycount",
+			"March":     "Marchcount",
+			"April":     "Aprilcount",
+			"May":       "Maycount",
+			"June":      "Junecount",
+			"July":      "Julycount",
+			"August":    "Augustcount",
+			"September": "Septembercount",
+			"October":   "Octobercount",
+			"November":  "Novembercount",
+			"December":  "Decembercount",
+		}
+		for _, key := range monthMap {
+			registrationsByMonth[key] = 0
+		}
+
+		// Заполняем map данными из запроса
+		for rows.Next() {
+			var monthName string
+			var count int
+			if err := rows.Scan(&monthName, &count); err != nil {
+				log.Printf("Error scanning row: %v", err)
+				continue
+			}
+			// Приводим к формату, ожидаемому фронтендом
+			if formattedKey, ok := monthMap[monthName]; ok {
+				registrationsByMonth[formattedKey] = count
+			}
+		}
+
+		// Возвращаем результат
+		utils.ResponseJSON(w, registrationsByMonth)
 	}
 }
