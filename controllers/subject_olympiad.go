@@ -556,22 +556,32 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 			return
 		}
 
-		// Step 4: Build query based on user role
+		// Step 4: Build base query (removed photo_url, fixed school name column)
 		query := `
-            SELECT so.id, so.subject_name, so.date, so.end_date, so.description, 
-                   so.school_id, so.level, so.limit_participants, 
-                   u.id as creator_id, u.first_name, u.last_name, s.name as school_name
-            FROM subject_olympiads so
-            LEFT JOIN users u ON so.creator_id = u.id
-            LEFT JOIN Schools s ON so.school_id = s.id
-        `
+			SELECT 
+				so.subject_olympiad_id,
+				so.subject_name,
+				so.date AS start_date,
+				so.end_date,
+				so.description,
+				so.school_id,
+				so.level,
+				so.limit_participants,
+				COALESCE(u.id, 0) AS creator_id,
+				COALESCE(u.first_name, '') AS creator_first_name,
+				COALESCE(u.last_name, '') AS creator_last_name,
+				COALESCE(s.school_name, '') AS school_name
+			FROM subject_olympiads so
+			LEFT JOIN users u ON so.creator_id = u.id
+			LEFT JOIN Schools s ON so.school_id = s.school_id
+		`
+
 		var rows *sql.Rows
 
+		// Step 5: Restrict query for non-superadmin
 		if userRole == "superadmin" {
-			// Superadmin can see all olympiads
 			rows, err = db.Query(query)
 		} else {
-			// Other roles can only see olympiads for their school
 			var schoolID int
 			err = db.QueryRow("SELECT school_id FROM users WHERE id = ?", userID).Scan(&schoolID)
 			if err != nil {
@@ -590,43 +600,78 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 		}
 		defer rows.Close()
 
-		// Step 5: Collect olympiads
-		var olympiads []models.SubjectOlympiad
+		// Step 6: Read and map rows (removed photoURL variable)
+		var olympiads []map[string]interface{}
 		for rows.Next() {
-			var olympiad models.SubjectOlympiad
+			var (
+				id                int
+				subjectName       string
+				startDate         string
+				endDate           string
+				description       sql.NullString
+				schoolID          int
+				level             string
+				limitParticipants int
+				creatorID         int
+				creatorFirstName  string
+				creatorLastName   string
+				schoolName        string
+			)
+
 			err := rows.Scan(
-				&olympiad.ID,
-				&olympiad.SubjectName,
-				&olympiad.StartDate,
-				&olympiad.EndDate,
-				&olympiad.Description,
-				&olympiad.SchoolID,
-				&olympiad.Level,
-				&olympiad.Limit,
-				&olympiad.CreatorID,
-				&olympiad.CreatorFirstName,
-				&olympiad.CreatorLastName,
-				&olympiad.SchoolName,
+				&id,
+				&subjectName,
+				&startDate,
+				&endDate,
+				&description,
+				&schoolID,
+				&level,
+				&limitParticipants,
+				&creatorID,
+				&creatorFirstName,
+				&creatorLastName,
+				&schoolName,
 			)
 			if err != nil {
 				log.Println("Error scanning olympiad row:", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing olympiad data"})
 				return
 			}
+
+			// Check expired
+			isExpired := false
+			endDateParsed, err := time.Parse("2006-01-02", endDate)
+			if err == nil && time.Now().After(endDateParsed) {
+				isExpired = true
+			}
+
+			// Compose response object (removed photo_url or set it to empty string)
+			olympiad := map[string]interface{}{
+				"subject_olympiad_id": id,
+				"id":                  id,
+				"subject_name":        subjectName,
+				"start_date":          startDate,
+				"end_date":            endDate,
+				"description":         description.String,
+				"school_id":           schoolID,
+				"level":               level,
+				"limit_participants":  limitParticipants,
+				"photo_url":           "", // Empty string since column doesn't exist
+				"creator_id":          creatorID,
+				"creator_first_name":  creatorFirstName,
+				"creator_last_name":   creatorLastName,
+				"school_name":         schoolName,
+				"expired":             isExpired,
+			}
+
 			olympiads = append(olympiads, olympiad)
 		}
 
-		// Step 6: Check for errors in row iteration
-		if err = rows.Err(); err != nil {
-			log.Println("Error iterating over olympiad rows:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing olympiad data"})
-			return
-		}
-
-		// Step 7: Return the list of olympiads
+		// Step 7: Return response
 		utils.ResponseJSON(w, olympiads)
 	}
 }
+
 func (c *SubjectOlympiadController) GetOlympiadsBySubjectID(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract subject_olympiad_id from URL parameters

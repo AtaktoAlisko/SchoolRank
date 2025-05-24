@@ -14,4 +14,5 @@ type SubjectOlympiad struct {
 	CreatorLastName  string `json:"creator_last_name"`
 	SchoolName       string `json:"school_name"`
 	Expired          bool   `json:"expired"`
+	PhotoURL         string `json:"photo_url"`
 }
