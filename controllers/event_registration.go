@@ -411,6 +411,10 @@ func (ec *EventsRegistrationController) GetEventRegistrations(db *sql.DB) http.H
 				continue
 			}
 
+			// Log raw scanned values for debugging
+			log.Printf("Scanned: regDateStr=%s, status=%v, schoolName=%v, endDate=%v",
+				regDateStr, status, schoolName, endDate)
+
 			reg.RegistrationDate, _ = time.Parse("2006-01-02 15:04:05", regDateStr)
 			if status.Valid {
 				reg.Status = status.String
@@ -592,104 +596,104 @@ func (ec *EventsRegistrationController) DeleteMyEventRegistration(db *sql.DB) ht
 	}
 }
 func (ec *EventsRegistrationController) ApproveOrCancelEventRegistration(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        userID, err := utils.VerifyToken(r)
-        if err != nil {
-            log.Printf("Token verification failed for user %d: %v", userID, err)
-            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
-            return
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			log.Printf("Token verification failed for user %d: %v", userID, err)
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+			return
+		}
 
-        var role string
-        var userSchoolID sql.NullInt64
-        err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&role, &userSchoolID)
-        if err != nil || (role != "schooladmin" && role != "superadmin") {
-            log.Printf("Access denied for user %d: invalid role or error %v", userID, err)
-            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Access denied"})
-            return
-        }
+		var role string
+		var userSchoolID sql.NullInt64
+		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&role, &userSchoolID)
+		if err != nil || (role != "schooladmin" && role != "superadmin") {
+			log.Printf("Access denied for user %d: invalid role or error %v", userID, err)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Access denied"})
+			return
+		}
 
-        idStr := mux.Vars(r)["id"]
-        regID, err := strconv.Atoi(idStr)
-        if err != nil || regID <= 0 {
-            log.Printf("Invalid registration ID %s: %v", idStr, err)
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid registration ID"})
-            return
-        }
+		idStr := mux.Vars(r)["id"]
+		regID, err := strconv.Atoi(idStr)
+		if err != nil || regID <= 0 {
+			log.Printf("Invalid registration ID %s: %v", idStr, err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid registration ID"})
+			return
+		}
 
-        var body struct {
-            Status string `json:"status"`
-        }
-        if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-            log.Printf("Invalid request body for registration %d: %v", regID, err)
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid body"})
-            return
-        }
-        defer r.Body.Close()
+		var body struct {
+			Status string `json:"status"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			log.Printf("Invalid request body for registration %d: %v", regID, err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid body"})
+			return
+		}
+		defer r.Body.Close()
 
-        validStatuses := map[string]bool{
-            "accepted": true,
-            "canceled": true,
-        }
-        if !validStatuses[body.Status] {
-            log.Printf("Invalid status %s for registration %d", body.Status, regID)
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid status, must be 'accepted' or 'canceled'"})
-            return
-        }
+		validStatuses := map[string]bool{
+			"accepted": true,
+			"canceled": true,
+		}
+		if !validStatuses[body.Status] {
+			log.Printf("Invalid status %s for registration %d", body.Status, regID)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid status, must be 'accepted' or 'canceled'"})
+			return
+		}
 
-        tx, err := db.Begin()
-        if err != nil {
-            log.Printf("Error starting transaction for registration %d: %v", regID, err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
-            return
-        }
-        defer tx.Rollback()
+		tx, err := db.Begin()
+		if err != nil {
+			log.Printf("Error starting transaction for registration %d: %v", regID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+			return
+		}
+		defer tx.Rollback()
 
-        var eventSchoolID int
-        var eventID int
-        err = tx.QueryRow(`
+		var eventSchoolID int
+		var eventID int
+		err = tx.QueryRow(`
             SELECT e.school_id, r.event_id 
             FROM EventRegistrations r
             JOIN Events e ON r.event_id = e.id
             WHERE r.event_registration_id = ?`, regID).Scan(&eventSchoolID, &eventID)
-        if err == sql.ErrNoRows {
-            log.Printf("Registration %d not found", regID)
-            utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Registration not found"})
-            return
-        }
-        if err != nil {
-            log.Printf("Error fetching event details for registration %d: %v", regID, err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking registration"})
-            return
-        }
+		if err == sql.ErrNoRows {
+			log.Printf("Registration %d not found", regID)
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Registration not found"})
+			return
+		}
+		if err != nil {
+			log.Printf("Error fetching event details for registration %d: %v", regID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking registration"})
+			return
+		}
 
-        if role == "schooladmin" {
-            if !userSchoolID.Valid {
-                log.Printf("No school assigned to schooladmin %d", userID)
-                utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "No school assigned"})
-                return
-            }
-            if eventSchoolID != int(userSchoolID.Int64) {
-                log.Printf("School mismatch for schooladmin %d, event %d: user school %v, event school %d", userID, eventID, userSchoolID, eventSchoolID)
-                utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only approve/cancel registrations for your school's events"})
-                return
-            }
-        }
+		if role == "schooladmin" {
+			if !userSchoolID.Valid {
+				log.Printf("No school assigned to schooladmin %d", userID)
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "No school assigned"})
+				return
+			}
+			if eventSchoolID != int(userSchoolID.Int64) {
+				log.Printf("School mismatch for schooladmin %d, event %d: user school %v, event school %d", userID, eventID, userSchoolID, eventSchoolID)
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only approve/cancel registrations for your school's events"})
+				return
+			}
+		}
 
-        _, err = tx.Exec("UPDATE EventRegistrations SET status = ? WHERE event_registration_id = ?", body.Status, regID)
-        if err != nil {
-            log.Printf("Error updating status for registration %d: %v", regID, err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update status"})
-            return
-        }
+		_, err = tx.Exec("UPDATE EventRegistrations SET status = ? WHERE event_registration_id = ?", body.Status, regID)
+		if err != nil {
+			log.Printf("Error updating status for registration %d: %v", regID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update status"})
+			return
+		}
 
-        var registration models.EventRegistration
-        var regDateStr string
-        var eventEnd sql.NullString
-        var schoolName sql.NullString
-        var status sql.NullString
+		var registration models.EventRegistration
+		var regDateStr string
+		var eventEnd sql.NullString
+		var schoolName sql.NullString
+		var status sql.NullString
 
-        err = tx.QueryRow(`
+		err = tx.QueryRow(`
             SELECT r.event_registration_id, r.student_id, r.event_id, r.registration_date, r.status,
                    r.school_id,
                    s.first_name, s.last_name, s.patronymic, s.grade, s.letter,
@@ -700,47 +704,47 @@ func (ec *EventsRegistrationController) ApproveOrCancelEventRegistration(db *sql
             JOIN Schools sc ON r.school_id = sc.school_id
             JOIN Events e ON r.event_id = e.id
             WHERE r.event_registration_id = ?`, regID).Scan(
-            &registration.EventRegistrationID,
-            &registration.StudentID,
-            &registration.EventID,
-            &regDateStr,
-            &status,
-            &registration.SchoolID,
-            &registration.StudentFirstName,
-            &registration.StudentLastName,
-            &registration.StudentPatronymic,
-            &registration.StudentGrade,
-            &registration.StudentLetter,
-            &schoolName,
-            &registration.EventName,
-            &registration.EventStartDate,
-            &eventEnd,
-        )
-        if err != nil {
-            log.Printf("Error fetching updated registration %d: %v", regID, err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch updated registration"})
-            return
-        }
+			&registration.EventRegistrationID,
+			&registration.StudentID,
+			&registration.EventID,
+			&regDateStr,
+			&status,
+			&registration.SchoolID,
+			&registration.StudentFirstName,
+			&registration.StudentLastName,
+			&registration.StudentPatronymic,
+			&registration.StudentGrade,
+			&registration.StudentLetter,
+			&schoolName,
+			&registration.EventName,
+			&registration.EventStartDate,
+			&eventEnd,
+		)
+		if err != nil {
+			log.Printf("Error fetching updated registration %d: %v", regID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch updated registration"})
+			return
+		}
 
-        if err := tx.Commit(); err != nil {
-            log.Printf("Error committing transaction for registration %d: %v", regID, err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update registration"})
-            return
-        }
+		if err := tx.Commit(); err != nil {
+			log.Printf("Error committing transaction for registration %d: %v", regID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update registration"})
+			return
+		}
 
-        registration.RegistrationDate, _ = time.Parse("2006-01-02 15:04:05", regDateStr)
-        if status.Valid {
-            registration.Status = status.String
-        }
-        if schoolName.Valid {
-            registration.SchoolName = schoolName.String
-        }
-        if eventEnd.Valid {
-            registration.EventEndDate = eventEnd.String
-        }
+		registration.RegistrationDate, _ = time.Parse("2006-01-02 15:04:05", regDateStr)
+		if status.Valid {
+			registration.Status = status.String
+		}
+		if schoolName.Valid {
+			registration.SchoolName = schoolName.String
+		}
+		if eventEnd.Valid {
+			registration.EventEndDate = eventEnd.String
+		}
 
-        utils.ResponseJSON(w, registration)
-    }
+		utils.ResponseJSON(w, registration)
+	}
 }
 
 func (ec *EventsRegistrationController) GetSchoolRanking(db *sql.DB) http.HandlerFunc {

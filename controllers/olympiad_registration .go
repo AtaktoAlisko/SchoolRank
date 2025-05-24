@@ -242,23 +242,23 @@ func (c *OlympiadRegistrationController) GetOlympiadRegistrations(db *sql.DB) ht
 			return
 		}
 
-		// Фильтры
+		// Filters
 		studentID := r.URL.Query().Get("student_id")
 		subjectOlympiadID := r.URL.Query().Get("subject_olympiad_id")
 		status := r.URL.Query().Get("status")
 
 		query := `
-			SELECT r.olympiads_registrations_id, r.student_id, r.subject_olympiad_id, r.registration_date, r.status,
-				   r.school_id,
-				   s.first_name, s.last_name, s.patronymic, s.grade, s.letter,
-				   sch.school_name,
-				   o.subject_name, o.date, o.end_date, o.level,
-				   r.score, r.olympiad_place
-			FROM olympiad_registrations r
-			JOIN student s ON r.student_id = s.student_id
-			JOIN subject_olympiads o ON r.subject_olympiad_id = o.subject_olympiad_id
-			JOIN Schools sch ON r.school_id = sch.school_id
-			WHERE 1=1`
+            SELECT r.olympiads_registrations_id, r.student_id, r.subject_olympiad_id, r.registration_date, r.status,
+                   r.school_id, r.document_url,
+                   s.first_name, s.last_name, s.patronymic, s.grade, s.letter,
+                   sch.school_name,
+                   o.subject_name, o.date, o.end_date, o.level,
+                   r.score, r.olympiad_place
+            FROM olympiad_registrations r
+            JOIN student s ON r.student_id = s.student_id
+            JOIN subject_olympiads o ON r.subject_olympiad_id = o.subject_olympiad_id
+            JOIN Schools sch ON r.school_id = sch.school_id
+            WHERE 1=1`
 
 		var params []interface{}
 
@@ -314,6 +314,7 @@ func (c *OlympiadRegistrationController) GetOlympiadRegistrations(db *sql.DB) ht
 			var level sql.NullString
 			var score sql.NullInt64
 			var olympiadPlace sql.NullInt64
+			var documentURL sql.NullString
 
 			err := rows.Scan(
 				&reg.OlympiadsRegistrationsID,
@@ -322,6 +323,7 @@ func (c *OlympiadRegistrationController) GetOlympiadRegistrations(db *sql.DB) ht
 				&regDateStr,
 				&reg.Status,
 				&reg.SchoolID,
+				&documentURL,
 				&reg.StudentFirstName,
 				&reg.StudentLastName,
 				&reg.StudentPatronymic,
@@ -352,6 +354,9 @@ func (c *OlympiadRegistrationController) GetOlympiadRegistrations(db *sql.DB) ht
 			}
 			if olympiadPlace.Valid {
 				reg.OlympiadPlace = int(olympiadPlace.Int64)
+			}
+			if documentURL.Valid {
+				reg.DocumentURL = documentURL.String
 			}
 
 			registrations = append(registrations, reg)
