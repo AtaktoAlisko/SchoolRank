@@ -1187,58 +1187,58 @@ func (c *UNTScoreController) GetTop3UNTStudents(db *sql.DB) http.HandlerFunc {
 	}
 }
 func (c *UNTScoreController) GetTop3UNTStudentsBySchoolID(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // Step 1: Verify the token
-        userID, err := utils.VerifyToken(r)
-        if err != nil {
-            log.Printf("Token verification failed: %v", err)
-            utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
-            return
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify the token
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			log.Printf("Token verification failed: %v", err)
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
 
-        // Step 2: Get user role and school_id
-        var userRole string
-        var userSchoolID sql.NullInt64
-        err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
-        if err != nil {
-            log.Printf("Error fetching user details for user ID %d: %v", userID, err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
-            return
-        }
+		// Step 2: Get user role and school_id
+		var userRole string
+		var userSchoolID sql.NullInt64
+		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+		if err != nil {
+			log.Printf("Error fetching user details for user ID %d: %v", userID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
 
-        // Step 3: Check access permissions
-        if userRole != "superadmin" && userRole != "schooladmin" {
-            log.Printf("Access denied for user ID %d with role %s", userID, userRole)
-            utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view UNT statistics"})
-            return
-        }
+		// Step 3: Check access permissions
+		if userRole != "superadmin" && userRole != "schooladmin" {
+			log.Printf("Access denied for user ID %d with role %s", userID, userRole)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view UNT statistics"})
+			return
+		}
 
-        // Step 4: Extract school_id from URL
-        vars := mux.Vars(r)
-        schoolIDParam := vars["school_id"]
-        schoolID, err := strconv.Atoi(schoolIDParam)
-        if err != nil || schoolID <= 0 {
-            log.Printf("Invalid school_id format: %s, error: %v", schoolIDParam, err)
-            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school_id format"})
-            return
-        }
+		// Step 4: Extract school_id from URL
+		vars := mux.Vars(r)
+		schoolIDParam := vars["school_id"]
+		schoolID, err := strconv.Atoi(schoolIDParam)
+		if err != nil || schoolID <= 0 {
+			log.Printf("Invalid school_id format: %s, error: %v", schoolIDParam, err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school_id format"})
+			return
+		}
 
-        // Step 5: Restrict schooladmin to their school
-        if userRole == "schooladmin" {
-            if !userSchoolID.Valid {
-                log.Printf("No school_id associated with schooladmin user ID %d", userID)
-                utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "No school assigned to this admin"})
-                return
-            }
-            if int(userSchoolID.Int64) != schoolID {
-                log.Printf("Schooladmin user ID %d attempted to access school ID %d, but is assigned to school ID %d", userID, schoolID, userSchoolID.Int64)
-                utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view this school's data"})
-                return
-            }
-        }
+		// Step 5: Restrict schooladmin to their school
+		if userRole == "schooladmin" {
+			if !userSchoolID.Valid {
+				log.Printf("No school_id associated with schooladmin user ID %d", userID)
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "No school assigned to this admin"})
+				return
+			}
+			if int(userSchoolID.Int64) != schoolID {
+				log.Printf("Schooladmin user ID %d attempted to access school ID %d, but is assigned to school ID %d", userID, schoolID, userSchoolID.Int64)
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view this school's data"})
+				return
+			}
+		}
 
-        // Step 6: Query to get top 3 students by UNT score for the specified school
-        query := `
+		// Step 6: Query to get top 3 students by UNT score for the specified school
+		query := `
             SELECT 
                 CONCAT(s.first_name, ' ', s.last_name, ' ', COALESCE(s.patronymic, '')) AS full_name,
                 s.iin,
@@ -1252,55 +1252,123 @@ func (c *UNTScoreController) GetTop3UNTStudentsBySchoolID(db *sql.DB) http.Handl
             LIMIT 3
         `
 
-        rows, err := db.Query(query, schoolID)
-        if err != nil {
-            log.Printf("Error executing query for school ID %d: %v", schoolID, err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve student data"})
-            return
-        }
-        defer rows.Close()
+		rows, err := db.Query(query, schoolID)
+		if err != nil {
+			log.Printf("Error executing query for school ID %d: %v", schoolID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve student data"})
+			return
+		}
+		defer rows.Close()
 
-        // Structure to hold the response data
-        type TopStudent struct {
-            FullName string `json:"full_name"`
-            IIN      string `json:"iin"`
-            Grade    int    `json:"grade"`
-            Letter   string `json:"letter"`
-            UNTScore int    `json:"unt_score"`
-        }
+		// Structure to hold the response data
+		type TopStudent struct {
+			FullName string `json:"full_name"`
+			IIN      string `json:"iin"`
+			Grade    int    `json:"grade"`
+			Letter   string `json:"letter"`
+			UNTScore int    `json:"unt_score"`
+		}
 
-        var topStudents []TopStudent
+		var topStudents []TopStudent
 
-        // Step 7: Iterate over the query results
-        for rows.Next() {
-            var student TopStudent
-            err := rows.Scan(
-                &student.FullName,
-                &student.IIN,
-                &student.Grade,
-                &student.Letter,
-                &student.UNTScore,
-            )
-            if err != nil {
-                log.Printf("Error scanning row: %v", err)
-                utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing student data"})
-                return
-            }
-            topStudents = append(topStudents, student)
-        }
+		// Step 7: Iterate over the query results
+		for rows.Next() {
+			var student TopStudent
+			err := rows.Scan(
+				&student.FullName,
+				&student.IIN,
+				&student.Grade,
+				&student.Letter,
+				&student.UNTScore,
+			)
+			if err != nil {
+				log.Printf("Error scanning row: %v", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing student data"})
+				return
+			}
+			topStudents = append(topStudents, student)
+		}
 
-        // Step 8: Check for errors from iterating over rows
-        if err = rows.Err(); err != nil {
-            log.Printf("Error processing query results: %v", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing data"})
-            return
-        }
+		// Step 8: Check for errors from iterating over rows
+		if err = rows.Err(); err != nil {
+			log.Printf("Error processing query results: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing data"})
+			return
+		}
 
-        // Step 9: Return the response
-        log.Printf("Successfully retrieved top 3 UNT students for school ID %d, user ID %d", schoolID, userID)
-        utils.ResponseJSON(w, map[string]interface{}{
-            "message": "Top 3 UNT students for the school",
-            "data":    topStudents,
-        })
-    }
+		// Step 9: Return the response
+		log.Printf("Successfully retrieved top 3 UNT students for school ID %d, user ID %d", schoolID, userID)
+		utils.ResponseJSON(w, map[string]interface{}{
+			"message": "Top 3 UNT students for the school",
+			"data":    topStudents,
+		})
+	}
+}
+func (c *UNTScoreController) GetUNTScoreByStudentID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Проверка токена
+		_, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+			return
+		}
+
+		// Получение student_id
+		vars := mux.Vars(r)
+		studentID, err := strconv.Atoi(vars["student_id"])
+		if err != nil || studentID <= 0 {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid student_id"})
+			return
+		}
+
+		// Получение последнего экзамена
+		query := `
+			SELECT exam_type, first_subject, first_subject_score, second_subject, second_subject_score,
+			       history_of_kazakhstan, mathematical_literacy, reading_literacy, total_score
+			FROM UNT_Exams
+			WHERE student_id = ?
+			ORDER BY date DESC
+			LIMIT 1
+		`
+
+		var exam models.UNTExam
+		err = db.QueryRow(query, studentID).Scan(
+			&exam.ExamType,
+			&exam.FirstSubject,
+			&exam.FirstSubjectScore,
+			&exam.SecondSubject,
+			&exam.SecondSubjectScore,
+			&exam.HistoryOfKazakhstan,
+			&exam.MathematicalLiteracy,
+			&exam.ReadingLiteracy,
+			&exam.TotalScore,
+		)
+
+		if err != nil {
+			if err == sql.ErrNoRows {
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "UNT exam not found for this student"})
+			} else {
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+			}
+			return
+		}
+
+		// Формируем ответ по типу экзамена
+		response := map[string]interface{}{
+			"exam_type":             exam.ExamType,
+			"first_subject":         exam.FirstSubject,
+			"first_subject_score":   exam.FirstSubjectScore,
+			"second_subject":        exam.SecondSubject,
+			"second_subject_score":  exam.SecondSubjectScore,
+			"history_of_kazakhstan": exam.HistoryOfKazakhstan,
+			"reading_literacy":      exam.ReadingLiteracy,
+			"total_score":           exam.TotalScore,
+		}
+
+		if exam.ExamType == "regular" {
+			response["mathematical_literacy"] = exam.MathematicalLiteracy
+		}
+
+		utils.ResponseJSON(w, response)
+	}
 }
