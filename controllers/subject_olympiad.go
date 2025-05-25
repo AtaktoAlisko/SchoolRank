@@ -230,7 +230,6 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 		utils.ResponseJSON(w, olympiad)
 	}
 }
-
 func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Step 1: Verify token
