@@ -237,7 +237,7 @@ func main() {
 	router.HandleFunc("/api/events/school/{school_id}", eventController.GetEventsBySchoolAndType(db)).Methods("GET")
 	router.HandleFunc("/api/events/{event_id}", eventController.UpdateEvent(db)).Methods("PUT")
 	router.HandleFunc("/api/events/{event_id}", eventController.DeleteEvent(db)).Methods("DELETE")
-	router.HandleFunc("/api/events/school/{school_id}", eventController.GetEventsBySchoolID(db)).Methods("GET")
+	router.HandleFunc("/api/events/school/data/{school_id}", eventController.GetEventsBySchoolID(db)).Methods("GET")
 	router.HandleFunc("/api/events/category/{category}", eventController.GetEventsByCategory(db)).Methods("GET")
 	router.HandleFunc("/api/event/{id}", eventController.GetEventByID(db)).Methods("GET")
 

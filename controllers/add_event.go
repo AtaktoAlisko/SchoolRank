@@ -877,7 +877,7 @@ func (c *EventController) DeleteEvent(db *sql.DB) http.HandlerFunc {
 }
 func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Verify authentication
+		// Verify user authentication
 		userID, err := utils.VerifyToken(r)
 		if err != nil {
 			log.Println("Authentication error:", err)
@@ -885,7 +885,7 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Get user details to determine role
+		// Retrieve user details
 		user, err := utils.GetUserByID(db, userID)
 		if err != nil {
 			log.Println("Error retrieving user details:", err)
@@ -893,7 +893,7 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Get school_id from URL parameters
+		// Extract school_id from URL parameters
 		vars := mux.Vars(r)
 		schoolIDStr := vars["school_id"]
 		schoolID, err := strconv.Atoi(schoolIDStr)
@@ -902,7 +902,7 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Validate school exists
+		// Check if school exists
 		var schoolExists bool
 		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM Schools WHERE school_id = ?)", schoolID).Scan(&schoolExists)
 		if err != nil {
@@ -915,9 +915,8 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Check permissions based on role
+		// Authorization checks
 		if user.Role == "schooladmin" {
-			// Verify user is associated with the school
 			var isAssociated bool
 			err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ? AND school_id = ? AND role = 'schooladmin')",
 				userID, schoolID).Scan(&isAssociated)
@@ -935,7 +934,7 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Get query parameters for filtering
+		// Parse query parameters
 		query := r.URL.Query()
 		params := map[string]string{
 			"grade":     query.Get("grade"),
@@ -943,24 +942,25 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 			"date_to":   query.Get("date_to"),
 			"limit":     query.Get("limit"),
 			"offset":    query.Get("offset"),
-			"category":  query.Get("category"), // Renamed from type
+			"category":  query.Get("category"),
 		}
 
-		// Build the SQL query
+		// Build SQL query
 		queryBuilder := strings.Builder{}
 		queryBuilder.WriteString(`
-            SELECT e.id, e.school_id, e.user_id, e.event_name, e.description, 
-            e.photo, e.participants, e.limit_count as limit, e.limit_participants, e.start_date, e.end_date, 
-            e.location, e.grade, e.created_at, e.updated_at, e.created_by, e.category, s.school_name
-            FROM Events e
-            LEFT JOIN users u ON e.user_id = u.id
-            LEFT JOIN Schools s ON e.school_id = s.school_id
-            WHERE e.school_id = ?
-        `)
+			SELECT e.id, e.school_id, e.user_id, e.event_name, e.description,
+			e.photo, e.start_date, e.end_date, e.location,
+			e.grade, e.limit_count as ` + "`limit`" + `, e.participants, e.limit_participants,
+			e.created_at, e.updated_at, e.created_by, e.category, s.school_name
+			FROM Events e
+			LEFT JOIN users u ON e.user_id = u.id
+			LEFT JOIN Schools s ON e.school_id = s.school_id
+			WHERE e.school_id = ?
+		`)
 
 		args := []interface{}{schoolID}
 
-		// Add filters
+		// Handle grade filter
 		if params["grade"] != "" {
 			gradeInt, err := strconv.Atoi(params["grade"])
 			if err != nil {
@@ -971,6 +971,7 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 			args = append(args, gradeInt)
 		}
 
+		// Handle date_from filter
 		if params["date_from"] != "" {
 			_, err := time.Parse("2006-01-02", params["date_from"])
 			if err != nil {
@@ -981,6 +982,7 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 			args = append(args, params["date_from"])
 		}
 
+		// Handle date_to filter
 		if params["date_to"] != "" {
 			_, err := time.Parse("2006-01-02", params["date_to"])
 			if err != nil {
@@ -991,7 +993,7 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 			args = append(args, params["date_to"])
 		}
 
-		// Add category filter (previously type)
+		// Handle category filter
 		if params["category"] != "" {
 			allowedCategories := []string{"Science", "Humanities", "Sport", "Creative"}
 			validCategory := false
@@ -1011,10 +1013,10 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 			args = append(args, params["category"])
 		}
 
-		// Add sorting
+		// Order by start_date
 		queryBuilder.WriteString(" ORDER BY e.start_date ASC")
 
-		// Add pagination
+		// Handle limit and offset
 		if params["limit"] != "" {
 			limitInt, err := strconv.Atoi(params["limit"])
 			if err != nil || limitInt <= 0 {
@@ -1035,6 +1037,9 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 			}
 		}
 
+		// Log the query for debugging
+		log.Printf("Executing query: %s\nWith args: %v\n", queryBuilder.String(), args)
+
 		// Execute query
 		rows, err := db.Query(queryBuilder.String(), args...)
 		if err != nil {
@@ -1044,14 +1049,14 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		// Collect results
+		// Scan query results
 		var events []models.Event
 		for rows.Next() {
 			var event models.Event
 			err := rows.Scan(
 				&event.ID, &event.SchoolID, &event.UserID, &event.EventName, &event.Description,
-				&event.Photo, &event.Participants, &event.Limit, &event.LimitParticipants,
-				&event.StartDate, &event.EndDate, &event.Location, &event.Grade,
+				&event.Photo, &event.StartDate, &event.EndDate, &event.Location,
+				&event.Grade, &event.Limit, &event.Participants, &event.LimitParticipants,
 				&event.CreatedAt, &event.UpdatedAt, &event.CreatedBy, &event.Category, &event.SchoolName,
 			)
 			if err != nil {
@@ -1061,6 +1066,7 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 			events = append(events, event)
 		}
 
+		// Check for errors during row iteration
 		if err = rows.Err(); err != nil {
 			log.Println("Error iterating event rows:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing events data"})
@@ -1078,6 +1084,7 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 			response["message"] = "No events found for this school"
 		}
 
+		// Send JSON response
 		utils.ResponseJSON(w, response)
 	}
 }
@@ -1415,11 +1422,13 @@ func getEventByID(db *sql.DB, id int) (models.Event, error) {
 // GetEventsByCategory returns events filtered by category with specific fields
 func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Check that GET method is used
 		if r.Method != http.MethodGet {
 			utils.RespondWithError(w, http.StatusMethodNotAllowed, models.Error{Message: "Method not allowed"})
 			return
 		}
 
+		// Get category from URL path
 		vars := mux.Vars(r)
 		category := vars["category"]
 
@@ -1428,6 +1437,7 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Validate category
 		allowedCategories := []string{"Science", "Humanities", "Sport", "Creative"}
 		validCategory := false
 		for _, c := range allowedCategories {
@@ -1444,6 +1454,7 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Get optional query parameters for additional filtering
 		query := r.URL.Query()
 		schoolID := query.Get("school_id")
 		limit := query.Get("limit")
@@ -1451,20 +1462,22 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 
 		log.Printf("GetEventsByCategory called with category: %s, school_id: %s", category, schoolID)
 
+		// Build SQL query - selecting only the required fields
 		queryBuilder := strings.Builder{}
 		queryBuilder.WriteString(`
-			SELECT e.id, e.school_id, s.school_name, e.event_name, e.photo as photo_url, 
-				   (SELECT COUNT(*) FROM EventRegistrations r WHERE r.event_id = e.id AND r.status = 'registered') as participants,
-				   e.limit_count as ` + "`limit`" + `,
-				   e.start_date, e.end_date, e.location
-			FROM Events e
-			LEFT JOIN Schools s ON e.school_id = s.school_id
-			WHERE e.category = ?
-		`)
+            SELECT e.school_id, s.school_name, e.event_name, e.photo as photo_url, 
+                   (SELECT COUNT(*) FROM EventRegistrations r WHERE r.event_id = e.id AND r.status = 'registered') as participants,
+                   e.limit_count as ` + "`limit`" + `,
+                   e.start_date, e.end_date, e.location
+            FROM Events e
+            LEFT JOIN Schools s ON e.school_id = s.school_id
+            WHERE e.category = ?
+        `)
 
 		var args []interface{}
 		args = append(args, category)
 
+		// Add school_id filter if provided
 		if schoolID != "" {
 			schoolIDInt, err := strconv.Atoi(schoolID)
 			if err != nil {
@@ -1475,8 +1488,10 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 			args = append(args, schoolIDInt)
 		}
 
+		// Add sorting by school_id and start_date
 		queryBuilder.WriteString(" ORDER BY e.school_id, e.start_date ASC")
 
+		// Add pagination if provided
 		if limit != "" {
 			limitInt, err := strconv.Atoi(limit)
 			if err != nil || limitInt <= 0 {
@@ -1497,9 +1512,11 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 			}
 		}
 
+		// Log final SQL query
 		finalQuery := queryBuilder.String()
 		log.Printf("Executing SQL query: %s with args: %v", finalQuery, args)
 
+		// Execute query
 		rows, err := db.Query(finalQuery, args...)
 		if err != nil {
 			log.Println("Error executing events by category query:", err)
@@ -1508,8 +1525,8 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 
+		// Define structs for the response
 		type Event struct {
-			EventID      int    `json:"event_id"`
 			EventName    string `json:"event_name"`
 			PhotoURL     string `json:"photo_url"`
 			Participants int    `json:"participants"`
@@ -1525,20 +1542,23 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 			Events     []Event `json:"events"`
 		}
 
+		// Collect results, grouping by school
 		schoolMap := make(map[int]*School)
 		for rows.Next() {
 			var schoolID int
 			var schoolName string
 			var event Event
 			err := rows.Scan(
-				&event.EventID, &schoolID, &schoolName, &event.EventName, &event.PhotoURL,
-				&event.Participants, &event.Limit, &event.StartDate, &event.EndDate, &event.Location,
+				&schoolID, &schoolName, &event.EventName, &event.PhotoURL,
+				&event.Participants, &event.Limit,
+				&event.StartDate, &event.EndDate, &event.Location,
 			)
 			if err != nil {
 				log.Println("Error scanning event row:", err)
 				continue
 			}
 
+			// If school doesn't exist in map, create it
 			if _, exists := schoolMap[schoolID]; !exists {
 				schoolMap[schoolID] = &School{
 					SchoolID:   schoolID,
@@ -1547,6 +1567,7 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 				}
 			}
 
+			// Append event to school's events list
 			schoolMap[schoolID].Events = append(schoolMap[schoolID].Events, event)
 		}
 
@@ -1556,11 +1577,13 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Convert school map to slice
 		schools := make([]School, 0, len(schoolMap))
 		for _, school := range schoolMap {
 			schools = append(schools, *school)
 		}
 
+		// Prepare response
 		response := map[string]interface{}{
 			"category": category,
 			"schools":  schools,
@@ -1573,7 +1596,6 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
-
 func (ec *EventController) GetEventByID(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check that GET method is used
