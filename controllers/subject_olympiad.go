@@ -1157,3 +1157,63 @@ func (c *SubjectOlympiadController) GetRegisteredStudentsByMonth(db *sql.DB) htt
 		utils.ResponseJSON(w, registrations)
 	}
 }
+func (c *SubjectOlympiadController) GetOlympiadParticipants(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		olympiadIDStr := vars["subject_olympiad_id"]
+		olympiadID, err := strconv.Atoi(olympiadIDStr)
+		if err != nil || olympiadID <= 0 {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid subject_olympiad_id"})
+			return
+		}
+
+		query := `
+			SELECT 
+				s.school_name,
+				so.date AS start_date,
+				so.end_date,
+				so.level,
+				so.limit_participants,
+				so.subject_name,
+				(
+					SELECT COUNT(*) 
+					FROM olympiad_registrations r 
+					WHERE r.subject_olympiad_id = so.subject_olympiad_id AND r.status = 'accepted'
+				) AS participants
+			FROM subject_olympiads so
+			LEFT JOIN Schools s ON s.school_id = so.school_id
+			WHERE so.subject_olympiad_id = ?
+		`
+
+		var result struct {
+			SchoolName   string `json:"school_name"`
+			StartDate    string `json:"start_date"`
+			EndDate      string `json:"end_date"`
+			Level        string `json:"level"`
+			Limit        int    `json:"limit_participants"`
+			SubjectName  string `json:"subject_name"`
+			Participants int    `json:"participants"`
+		}
+
+		err = db.QueryRow(query, olympiadID).Scan(
+			&result.SchoolName,
+			&result.StartDate,
+			&result.EndDate,
+			&result.Level,
+			&result.Limit,
+			&result.SubjectName,
+			&result.Participants,
+		)
+
+		if err == sql.ErrNoRows {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Olympiad not found"})
+			return
+		} else if err != nil {
+			log.Println("Database error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+			return
+		}
+
+		utils.ResponseJSON(w, result)
+	}
+}
