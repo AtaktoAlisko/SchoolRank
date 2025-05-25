@@ -822,30 +822,29 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 
 		// Query to get olympiads with school information and participant count
 		query := `
-			SELECT 
-				so.subject_olympiad_id,
-				so.date as start_date,
-				so.end_date,
-				so.description as location,
-				so.limit_participants,
-				so.level,
-				s.school_id,
-				s.school_name,
-				COUNT(reg.olympiads_registrations_id) as current_participants
-			FROM 
-				subject_olympiads so
-			LEFT JOIN 
-				Schools s ON so.school_id = s.school_id
-			LEFT JOIN 
-				olympiad_registrations reg ON so.subject_olympiad_id = reg.subject_olympiad_id 
-				AND reg.status = 'accepted'
-			WHERE 
-				so.subject_name = ?
-			GROUP BY 
-				so.subject_olympiad_id, so.date, so.end_date, so.description, so.limit_participants, so.level, s.school_id, s.school_name
-			ORDER BY 
-				s.school_name, so.subject_olympiad_id
-		`
+            SELECT 
+                so.subject_olympiad_id,
+                so.date as start_date,
+                so.end_date,
+                COALESCE(so.description, '') as location,
+                so.level,
+                s.school_id,
+                COALESCE(s.school_name, '') as school_name,
+                COUNT(reg.olympiads_registrations_id) as current_participants
+            FROM 
+                subject_olympiads so
+            LEFT JOIN 
+                Schools s ON so.school_id = s.school_id
+            LEFT JOIN 
+                olympiad_registrations reg ON so.subject_olympiad_id = reg.subject_olympiad_id 
+                AND reg.status = 'accepted'
+            WHERE 
+                so.subject_name = ?
+            GROUP BY 
+                so.subject_olympiad_id, so.date, so.end_date, so.description, so.level, s.school_id, s.school_name
+            ORDER BY 
+                s.school_name, so.subject_olympiad_id
+        `
 
 		// Execute the query
 		log.Printf("Executing query: %s with subject_name: %s", query, subjectName)
@@ -857,16 +856,15 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 		}
 		defer rows.Close()
 
-		// Define olympiad structure with participant count as a simple number
+		// Define olympiad structure
 		type OlympiadData struct {
 			ID           int    `json:"subject_olympiad_id"`
 			StartDate    string `json:"start_date"`
 			EndDate      string `json:"end_date,omitempty"` // Only included if not expired
 			Location     string `json:"location"`
-			Limit        int    `json:"limit_participants"`
 			Level        string `json:"level"`
 			Expired      bool   `json:"expired"`
-			Participants int    `json:"participants"` // Changed to simple integer
+			Participants int    `json:"participants"`
 		}
 
 		// Define school with olympiads structure
@@ -883,7 +881,7 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 		for rows.Next() {
 			var olympiad OlympiadData
 			var schoolID int
-			var schoolName sql.NullString
+			var schoolName string
 			var endDateStr sql.NullString
 			var currentParticipants int
 
@@ -893,7 +891,6 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 				&olympiad.StartDate,
 				&endDateStr,
 				&olympiad.Location,
-				&olympiad.Limit,
 				&olympiad.Level,
 				&schoolID,
 				&schoolName,
@@ -924,17 +921,11 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 				olympiad.Expired = currentTime.After(endDate)
 			}
 
-			// Get the school name string value
-			schoolNameStr := "Unknown School"
-			if schoolName.Valid {
-				schoolNameStr = schoolName.String
-			}
-
 			// Add to school map
 			if _, exists := schoolMap[schoolID]; !exists {
 				schoolMap[schoolID] = &SchoolWithOlympiads{
 					SchoolID:   schoolID,
-					SchoolName: schoolNameStr,
+					SchoolName: schoolName,
 					Olympiads:  []OlympiadData{},
 				}
 			}
@@ -956,14 +947,8 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 			response = append(response, *school)
 		}
 
-		// Return appropriate response
-		if len(response) == 0 {
-			log.Printf("No olympiads found for subject_name %s", subjectName)
-			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No olympiads found for the given subject"})
-			return
-		}
-
-		log.Printf("Found olympiads from %d Schools for subject %s", len(response), subjectName)
+		// Return response with 200 OK, even if no olympiads are found
+		log.Printf("Found olympiads from %d schools for subject %s", len(response), subjectName)
 		utils.ResponseJSON(w, response)
 	}
 }

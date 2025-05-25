@@ -1412,214 +1412,267 @@ func getEventByID(db *sql.DB, id int) (models.Event, error) {
 	return event, nil
 }
 
-// func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
-// 	return func(w http.ResponseWriter, r *http.Request) {
-// 		// Verify authentication
-// 		userID, err := utils.VerifyToken(r)
-// 		if err != nil {
-// 			log.Println("Authentication error:", err)
-// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Authentication required"})
-// 			return
-// 		}
+// GetEventsByCategory returns events filtered by category with specific fields
+func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Check that GET method is used
+		if r.Method != http.MethodGet {
+			utils.RespondWithError(w, http.StatusMethodNotAllowed, models.Error{Message: "Method not allowed"})
+			return
+		}
 
-// 		// Get user details to determine role
-// 		user, err := utils.GetUserByID(db, userID)
-// 		if err != nil {
-// 			log.Println("Error retrieving user details:", err)
-// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error retrieving user information"})
-// 			return
-// 		}
+		// Get category from URL path
+		vars := mux.Vars(r)
+		category := vars["category"]
 
-// 		// Get query parameters for filtering
-// 		query := r.URL.Query()
-// 		params := map[string]string{
-// 			"school_id":  query.Get("school_id"),
-// 			"grade":      query.Get("grade"),
-// 			"date_from":  query.Get("date_from"),
-// 			"date_to":    query.Get("date_to"),
-// 			"limit":      query.Get("limit"),
-// 			"offset":     query.Get("offset"),
-// 			"subject_name": query.Get("subject_name"), // New parameter for category
-// 		}
+		if category == "" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Category parameter is required"})
+			return
+		}
 
-// 		// Build the SQL query
-// 		queryBuilder := strings.Builder{}
-// 		queryBuilder.WriteString(`
-//             SELECT e.id, e.school_id, e.user_id, e.event_name, e.description,
-//             e.photo, e.participants, e.limit_count as limit, e.limit_participants, e.start_date, e.end_date,
-//             e.location, e.grade, e.created_at, e.updated_at, u.email AS created_by, e.category, s.school_name
-//             FROM Events e
-//             LEFT JOIN users u ON e.user_id = u.id
-//             LEFT JOIN Schools s ON e.school_id = s.school_id
-//             WHERE 1=1
-//         `)
+		// Validate category
+		allowedCategories := []string{"Science", "Humanities", "Sport", "Creative"}
+		validCategory := false
+		for _, c := range allowedCategories {
+			if category == c {
+				validCategory = true
+				break
+			}
+		}
 
-// 		var args []interface{}
+		if !validCategory {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{
+				Message: "Invalid category. Allowed values are: Science, Humanities, Sport, Creative",
+			})
+			return
+		}
 
-// 		// Add school_id filter if provided
-// 		if params["school_id"] != "" {
-// 			schoolID, err := strconv.Atoi(params["school_id"])
-// 			if err != nil {
-// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID format"})
-// 				return
-// 			}
-// 			queryBuilder.WriteString(" AND e.school_id = ?")
-// 			args = append(args, schoolID)
+		// Get optional query parameters for additional filtering
+		query := r.URL.Query()
+		schoolID := query.Get("school_id")
+		limit := query.Get("limit")
+		offset := query.Get("offset")
 
-// 			// Validate school exists
-// 			var schoolExists bool
-// 			err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM Schools WHERE school_id = ?)", schoolID).Scan(&schoolExists)
-// 			if err != nil {
-// 				log.Println("Error checking if school exists:", err)
-// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking school existence"})
-// 				return
-// 			}
-// 			if !schoolExists {
-// 				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "School not found"})
-// 				return
-// 			}
+		log.Printf("GetEventsByCategory called with category: %s, school_id: %s", category, schoolID)
 
-// 			// Check permissions based on role for school-specific access
-// 			if user.Role == "schooladmin" {
-// 				var isAssociated bool
-// 				err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ? AND school_id = ? AND role = 'schooladmin')",
-// 					userID, schoolID).Scan(&isAssociated)
-// 				if err != nil {
-// 					log.Println("Error checking school association:", err)
-// 					utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error validating school association"})
-// 					return
-// 				}
-// 				if !isAssociated {
-// 					utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Not authorized to view events for this school"})
-// 					return
-// 				}
-// 			} else if user.Role != "superadmin" {
-// 				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Insufficient permissions"})
-// 				return
-// 			}
-// 		}
+		// Build SQL query - selecting only the required fields
+		queryBuilder := strings.Builder{}
+		queryBuilder.WriteString(`
+            SELECT e.school_id, s.school_name, e.event_name, e.photo as photo_url, 
+                   (SELECT COUNT(*) FROM EventRegistrations r WHERE r.event_id = e.id AND r.status = 'registered') as participants,
+                   e.limit_count as ` + "`limit`" + `,
+                   e.start_date, e.end_date, e.location
+            FROM Events e
+            LEFT JOIN Schools s ON e.school_id = s.school_id
+            WHERE e.category = ?
+        `)
 
-// 		// Add filters
-// 		if params["grade"] != "" {
-// 			gradeInt, err := strconv.Atoi(params["grade"])
-// 			if err != nil {
-// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade format"})
-// 				return
-// 			}
-// 			queryBuilder.WriteString(" AND e.grade = ?")
-// 			args = append(args, gradeInt)
-// 		}
+		var args []interface{}
+		args = append(args, category)
 
-// 		if params["date_from"] != "" {
-// 			_, err := time.Parse("2006-01-02", params["date_from"])
-// 			if err != nil {
-// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid date_from format. Use YYYY-MM-DD"})
-// 				return
-// 			}
-// 			queryBuilder.WriteString(" AND e.start_date >= ?")
-// 			args = append(args, params["date_from"])
-// 		}
+		// Add school_id filter if provided
+		if schoolID != "" {
+			schoolIDInt, err := strconv.Atoi(schoolID)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school_id format"})
+				return
+			}
+			queryBuilder.WriteString(" AND e.school_id = ?")
+			args = append(args, schoolIDInt)
+		}
 
-// 		if params["date_to"] != "" {
-// 			_, err := time.Parse("2006-01-02", params["date_to"])
-// 			if err != nil {
-// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid date_to format. Use YYYY-MM-DD"})
-// 				return
-// 			}
-// 			queryBuilder.WriteString(" AND e.end_date <= ?")
-// 			args = append(args, params["date_to"])
-// 		}
+		// Add sorting by school_id and start_date
+		queryBuilder.WriteString(" ORDER BY e.school_id, e.start_date ASC")
 
-// 		// Add subject_name (category) filter
-// 		if params["subject_name"] != "" {
-// 			allowedCategories := []string{"Science", "Humanities", "Sport", "Creative"}
-// 			validCategory := false
-// 			for _, c := range allowedCategories {
-// 				if params["subject_name"] == c {
-// 					validCategory = true
-// 					break
-// 				}
-// 			}
-// 			if !validCategory {
-// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{
-// 					Message: "Invalid subject_name. Allowed values are: Science, Humanities, Sport, Creative",
-// 				})
-// 				return
-// 			}
-// 			queryBuilder.WriteString(" AND e.category = ?")
-// 			args = append(args, params["subject_name"])
-// 		}
+		// Add pagination if provided
+		if limit != "" {
+			limitInt, err := strconv.Atoi(limit)
+			if err != nil || limitInt <= 0 {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid limit parameter"})
+				return
+			}
+			queryBuilder.WriteString(" LIMIT ?")
+			args = append(args, limitInt)
 
-// 		// Add sorting
-// 		queryBuilder.WriteString(" ORDER BY e.start_date ASC")
+			if offset != "" {
+				offsetInt, err := strconv.Atoi(offset)
+				if err != nil || offsetInt < 0 {
+					utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid offset parameter"})
+					return
+				}
+				queryBuilder.WriteString(" OFFSET ?")
+				args = append(args, offsetInt)
+			}
+		}
 
-// 		// Add pagination
-// 		if params["limit"] != "" {
-// 			limitInt, err := strconv.Atoi(params["limit"])
-// 			if err != nil || limitInt <= 0 {
-// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid limit parameter"})
-// 				return
-// 			}
-// 			queryBuilder.WriteString(" LIMIT ?")
-// 			args = append(args, limitInt)
+		// Log final SQL query
+		finalQuery := queryBuilder.String()
+		log.Printf("Executing SQL query: %s with args: %v", finalQuery, args)
 
-// 			if params["offset"] != "" {
-// 				offsetInt, err := strconv.Atoi(params["offset"])
-// 				if err != nil || offsetInt < 0 {
-// 					utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid offset parameter"})
-// 					return
-// 				}
-// 				queryBuilder.WriteString(" OFFSET ?")
-// 				args = append(args, offsetInt)
-// 			}
-// 		}
+		// Execute query
+		rows, err := db.Query(finalQuery, args...)
+		if err != nil {
+			log.Println("Error executing events by category query:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch events"})
+			return
+		}
+		defer rows.Close()
 
-// 		// Execute query
-// 		rows, err := db.Query(queryBuilder.String(), args...)
-// 		if err != nil {
-// 			log.Println("Error executing events query:", err)
-// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch events"})
-// 			return
-// 		}
-// 		defer rows.Close()
+		// Define structs for the response
+		type Event struct {
+			EventName    string `json:"event_name"`
+			PhotoURL     string `json:"photo_url"`
+			Participants int    `json:"participants"`
+			Limit        int    `json:"limit"`
+			StartDate    string `json:"start_date"`
+			EndDate      string `json:"end_date"`
+			Location     string `json:"location"`
+		}
 
-// 		// Collect results
-// 		var events []models.Event
-// 		for rows.Next() {
-// 			var event models.Event
-// 			err := rows.Scan(
-// 				&event.ID, &event.SchoolID, &event.UserID, &event.EventName, &event.Description,
-// 				&event.Photo, &event.Participants, &event.Limit, &event.LimitParticipants,
-// 				&event.StartDate, &event.EndDate, &event.Location, &event.Grade,
-// 				&event.CreatedAt, &event.UpdatedAt, &event.CreatedBy, &event.Category, &event.SchoolName,
-// 			)
-// 			if err != nil {
-// 				log.Println("Error scanning event row:", err)
-// 				continue
-// 			}
-// 			events = append(events, event)
-// 		}
+		type School struct {
+			SchoolID   int     `json:"school_id"`
+			SchoolName string  `json:"school_name"`
+			Events     []Event `json:"events"`
+		}
 
-// 		if err = rows.Err(); err != nil {
-// 			log.Println("Error iterating event rows:", err)
-// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing events data"))
-// 			return
-// 		}
+		// Collect results, grouping by school
+		schoolMap := make(map[int]*School)
+		for rows.Next() {
+			var schoolID int
+			var schoolName string
+			var event Event
+			err := rows.Scan(
+				&schoolID, &schoolName, &event.EventName, &event.PhotoURL,
+				&event.Participants, &event.Limit,
+				&event.StartDate, &event.EndDate, &event.Location,
+			)
+			if err != nil {
+				log.Println("Error scanning event row:", err)
+				continue
+			}
 
-// 		// Prepare response
-// 		response := map[string]interface{}{
-// 			"events":      events,
-// 			"total_count": len(events),
-// 		}
+			// If school doesn't exist in map, create it
+			if _, exists := schoolMap[schoolID]; !exists {
+				schoolMap[schoolID] = &School{
+					SchoolID:   schoolID,
+					SchoolName: schoolName,
+					Events:     []Event{},
+				}
+			}
 
-// 		if params["school_id"] != "" {
-// 			response["school_id"] = params["school_id"]
-// 		}
+			// Append event to school's events list
+			schoolMap[schoolID].Events = append(schoolMap[schoolID].Events, event)
+		}
 
-// 		if len(events) == 0 {
-// 			response["message"] = "No events found for the specified subject"
-// 		}
+		if err = rows.Err(); err != nil {
+			log.Println("Error iterating event rows:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing events data"})
+			return
+		}
 
-// 		utils.ResponseJSON(w, response)
-// 	}
-// }
+		// Convert school map to slice
+		schools := make([]School, 0, len(schoolMap))
+		for _, school := range schoolMap {
+			schools = append(schools, *school)
+		}
+
+		// Prepare response
+		response := map[string]interface{}{
+			"category": category,
+			"schools":  schools,
+		}
+
+		if len(schools) == 0 {
+			response["message"] = fmt.Sprintf("No events found for category '%s'", category)
+		}
+
+		utils.ResponseJSON(w, response)
+	}
+}
+func (ec *EventController) GetEventByID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Check that GET method is used
+		if r.Method != http.MethodGet {
+			utils.RespondWithError(w, http.StatusMethodNotAllowed, models.Error{Message: "Method not allowed"})
+			return
+		}
+
+		// Get event ID from URL path
+		vars := mux.Vars(r)
+		eventIDStr := vars["id"]
+		if eventIDStr == "" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Event ID is required"})
+			return
+		}
+
+		eventID, err := strconv.Atoi(eventIDStr)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid event ID format"})
+			return
+		}
+
+		log.Printf("GetEventByID called with event_id: %d", eventID)
+
+		// Build SQL query - selecting all fields from Event struct except created_by
+		query := `
+            SELECT e.id, e.school_id, COALESCE(s.school_name, '') as school_name, e.user_id, 
+                   e.event_name, COALESCE(e.description, '') as description,
+                   COALESCE(e.photo, '') as photo_url, 
+                   (SELECT COUNT(*) FROM EventRegistrations r WHERE r.event_id = e.id AND r.status = 'registered') as participants,
+                   e.limit_count as ` + "`limit`" + `,
+                   e.start_date, e.end_date, COALESCE(e.location, '') as location, 
+                   COALESCE(e.grade, 0) as grade,
+                   COALESCE(e.created_at, '') as created_at, 
+                   COALESCE(e.updated_at, '') as updated_at, 
+                   COALESCE(e.category, '') as category
+            FROM Events e
+            LEFT JOIN Schools s ON e.school_id = s.school_id
+            WHERE e.id = ?
+        `
+
+		// Execute query
+		row := db.QueryRow(query, eventID)
+
+		// Define struct for the response
+		type Event struct {
+			ID           int    `json:"event_id"`
+			SchoolID     int    `json:"school_id"`
+			SchoolName   string `json:"school_name"`
+			UserID       int    `json:"user_id"`
+			EventName    string `json:"event_name"`
+			Description  string `json:"description"`
+			PhotoURL     string `json:"photo_url"`
+			Participants int    `json:"participants"`
+			Limit        int    `json:"limit"`
+			StartDate    string `json:"start_date"`
+			EndDate      string `json:"end_date"`
+			Location     string `json:"location"`
+			Grade        int    `json:"grade"`
+			CreatedAt    string `json:"created_at"`
+			UpdatedAt    string `json:"updated_at"`
+			Category     string `json:"category"`
+		}
+
+		// Scan the result
+		var event Event
+		err = row.Scan(
+			&event.ID, &event.SchoolID, &event.SchoolName, &event.UserID, &event.EventName, &event.Description,
+			&event.PhotoURL, &event.Participants, &event.Limit,
+			&event.StartDate, &event.EndDate, &event.Location, &event.Grade,
+			&event.CreatedAt, &event.UpdatedAt, &event.Category,
+		)
+		if err == sql.ErrNoRows {
+			log.Printf("Event with ID %d not found", eventID)
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Event not found"})
+			return
+		}
+		if err != nil {
+			log.Println("Error scanning event row:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching event"})
+			return
+		}
+
+		// Prepare response
+		utils.ResponseJSON(w, event)
+	}
+}
