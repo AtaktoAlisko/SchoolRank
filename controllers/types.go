@@ -1117,8 +1117,6 @@ func (c *TypeController) GetAverageRatingSecondBySchool(db *sql.DB) http.Handler
 		})
 	}
 }
-
-// GetTop3UNTStudents returns the top 3 students by UNT score across all schools
 func (c *UNTScoreController) GetTop3UNTStudents(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Query to get top 3 students by UNT score

@@ -623,21 +623,17 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		// Step 2: Create slice to store school data
+		// Step 2: Create slice to store school data with desired fields
 		var schools []struct {
-			SchoolID         int      `json:"school_id"`
-			UserID           int      `json:"user_id"`
-			SchoolName       string   `json:"school_name"`
-			SchoolAddress    *string  `json:"school_address"`
-			City             string   `json:"city"`
-			AboutSchool      *string  `json:"about_school"`
-			PhotoURL         *string  `json:"photo_url"`
-			SchoolEmail      *string  `json:"school_email"`
-			SchoolPhone      *string  `json:"school_phone"`
-			SchoolAdminLogin *string  `json:"school_admin_login"`
-			Specializations  []string `json:"specializations"`
-			CreatedAt        *string  `json:"created_at"`
-			UpdatedAt        *string  `json:"updated_at"`
+			SchoolID      int      `json:"school_id"`
+			UserID        int      `json:"user_id"`
+			SchoolName    string   `json:"school_name"`
+			SchoolAddress *string  `json:"school_address"`
+			City          string   `json:"city"`
+			PhotoURL      *string  `json:"photo_url"`
+			CreatedAt     *string  `json:"created_at"`
+			UpdatedAt     *string  `json:"updated_at"`
+			Rating        *float64 `json:"rating"`
 		}
 
 		// Step 3: Iterate through results and populate slice
@@ -666,59 +662,31 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 				return
 			}
 
-			// Handle specializations
-			if specializationsJSON.Valid && specializationsJSON.String != "" {
-				err = json.Unmarshal([]byte(specializationsJSON.String), &school.Specializations)
-				if err != nil {
-					log.Println("Error unmarshaling specializations:", err)
-					school.Specializations = []string{specializationsJSON.String}
-				}
-			} else {
-				school.Specializations = []string{}
-			}
-
 			// Prepare response struct for JSON serialization
 			responseSchool := struct {
-				SchoolID         int      `json:"school_id"`
-				UserID           int      `json:"user_id"`
-				SchoolName       string   `json:"school_name"`
-				SchoolAddress    *string  `json:"school_address"`
-				City             string   `json:"city"`
-				AboutSchool      *string  `json:"about_school"`
-				PhotoURL         *string  `json:"photo_url"`
-				SchoolEmail      *string  `json:"school_email"`
-				SchoolPhone      *string  `json:"school_phone"`
-				SchoolAdminLogin *string  `json:"school_admin_login"`
-				Specializations  []string `json:"specializations"`
-				CreatedAt        *string  `json:"created_at"`
-				UpdatedAt        *string  `json:"updated_at"`
+				SchoolID      int      `json:"school_id"`
+				UserID        int      `json:"user_id"`
+				SchoolName    string   `json:"school_name"`
+				SchoolAddress *string  `json:"school_address"`
+				City          string   `json:"city"`
+				PhotoURL      *string  `json:"photo_url"`
+				CreatedAt     *string  `json:"created_at"`
+				UpdatedAt     *string  `json:"updated_at"`
+				Rating        *float64 `json:"rating"`
 			}{
-				SchoolID:        school.SchoolID,
-				UserID:          school.UserID,
-				SchoolName:      school.SchoolName,
-				City:            school.City,
-				Specializations: school.Specializations,
+				SchoolID:   school.SchoolID,
+				UserID:     school.UserID,
+				SchoolName: school.SchoolName,
+				City:       school.City,
 			}
 
 			// Assign nullable fields
 			if school.SchoolAddress.Valid {
 				responseSchool.SchoolAddress = &school.SchoolAddress.String
 			}
-			if school.AboutSchool.Valid {
-				responseSchool.AboutSchool = &school.AboutSchool.String
-			}
-			if school.PhotoURL.Valid {
+			if school.PhotoURL.Valid && school.PhotoURL.String != "" {
 				responseSchool.PhotoURL = &school.PhotoURL.String
-			}
-			if school.SchoolEmail.Valid {
-				responseSchool.SchoolEmail = &school.SchoolEmail.String
-			}
-			if school.SchoolPhone.Valid {
-				responseSchool.SchoolPhone = &school.SchoolPhone.String
-			}
-			if school.SchoolAdminLogin.Valid {
-				responseSchool.SchoolAdminLogin = &school.SchoolAdminLogin.String
-			}
+			} // If PhotoURL is empty string, leave it as nil (maps to null in JSON)
 			if school.CreatedAt.Valid {
 				responseSchool.CreatedAt = &school.CreatedAt.String
 			}
@@ -726,18 +694,35 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 				responseSchool.UpdatedAt = &school.UpdatedAt.String
 			}
 
+			// Step 4: Calculate average rating for the school
+			var avgRating sql.NullFloat64
+			ratingQuery := `
+                SELECT AVG(rating)
+                FROM Reviews
+                WHERE school_id = ?
+            `
+			err = db.QueryRow(ratingQuery, school.SchoolID).Scan(&avgRating)
+			if err != nil && err != sql.ErrNoRows {
+				log.Println("Error fetching average rating for school", school.SchoolID, ":", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching average rating"})
+				return
+			}
+			if avgRating.Valid {
+				responseSchool.Rating = &avgRating.Float64
+			}
+
 			// Add school to slice
 			schools = append(schools, responseSchool)
 		}
 
-		// Step 4: Check for errors after iteration
+		// Step 5: Check for errors after iteration
 		if err = rows.Err(); err != nil {
 			log.Println("Error during iteration:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error during iteration"})
 			return
 		}
 
-		// Step 5: Return list of all schools as JSON
+		// Step 6: Return list of all schools as JSON
 		utils.ResponseJSON(w, schools)
 	}
 }
@@ -842,6 +827,8 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 		// Query to fetch the school by ID
 		var school models.School
 		var specializationsJSON sql.NullString
+		var aboutSchool sql.NullString
+
 		query := `
             SELECT 
                 school_id, 
@@ -849,14 +836,12 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
                 school_name, 
                 school_address, 
                 city, 
-                about_school, 
                 photo_url, 
                 school_email, 
                 school_phone, 
                 school_admin_login, 
-                specializations, 
-                created_at, 
-                updated_at 
+                specializations,
+                about_school
             FROM Schools 
             WHERE school_id = ?`
 
@@ -866,14 +851,12 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 			&school.SchoolName,
 			&school.SchoolAddress,
 			&school.City,
-			&school.AboutSchool,
 			&school.PhotoURL,
 			&school.SchoolEmail,
 			&school.SchoolPhone,
 			&school.SchoolAdminLogin,
 			&specializationsJSON,
-			&school.CreatedAt,
-			&school.UpdatedAt,
+			&aboutSchool,
 		)
 
 		if err != nil {
@@ -897,14 +880,6 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 			school.Specializations = []string{}
 		}
 
-		// Get total number of students for this school
-		var totalStudents int
-		err = db.QueryRow("SELECT COUNT(*) FROM student WHERE school_id = ?", schoolID).Scan(&totalStudents)
-		if err != nil {
-			log.Println("Error counting students:", err)
-			totalStudents = 0
-		}
-
 		// Prepare response struct for JSON serialization
 		responseSchool := struct {
 			SchoolID         int      `json:"school_id"`
@@ -912,14 +887,12 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 			SchoolName       string   `json:"school_name"`
 			SchoolAddress    *string  `json:"school_address"`
 			City             string   `json:"city"`
-			AboutSchool      *string  `json:"about_school"`
 			PhotoURL         *string  `json:"photo_url"`
 			SchoolEmail      *string  `json:"school_email"`
 			SchoolPhone      *string  `json:"school_phone"`
 			SchoolAdminLogin *string  `json:"school_admin_login"`
 			Specializations  []string `json:"specializations"`
-			CreatedAt        *string  `json:"created_at"`
-			UpdatedAt        *string  `json:"updated_at"`
+			AboutSchool      *string  `json:"about_school"`
 		}{
 			SchoolID:        school.SchoolID,
 			UserID:          school.UserID,
@@ -932,10 +905,7 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 		if school.SchoolAddress.Valid {
 			responseSchool.SchoolAddress = &school.SchoolAddress.String
 		}
-		if school.AboutSchool.Valid {
-			responseSchool.AboutSchool = &school.AboutSchool.String
-		}
-		if school.PhotoURL.Valid {
+		if school.PhotoURL.Valid && school.PhotoURL.String != "" {
 			responseSchool.PhotoURL = &school.PhotoURL.String
 		}
 		if school.SchoolEmail.Valid {
@@ -947,22 +917,21 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 		if school.SchoolAdminLogin.Valid {
 			responseSchool.SchoolAdminLogin = &school.SchoolAdminLogin.String
 		}
-		if school.CreatedAt.Valid {
-			responseSchool.CreatedAt = &school.CreatedAt.String
-		}
-		if school.UpdatedAt.Valid {
-			responseSchool.UpdatedAt = &school.UpdatedAt.String
+		if aboutSchool.Valid {
+			responseSchool.AboutSchool = &aboutSchool.String
 		}
 
-		// Return response with school data and student count
-		response := map[string]interface{}{
-			"school":         responseSchool,
-			"total_students": totalStudents,
+		// Return response with school data
+		response := struct {
+			School interface{} `json:"school"`
+		}{
+			School: responseSchool,
 		}
 
 		utils.ResponseJSON(w, response)
 	}
 }
+
 func (sc *SchoolController) GetSchoolCount(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Println("GetSchoolCount endpoint called") // Debug log

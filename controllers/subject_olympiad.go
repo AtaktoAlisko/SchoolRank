@@ -860,7 +860,7 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 		type OlympiadData struct {
 			ID           int    `json:"subject_olympiad_id"`
 			StartDate    string `json:"start_date"`
-			EndDate      string `json:"end_date,omitempty"` // Only included if not expired
+			EndDate      string `json:"end_date,omitempty"`
 			Location     string `json:"location"`
 			Level        string `json:"level"`
 			Expired      bool   `json:"expired"`
@@ -885,7 +885,6 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 			var endDateStr sql.NullString
 			var currentParticipants int
 
-			// Scan the row
 			err := rows.Scan(
 				&olympiad.ID,
 				&olympiad.StartDate,
@@ -901,7 +900,6 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 				continue
 			}
 
-			// Set EndDate only if endDateStr is valid
 			if endDateStr.Valid {
 				olympiad.EndDate = endDateStr.String
 			} else {
@@ -909,10 +907,8 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 				olympiad.EndDate = start.AddDate(0, 0, 1).Format("2006-01-02")
 			}
 
-			// Set participants as a simple number
 			olympiad.Participants = currentParticipants
 
-			// Parse end date to check if it's expired
 			endDate, err := time.Parse("2006-01-02", olympiad.EndDate)
 			if err != nil {
 				log.Printf("Error parsing end date '%s': %v", olympiad.EndDate, err)
@@ -921,7 +917,6 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 				olympiad.Expired = currentTime.After(endDate)
 			}
 
-			// Add to school map
 			if _, exists := schoolMap[schoolID]; !exists {
 				schoolMap[schoolID] = &SchoolWithOlympiads{
 					SchoolID:   schoolID,
@@ -930,28 +925,32 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 				}
 			}
 
-			// Add olympiad to the school's list
 			schoolMap[schoolID].Olympiads = append(schoolMap[schoolID].Olympiads, olympiad)
 		}
 
-		// Check for errors from iterating over rows
 		if err := rows.Err(); err != nil {
 			log.Println("Error iterating over rows:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing olympiad data"})
 			return
 		}
 
-		// Convert map to slice for response
 		var response []SchoolWithOlympiads
 		for _, school := range schoolMap {
 			response = append(response, *school)
 		}
 
-		// Return response with 200 OK, even if no olympiads are found
+		// Return 404 if no olympiads found
+		if len(response) == 0 {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No olympiads found for the given subject"})
+			return
+		}
+
+		// Return response
 		log.Printf("Found olympiads from %d schools for subject %s", len(response), subjectName)
 		utils.ResponseJSON(w, response)
 	}
 }
+
 func (c *SubjectOlympiadController) GetAllSubjectOlympiadsSchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		_, err := utils.VerifyToken(r)
