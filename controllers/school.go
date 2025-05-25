@@ -611,7 +611,6 @@ func atoi(s string) int {
 }
 func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Step 1: Execute query to fetch all schools
 		query := `SELECT school_id, user_id, school_name, school_address, city, about_school, photo_url, 
                          school_email, school_phone, school_admin_login, specializations, 
                          created_at, updated_at FROM Schools`
@@ -623,20 +622,21 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		// Step 2: Create slice to store school data with desired fields
 		var schools []struct {
-			SchoolID      int      `json:"school_id"`
-			UserID        int      `json:"user_id"`
-			SchoolName    string   `json:"school_name"`
-			SchoolAddress *string  `json:"school_address"`
-			City          string   `json:"city"`
-			PhotoURL      *string  `json:"photo_url"`
-			CreatedAt     *string  `json:"created_at"`
-			UpdatedAt     *string  `json:"updated_at"`
-			Rating        *float64 `json:"rating"`
+			SchoolID         int      `json:"school_id"`
+			UserID           int      `json:"user_id"`
+			SchoolName       string   `json:"school_name"`
+			SchoolAddress    *string  `json:"school_address"`
+			City             string   `json:"city"`
+			PhotoURL         *string  `json:"photo_url"`
+			SchoolPhone      *string  `json:"school_phone"`
+			SchoolAdminLogin *string  `json:"school_admin_login"`
+			Specializations  []string `json:"specializations"`
+			CreatedAt        *string  `json:"created_at"`
+			UpdatedAt        *string  `json:"updated_at"`
+			Rating           *float64 `json:"rating"`
 		}
 
-		// Step 3: Iterate through results and populate slice
 		for rows.Next() {
 			var school models.School
 			var specializationsJSON sql.NullString
@@ -662,70 +662,97 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 				return
 			}
 
-			// Prepare response struct for JSON serialization
-			responseSchool := struct {
-				SchoolID      int      `json:"school_id"`
-				UserID        int      `json:"user_id"`
-				SchoolName    string   `json:"school_name"`
-				SchoolAddress *string  `json:"school_address"`
-				City          string   `json:"city"`
-				PhotoURL      *string  `json:"photo_url"`
-				CreatedAt     *string  `json:"created_at"`
-				UpdatedAt     *string  `json:"updated_at"`
-				Rating        *float64 `json:"rating"`
-			}{
-				SchoolID:   school.SchoolID,
-				UserID:     school.UserID,
-				SchoolName: school.SchoolName,
-				City:       school.City,
+			var specializations []string
+			if specializationsJSON.Valid {
+				err = json.Unmarshal([]byte(specializationsJSON.String), &specializations)
+				if err != nil {
+					specializations = []string{}
+				}
 			}
 
-			// Assign nullable fields
+			var schoolPhone *string
+			if school.SchoolPhone.Valid {
+				schoolPhone = &school.SchoolPhone.String
+			}
+
+			var adminLogin *string
+			if school.SchoolAdminLogin.Valid {
+				adminLogin = &school.SchoolAdminLogin.String
+			}
+
+			var schoolAddress *string
 			if school.SchoolAddress.Valid {
-				responseSchool.SchoolAddress = &school.SchoolAddress.String
-			}
-			if school.PhotoURL.Valid && school.PhotoURL.String != "" {
-				responseSchool.PhotoURL = &school.PhotoURL.String
-			} // If PhotoURL is empty string, leave it as nil (maps to null in JSON)
-			if school.CreatedAt.Valid {
-				responseSchool.CreatedAt = &school.CreatedAt.String
-			}
-			if school.UpdatedAt.Valid {
-				responseSchool.UpdatedAt = &school.UpdatedAt.String
+				schoolAddress = &school.SchoolAddress.String
 			}
 
-			// Step 4: Calculate average rating for the school
+			var photoURL *string
+			if school.PhotoURL.Valid && school.PhotoURL.String != "" {
+				photoURL = &school.PhotoURL.String
+			}
+
+			var createdAt *string
+			if school.CreatedAt.Valid {
+				createdAt = &school.CreatedAt.String
+			}
+			var updatedAt *string
+			if school.UpdatedAt.Valid {
+				updatedAt = &school.UpdatedAt.String
+			}
+
+			// Rating
 			var avgRating sql.NullFloat64
-			ratingQuery := `
-                SELECT AVG(rating)
-                FROM Reviews
-                WHERE school_id = ?
-            `
+			ratingQuery := `SELECT AVG(rating) FROM Reviews WHERE school_id = ?`
 			err = db.QueryRow(ratingQuery, school.SchoolID).Scan(&avgRating)
 			if err != nil && err != sql.ErrNoRows {
 				log.Println("Error fetching average rating for school", school.SchoolID, ":", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching average rating"})
 				return
 			}
+
+			var rating *float64
 			if avgRating.Valid {
-				responseSchool.Rating = &avgRating.Float64
+				rating = &avgRating.Float64
 			}
 
-			// Add school to slice
-			schools = append(schools, responseSchool)
+			schools = append(schools, struct {
+				SchoolID         int      `json:"school_id"`
+				UserID           int      `json:"user_id"`
+				SchoolName       string   `json:"school_name"`
+				SchoolAddress    *string  `json:"school_address"`
+				City             string   `json:"city"`
+				PhotoURL         *string  `json:"photo_url"`
+				SchoolPhone      *string  `json:"school_phone"`
+				SchoolAdminLogin *string  `json:"school_admin_login"`
+				Specializations  []string `json:"specializations"`
+				CreatedAt        *string  `json:"created_at"`
+				UpdatedAt        *string  `json:"updated_at"`
+				Rating           *float64 `json:"rating"`
+			}{
+				SchoolID:         school.SchoolID,
+				UserID:           school.UserID,
+				SchoolName:       school.SchoolName,
+				SchoolAddress:    schoolAddress,
+				City:             school.City,
+				PhotoURL:         photoURL,
+				SchoolPhone:      schoolPhone,
+				SchoolAdminLogin: adminLogin,
+				Specializations:  specializations,
+				CreatedAt:        createdAt,
+				UpdatedAt:        updatedAt,
+				Rating:           rating,
+			})
 		}
 
-		// Step 5: Check for errors after iteration
 		if err = rows.Err(); err != nil {
 			log.Println("Error during iteration:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error during iteration"})
 			return
 		}
 
-		// Step 6: Return list of all schools as JSON
 		utils.ResponseJSON(w, schools)
 	}
 }
+
 func (sc *SchoolController) GetTotalSchools(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Шаг 1: Выполняем запрос для получения общего количества школ
