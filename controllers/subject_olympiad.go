@@ -152,7 +152,6 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 }
 func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Проверка токена
 		userID, err := utils.VerifyToken(r)
 		if err != nil {
 			log.Println("Ошибка проверки токена:", err)
@@ -161,7 +160,6 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 		}
 		log.Printf("Проверенный userID: %d", userID)
 
-		// Получение ID из URL
 		vars := mux.Vars(r)
 		olympiadIDStr := vars["olympiad_id"]
 		olympiadID, err := strconv.Atoi(olympiadIDStr)
@@ -170,7 +168,6 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 			return
 		}
 
-		// Подготовка переменных
 		var olympiad models.SubjectOlympiad
 		var firstName, lastName, schoolName sql.NullString
 
@@ -180,7 +177,7 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 				so.subject_name,
 				so.date,
 				so.end_date,
-				so.description,
+				COALESCE(so.description, '') as location,
 				so.school_id,
 				so.level,
 				so.limit_participants,
@@ -188,7 +185,11 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 				u.first_name,
 				u.last_name,
 				s.school_name,
-				CASE WHEN so.end_date < CURRENT_DATE THEN true ELSE false END AS expired
+				CASE WHEN so.end_date < CURRENT_DATE THEN true ELSE false END AS expired,
+				(
+					SELECT COUNT(*) FROM olympiad_registrations reg
+					WHERE reg.subject_olympiad_id = so.subject_olympiad_id AND reg.status = 'accepted'
+				) AS participants
 			FROM subject_olympiads so
 			LEFT JOIN users u ON so.creator_id = u.id
 			LEFT JOIN Schools s ON so.school_id = s.school_id
@@ -200,7 +201,7 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 			&olympiad.SubjectName,
 			&olympiad.StartDate,
 			&olympiad.EndDate,
-			&olympiad.Description,
+			&olympiad.Location,
 			&olympiad.SchoolID,
 			&olympiad.Level,
 			&olympiad.Limit,
@@ -209,6 +210,7 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 			&lastName,
 			&schoolName,
 			&olympiad.Expired,
+			&olympiad.Participants,
 		)
 
 		if err == sql.ErrNoRows {
@@ -220,7 +222,6 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 			return
 		}
 
-		// Обработка null-значений
 		olympiad.CreatorFirstName = utils.NullStringToString(firstName)
 		olympiad.CreatorLastName = utils.NullStringToString(lastName)
 		olympiad.SchoolName = utils.NullStringToString(schoolName)
@@ -229,6 +230,7 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 		utils.ResponseJSON(w, olympiad)
 	}
 }
+
 func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Step 1: Verify token
@@ -813,14 +815,12 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 			return
 		}
 
-		// Get subject name from query parameter
 		subjectName := r.URL.Query().Get("subject_name")
 		if subjectName == "" {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "subject_name parameter is required"})
 			return
 		}
 
-		// Query to get olympiads with school information and participant count
 		query := `
             SELECT 
                 so.subject_olympiad_id,
@@ -828,6 +828,7 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
                 so.end_date,
                 COALESCE(so.description, '') as location,
                 so.level,
+                so.limit_participants,
                 s.school_id,
                 COALESCE(s.school_name, '') as school_name,
                 COUNT(reg.olympiads_registrations_id) as current_participants
@@ -841,12 +842,11 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
             WHERE 
                 so.subject_name = ?
             GROUP BY 
-                so.subject_olympiad_id, so.date, so.end_date, so.description, so.level, s.school_id, s.school_name
+                so.subject_olympiad_id, so.date, so.end_date, so.description, so.level, so.limit_participants, s.school_id, s.school_name
             ORDER BY 
                 s.school_name, so.subject_olympiad_id
         `
 
-		// Execute the query
 		log.Printf("Executing query: %s with subject_name: %s", query, subjectName)
 		rows, err := db.Query(query, subjectName)
 		if err != nil {
@@ -856,25 +856,23 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 		}
 		defer rows.Close()
 
-		// Define olympiad structure
 		type OlympiadData struct {
-			ID           int    `json:"subject_olympiad_id"`
-			StartDate    string `json:"start_date"`
-			EndDate      string `json:"end_date,omitempty"`
-			Location     string `json:"location"`
-			Level        string `json:"level"`
-			Expired      bool   `json:"expired"`
-			Participants int    `json:"participants"`
+			ID                int    `json:"subject_olympiad_id"`
+			StartDate         string `json:"start_date"`
+			EndDate           string `json:"end_date,omitempty"`
+			Location          string `json:"location"`
+			Level             string `json:"level"`
+			LimitParticipants int    `json:"limit_participants"`
+			Expired           bool   `json:"expired"`
+			Participants      int    `json:"participants"`
 		}
 
-		// Define school with olympiads structure
 		type SchoolWithOlympiads struct {
 			SchoolID   int            `json:"school_id"`
 			SchoolName string         `json:"school_name"`
 			Olympiads  []OlympiadData `json:"olympiads"`
 		}
 
-		// Read results and group by school
 		schoolMap := make(map[int]*SchoolWithOlympiads)
 		currentTime := time.Now()
 
@@ -891,6 +889,7 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 				&endDateStr,
 				&olympiad.Location,
 				&olympiad.Level,
+				&olympiad.LimitParticipants,
 				&schoolID,
 				&schoolName,
 				&currentParticipants,
@@ -908,10 +907,8 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 			}
 
 			olympiad.Participants = currentParticipants
-
 			endDate, err := time.Parse("2006-01-02", olympiad.EndDate)
 			if err != nil {
-				log.Printf("Error parsing end date '%s': %v", olympiad.EndDate, err)
 				olympiad.Expired = false
 			} else {
 				olympiad.Expired = currentTime.After(endDate)
@@ -929,7 +926,6 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 		}
 
 		if err := rows.Err(); err != nil {
-			log.Println("Error iterating over rows:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing olympiad data"})
 			return
 		}
@@ -939,13 +935,11 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 			response = append(response, *school)
 		}
 
-		// Return 404 if no olympiads found
 		if len(response) == 0 {
 			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No olympiads found for the given subject"})
 			return
 		}
 
-		// Return response
 		log.Printf("Found olympiads from %d schools for subject %s", len(response), subjectName)
 		utils.ResponseJSON(w, response)
 	}
