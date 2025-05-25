@@ -19,4 +19,5 @@ type Student struct {
 	Role          string `json:"role"`
 	AvatarURL     string `json:"avatar_url,omitempty"`
 	StudentTypeID int    `json:"student_type_id"`
+	Age           int    `json:"age"`
 }

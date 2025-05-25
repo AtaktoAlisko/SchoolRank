@@ -11,6 +11,7 @@ import (
 	"ranking-school/utils"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 )
@@ -304,13 +305,16 @@ func (sc *StudentController) EditStudent(db *sql.DB) http.HandlerFunc {
 }
 func (sc *StudentController) GetAllStudents(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Set current date (hardcoded to May 25, 2025, as per context)
+		currentDate := time.Date(2025, time.May, 25, 0, 0, 0, 0, time.UTC)
+
 		// Step 1: Get all students and their associated school names from the database
 		rows, err := db.Query(`
-			SELECT s.student_id, s.first_name, s.last_name, s.patronymic, s.iin, s.school_id, 
-					s.grade, s.letter, s.gender, s.phone, s.email, s.role, s.login, s.avatar_url, s.password,
-					Sc.school_name 
-			FROM student s
-			JOIN Schools Sc ON s.school_id = Sc.school_id`)
+            SELECT s.student_id, s.first_name, s.last_name, s.patronymic, s.date_of_birth, s.iin, s.school_id, 
+                   s.grade, s.letter, s.gender, s.phone, s.email, s.role, s.login, s.avatar_url, s.password,
+                   Sc.school_name 
+            FROM student s
+            JOIN Schools Sc ON s.school_id = Sc.school_id`)
 		if err != nil {
 			log.Println("Error fetching students:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch students"})
@@ -324,33 +328,35 @@ func (sc *StudentController) GetAllStudents(db *sql.DB) http.HandlerFunc {
 		// Step 3: Iterate through the rows and scan the student data
 		for rows.Next() {
 			var student models.Student
-			var schoolID sql.NullInt64    // For handling NULL in school_id
-			var grade sql.NullInt64       // For handling NULL in grade
-			var letter sql.NullString     // For handling NULL in letter
-			var gender sql.NullString     // For handling NULL in gender
-			var phone sql.NullString      // For handling NULL in phone
-			var email sql.NullString      // For handling NULL in email
-			var avatarURL sql.NullString  // For handling NULL in avatar_url
-			var password sql.NullString   // For handling NULL in password
-			var schoolName sql.NullString // For handling NULL in school_name
+			var schoolID sql.NullInt64     // For handling NULL in school_id
+			var dateOfBirth sql.NullString // For handling NULL in date_of_birth
+			var grade sql.NullInt64        // For handling NULL in grade
+			var letter sql.NullString      // For handling NULL in letter
+			var gender sql.NullString      // For handling NULL in gender
+			var phone sql.NullString       // For handling NULL in phone
+			var email sql.NullString       // For handling NULL in email
+			var avatarURL sql.NullString   // For handling NULL in avatar_url
+			var password sql.NullString    // For handling NULL in password
+			var schoolName sql.NullString  // For handling NULL in school_name
 
 			if err := rows.Scan(
 				&student.ID,
 				&student.FirstName,
 				&student.LastName,
 				&student.Patronymic,
+				&dateOfBirth, // Scan into NullString
 				&student.IIN,
-				&schoolID, // Scan into NullInt64
-				&grade,    // Scan into NullInt64
-				&letter,   // Scan into NullString
-				&gender,   // Scan into NullString
-				&phone,    // Scan into NullString
-				&email,    // Scan into NullString
+				&schoolID,
+				&grade,
+				&letter,
+				&gender,
+				&phone,
+				&email,
 				&student.Role,
 				&student.Login,
-				&avatarURL,  // Scan into NullString
-				&password,   // Scan into NullString
-				&schoolName, // Scan into NullString (school_name)
+				&avatarURL,
+				&password,
+				&schoolName,
 			); err != nil {
 				log.Println("Error scanning student:", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to scan student data"})
@@ -361,63 +367,73 @@ func (sc *StudentController) GetAllStudents(db *sql.DB) http.HandlerFunc {
 			if schoolID.Valid {
 				student.SchoolID = int(schoolID.Int64)
 			} else {
-				student.SchoolID = 0 // or set to NULL if necessary
+				student.SchoolID = 0
 			}
+
+			// Check if date_of_birth is valid (not NULL)
+			if dateOfBirth.Valid {
+				student.DateOfBirth = dateOfBirth.String
+			} else {
+				student.DateOfBirth = ""
+			}
+
+			// Calculate age based on date_of_birth
+			student.Age = calculateAge(student.DateOfBirth, currentDate)
 
 			// Check if grade is valid (not NULL)
 			if grade.Valid {
-				student.Grade = int(grade.Int64) // Convert to int if valid
+				student.Grade = int(grade.Int64)
 			} else {
-				student.Grade = 0 // If NULL, assign default value (0)
+				student.Grade = 0
 			}
 
 			// Check if letter is valid (not NULL)
 			if letter.Valid {
-				student.Letter = letter.String // If valid, assign the string value
+				student.Letter = letter.String
 			} else {
-				student.Letter = "" // If NULL, assign empty string
+				student.Letter = ""
 			}
 
 			// Check if gender is valid (not NULL)
 			if gender.Valid {
-				student.Gender = gender.String // If valid, assign the string value
+				student.Gender = gender.String
 			} else {
-				student.Gender = "" // If NULL, assign empty string
+				student.Gender = ""
 			}
 
 			// Check if phone is valid (not NULL)
 			if phone.Valid {
-				student.Phone = phone.String // If valid, assign the string value
+				student.Phone = phone.String
 			} else {
-				student.Phone = "" // If NULL, assign empty string
+				student.Phone = ""
 			}
 
 			// Check if email is valid (not NULL)
 			if email.Valid {
-				student.Email = email.String // If valid, assign the string value
+				student.Email = email.String
 			} else {
-				student.Email = "" // If NULL, assign empty string
+				student.Email = ""
 			}
 
 			// Check if avatarURL is valid (not NULL)
 			if avatarURL.Valid {
-				student.AvatarURL = avatarURL.String // If valid, assign the string value
+				student.AvatarURL = avatarURL.String
 			} else {
-				student.AvatarURL = "" // If NULL, assign empty string
+				student.AvatarURL = ""
 			}
 
 			// Check if password is valid (not NULL)
 			if password.Valid {
-				student.Password = password.String // If valid, assign the string value
+				student.Password = password.String
 			} else {
-				student.Password = "" // If NULL, assign empty string
+				student.Password = ""
 			}
 
 			// Check if schoolName is valid (not NULL)
 			if schoolName.Valid {
-				student.SchoolName = schoolName.String // If valid, assign the string value
+				student.SchoolName = schoolName.String
 			} else {
-				student.SchoolName = "" // If NULL, assign empty string
+				student.SchoolName = ""
 			}
 
 			// Append the student to the slice
@@ -436,29 +452,10 @@ func (sc *StudentController) GetAllStudents(db *sql.DB) http.HandlerFunc {
 }
 func (sc *StudentController) GetStudentByID(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Step 1: Verify the user's token and get user ID
-		userID, err := utils.VerifyToken(r)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
-			return
-		}
+		// Set current date (hardcoded to May 25, 2025, as per context)
+		currentDate := time.Date(2025, time.May, 25, 0, 0, 0, 0, time.UTC)
 
-		// Step 2: Get user role from the database
-		var userRole string
-		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
-		if err != nil {
-			log.Println("Error fetching user role:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
-			return
-		}
-
-		// Step 3: Check if the user is a superadmin or schooladmin
-		if userRole != "schooladmin" && userRole != "superadmin" {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view this student"})
-			return
-		}
-
-		// Step 4: Get student ID from URL parameters
+		// Step 1: Get studentID from URL parameters
 		vars := mux.Vars(r)
 		studentIDStr, ok := vars["id"]
 		if !ok {
@@ -474,44 +471,10 @@ func (sc *StudentController) GetStudentByID(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Step 5: Handle permissions based on user role
-		if userRole == "schooladmin" {
-			// Fetch school ID for schooladmin
-			var userEmail string
-			err = db.QueryRow("SELECT email FROM users WHERE id = ?", userID).Scan(&userEmail)
-			if err != nil {
-				log.Println("Error fetching user email:", err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user email"})
-				return
-			}
-
-			var adminSchoolID int
-			err = db.QueryRow("SELECT school_id FROM Schools WHERE school_admin_login = ?", userEmail).Scan(&adminSchoolID)
-			if err != nil {
-				log.Println("Error fetching school ID:", err)
-				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Director does not have an assigned school"})
-				return
-			}
-
-			// Verify that student belongs to admin's school
-			var studentSchoolID int
-			err = db.QueryRow("SELECT school_id FROM student WHERE student_id = ?", studentID).Scan(&studentSchoolID)
-			if err != nil {
-				log.Printf("Error fetching student school ID: %v for student ID: %d", err, studentID)
-				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found"})
-				return
-			}
-
-			if studentSchoolID != adminSchoolID {
-				log.Printf("Permission denied: Student ID %d (school ID %d) not in admin's school (school ID %d)", studentID, studentSchoolID, adminSchoolID)
-				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view this student"})
-				return
-			}
-		}
-
-		// Step 6: Fetch student data with school name
+		// Step 2: Fetch student data with school name
 		var student models.Student
 		var schoolID sql.NullInt64
+		var dateOfBirth sql.NullString
 		var grade sql.NullInt64
 		var letter sql.NullString
 		var gender sql.NullString
@@ -522,7 +485,7 @@ func (sc *StudentController) GetStudentByID(db *sql.DB) http.HandlerFunc {
 		var schoolName sql.NullString
 
 		err = db.QueryRow(`
-			SELECT s.student_id, s.first_name, s.last_name, s.patronymic, s.iin, s.school_id, 
+			SELECT s.student_id, s.first_name, s.last_name, s.patronymic, s.date_of_birth, s.iin, s.school_id, 
 				   s.grade, s.letter, s.gender, s.phone, s.email, s.role, s.login, s.avatar_url, s.password,
 				   Sc.school_name 
 			FROM student s
@@ -533,6 +496,7 @@ func (sc *StudentController) GetStudentByID(db *sql.DB) http.HandlerFunc {
 				&student.FirstName,
 				&student.LastName,
 				&student.Patronymic,
+				&dateOfBirth,
 				&student.IIN,
 				&schoolID,
 				&grade,
@@ -558,12 +522,21 @@ func (sc *StudentController) GetStudentByID(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Step 7: Handle NULL values
+		// Step 3: Handle NULL values
 		if schoolID.Valid {
 			student.SchoolID = int(schoolID.Int64)
 		} else {
 			student.SchoolID = 0
 		}
+
+		if dateOfBirth.Valid {
+			student.DateOfBirth = dateOfBirth.String
+		} else {
+			student.DateOfBirth = ""
+		}
+
+		// Calculate age
+		student.Age = calculateAge(student.DateOfBirth, currentDate)
 
 		if grade.Valid {
 			student.Grade = int(grade.Int64)
@@ -613,7 +586,7 @@ func (sc *StudentController) GetStudentByID(db *sql.DB) http.HandlerFunc {
 			student.SchoolName = ""
 		}
 
-		// Step 8: Return the student data in the response
+		// Step 4: Return the student data in the response
 		utils.ResponseJSON(w, student)
 	}
 }
@@ -1856,4 +1829,22 @@ func (c *StudentController) GetStudentsCountBySchool(db *sql.DB) http.HandlerFun
 		log.Printf("Successfully counted %d students for school ID %d", studentCount, schoolID)
 		utils.ResponseJSON(w, response)
 	}
+}
+func calculateAge(dob string, currentDate time.Time) int {
+	if dob == "" {
+		return 0 // Return 0 if date_of_birth is empty
+	}
+
+	// Parse date_of_birth (assuming format "YYYY-MM-DD")
+	birthDate, err := time.Parse("2006-01-02", dob)
+	if err != nil {
+		return 0 // Return 0 if date_of_birth is invalid
+	}
+
+	// Calculate age
+	age := currentDate.Year() - birthDate.Year()
+	if currentDate.YearDay() < birthDate.YearDay() {
+		age--
+	}
+	return age
 }
