@@ -933,3 +933,191 @@ func (c *OlympiadRegistrationController) GetRegistrationsByMonth(db *sql.DB) htt
 		utils.ResponseJSON(w, registrationsByMonth)
 	}
 }
+func (c *OlympiadRegistrationController) GetOlympiadRegistrationByID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
+
+		vars := mux.Vars(r)
+		idStr := vars["id"]
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid registration ID"})
+			return
+		}
+
+		var reg models.OlympiadRegistration
+		var regDateStr string
+		var olympiadEnd sql.NullString
+		var level sql.NullString
+		var score sql.NullInt64
+		var olympiadPlace sql.NullInt64
+		var documentURL sql.NullString
+
+		err = db.QueryRow(`
+			SELECT r.olympiads_registrations_id, r.student_id, r.subject_olympiad_id, r.registration_date, r.status,
+				   r.school_id, r.document_url,
+				   s.first_name, s.last_name, s.patronymic, s.grade, s.letter,
+				   sch.school_name,
+				   o.subject_name, o.date, o.end_date, o.level,
+				   r.score, r.olympiad_place
+			FROM olympiad_registrations r
+			JOIN student s ON r.student_id = s.student_id
+			JOIN subject_olympiads o ON r.subject_olympiad_id = o.subject_olympiad_id
+			JOIN Schools sch ON r.school_id = sch.school_id
+			WHERE r.olympiads_registrations_id = ?`, id).Scan(
+			&reg.OlympiadsRegistrationsID,
+			&reg.StudentID,
+			&reg.SubjectOlympiadID,
+			&regDateStr,
+			&reg.Status,
+			&reg.SchoolID,
+			&documentURL,
+			&reg.StudentFirstName,
+			&reg.StudentLastName,
+			&reg.StudentPatronymic,
+			&reg.StudentGrade,
+			&reg.StudentLetter,
+			&reg.SchoolName,
+			&reg.OlympiadName,
+			&reg.OlympiadStartDate,
+			&olympiadEnd,
+			&level,
+			&score,
+			&olympiadPlace,
+		)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Registration not found"})
+			return
+		}
+
+		reg.RegistrationDate, _ = time.Parse("2006-01-02 15:04:05", regDateStr)
+		if olympiadEnd.Valid {
+			reg.OlympiadEndDate = olympiadEnd.String
+		}
+		if level.Valid {
+			reg.Level = level.String
+		}
+		if score.Valid {
+			reg.Score = int(score.Int64)
+		}
+		if olympiadPlace.Valid {
+			reg.OlympiadPlace = int(olympiadPlace.Int64)
+		}
+		if documentURL.Valid {
+			reg.DocumentURL = documentURL.String
+		}
+
+		utils.ResponseJSON(w, reg)
+	}
+}
+func (c *OlympiadRegistrationController) GetOlympiadRegistrationsBySchoolID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Verify JWT token
+		_, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
+
+		// Extract school_id from URL parameters
+		vars := mux.Vars(r)
+		schoolIDStr := vars["school_id"]
+		schoolID, err := strconv.Atoi(schoolIDStr)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+			return
+		}
+
+		// Query registrations for the given school_id
+		rows, err := db.Query(`
+			SELECT r.olympiads_registrations_id, r.student_id, r.subject_olympiad_id, r.registration_date, r.status,
+				   r.school_id, r.document_url,
+				   s.first_name, s.last_name, s.patronymic, s.grade, s.letter,
+				   sch.school_name,
+				   o.subject_name, o.date, o.end_date, o.level,
+				   r.score, r.olympiad_place
+			FROM olympiad_registrations r
+			JOIN student s ON r.student_id = s.student_id
+			JOIN subject_olympiads o ON r.subject_olympiad_id = o.subject_olympiad_id
+			JOIN Schools sch ON r.school_id = sch.school_id
+			WHERE r.school_id = ?`, schoolID)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error querying registrations"})
+			return
+		}
+		defer rows.Close()
+
+		// Collect all registrations
+		var registrations []models.OlympiadRegistration
+		for rows.Next() {
+			var reg models.OlympiadRegistration
+			var regDateStr string
+			var olympiadEnd sql.NullString
+			var level sql.NullString
+			var score sql.NullInt64
+			var olympiadPlace sql.NullInt64
+			var documentURL sql.NullString
+
+			err := rows.Scan(
+				&reg.OlympiadsRegistrationsID,
+				&reg.StudentID,
+				&reg.SubjectOlympiadID,
+				&regDateStr,
+				&reg.Status,
+				&reg.SchoolID,
+				&documentURL,
+				&reg.StudentFirstName,
+				&reg.StudentLastName,
+				&reg.StudentPatronymic,
+				&reg.StudentGrade,
+				&reg.StudentLetter,
+				&reg.SchoolName,
+				&reg.OlympiadName,
+				&reg.OlympiadStartDate,
+				&olympiadEnd,
+				&level,
+				&score,
+				&olympiadPlace,
+			)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error scanning registration"})
+				return
+			}
+
+			// Parse registration date
+			reg.RegistrationDate, _ = time.Parse("2006-01-02 15:04:05", regDateStr)
+
+			// Handle nullable fields
+			if olympiadEnd.Valid {
+				reg.OlympiadEndDate = olympiadEnd.String
+			}
+			if level.Valid {
+				reg.Level = level.String
+			}
+			if score.Valid {
+				reg.Score = int(score.Int64)
+			}
+			if olympiadPlace.Valid {
+				reg.OlympiadPlace = int(olympiadPlace.Int64)
+			}
+			if documentURL.Valid {
+				reg.DocumentURL = documentURL.String
+			}
+
+			registrations = append(registrations, reg)
+		}
+
+		// Check if any registrations were found
+		if len(registrations) == 0 {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No registrations found for this school"})
+			return
+		}
+
+		// Return the list of registrations
+		utils.ResponseJSON(w, registrations)
+	}
+}
