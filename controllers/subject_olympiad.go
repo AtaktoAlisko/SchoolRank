@@ -229,7 +229,6 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 		utils.ResponseJSON(w, olympiad)
 	}
 }
-
 func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Step 1: Verify token
@@ -556,7 +555,7 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 			return
 		}
 
-		// Step 4: Build base query (removed photo_url, fixed school name column)
+		// Step 4: Build base query with photo_url
 		query := `
 			SELECT 
 				so.subject_olympiad_id,
@@ -570,7 +569,8 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 				COALESCE(u.id, 0) AS creator_id,
 				COALESCE(u.first_name, '') AS creator_first_name,
 				COALESCE(u.last_name, '') AS creator_last_name,
-				COALESCE(s.school_name, '') AS school_name
+				COALESCE(s.school_name, '') AS school_name,
+				so.photo_url
 			FROM subject_olympiads so
 			LEFT JOIN users u ON so.creator_id = u.id
 			LEFT JOIN Schools s ON so.school_id = s.school_id
@@ -600,7 +600,7 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 		}
 		defer rows.Close()
 
-		// Step 6: Read and map rows (removed photoURL variable)
+		// Step 6: Read and map rows
 		var olympiads []map[string]interface{}
 		for rows.Next() {
 			var (
@@ -616,6 +616,7 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 				creatorFirstName  string
 				creatorLastName   string
 				schoolName        string
+				photo             sql.NullString
 			)
 
 			err := rows.Scan(
@@ -631,6 +632,7 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 				&creatorFirstName,
 				&creatorLastName,
 				&schoolName,
+				&photo,
 			)
 			if err != nil {
 				log.Println("Error scanning olympiad row:", err)
@@ -638,14 +640,22 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 				return
 			}
 
-			// Check expired
+			// Check if olympiad expired
 			isExpired := false
 			endDateParsed, err := time.Parse("2006-01-02", endDate)
 			if err == nil && time.Now().After(endDateParsed) {
 				isExpired = true
 			}
 
-			// Compose response object (removed photo_url or set it to empty string)
+			// Convert photo_url
+			var photoURL interface{}
+			if photo.Valid && photo.String != "" {
+				photoURL = photo.String
+			} else {
+				photoURL = nil
+			}
+
+			// Build result object
 			olympiad := map[string]interface{}{
 				"subject_olympiad_id": id,
 				"id":                  id,
@@ -656,7 +666,7 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 				"school_id":           schoolID,
 				"level":               level,
 				"limit_participants":  limitParticipants,
-				"photo_url":           "", // Empty string since column doesn't exist
+				"photo_url":           photoURL,
 				"creator_id":          creatorID,
 				"creator_first_name":  creatorFirstName,
 				"creator_last_name":   creatorLastName,

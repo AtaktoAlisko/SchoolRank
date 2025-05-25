@@ -153,7 +153,6 @@ func main() {
 	router.HandleFunc("/api/school/combined-average-rating", untScoreController.GetCombinedAverageRating(db)).Methods("GET")
 	router.HandleFunc("/api/untscore/{student_id}", untScoreController.GetUNTScoreByStudentID(db)).Methods("GET")
 
-
 	// =======================
 	// Работа с типами UNT (например, для классификации)
 	// =======================
