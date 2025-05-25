@@ -609,11 +609,11 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 				id                int
 				subjectName       string
 				startDate         string
-				endDate           string
+				endDate           sql.NullString
 				description       sql.NullString
-				schoolID          int
-				level             string
-				limitParticipants int
+				schoolID          sql.NullInt64
+				level             sql.NullString
+				limitParticipants sql.NullInt64
 				creatorID         int
 				creatorFirstName  string
 				creatorLastName   string
@@ -644,9 +644,11 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 
 			// Check if olympiad expired
 			isExpired := false
-			endDateParsed, err := time.Parse("2006-01-02", endDate)
-			if err == nil && time.Now().After(endDateParsed) {
-				isExpired = true
+			if endDate.Valid && endDate.String != "" {
+				endDateParsed, err := time.Parse("2006-01-02", endDate.String)
+				if err == nil && time.Now().After(endDateParsed) {
+					isExpired = true
+				}
 			}
 
 			// Convert photo_url
@@ -657,17 +659,49 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 				photoURL = nil
 			}
 
+			// Convert end_date to proper format
+			var endDateValue interface{}
+			if endDate.Valid {
+				endDateValue = endDate.String
+			} else {
+				endDateValue = nil
+			}
+
+			// Convert school_id to proper format
+			var schoolIDValue interface{}
+			if schoolID.Valid {
+				schoolIDValue = int(schoolID.Int64)
+			} else {
+				schoolIDValue = nil
+			}
+
+			// Convert level to proper format
+			var levelValue interface{}
+			if level.Valid {
+				levelValue = level.String
+			} else {
+				levelValue = nil
+			}
+
+			// Convert limit_participants to proper format
+			var limitParticipantsValue interface{}
+			if limitParticipants.Valid {
+				limitParticipantsValue = int(limitParticipants.Int64)
+			} else {
+				limitParticipantsValue = nil
+			}
+
 			// Build result object
 			olympiad := map[string]interface{}{
 				"subject_olympiad_id": id,
 				"id":                  id,
 				"subject_name":        subjectName,
 				"start_date":          startDate,
-				"end_date":            endDate,
+				"end_date":            endDateValue,
 				"description":         description.String,
-				"school_id":           schoolID,
-				"level":               level,
-				"limit_participants":  limitParticipants,
+				"school_id":           schoolIDValue,
+				"level":               levelValue,
+				"limit_participants":  limitParticipantsValue,
 				"photo_url":           photoURL,
 				"creator_id":          creatorID,
 				"creator_first_name":  creatorFirstName,
@@ -683,7 +717,6 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 		utils.ResponseJSON(w, olympiads)
 	}
 }
-
 func (c *SubjectOlympiadController) GetOlympiadsBySubjectID(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract subject_olympiad_id from URL parameters
