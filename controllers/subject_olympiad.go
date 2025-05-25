@@ -1169,6 +1169,7 @@ func (c *SubjectOlympiadController) GetOlympiadParticipants(db *sql.DB) http.Han
 
 		query := `
 			SELECT 
+				so.subject_olympiad_id,
 				s.school_name,
 				so.date AS start_date,
 				so.end_date,
@@ -1186,6 +1187,7 @@ func (c *SubjectOlympiadController) GetOlympiadParticipants(db *sql.DB) http.Han
 		`
 
 		var result struct {
+			ID           int    `json:"subject_olympiad_id"`
 			SchoolName   string `json:"school_name"`
 			StartDate    string `json:"start_date"`
 			EndDate      string `json:"end_date"`
@@ -1196,6 +1198,7 @@ func (c *SubjectOlympiadController) GetOlympiadParticipants(db *sql.DB) http.Han
 		}
 
 		err = db.QueryRow(query, olympiadID).Scan(
+			&result.ID,
 			&result.SchoolName,
 			&result.StartDate,
 			&result.EndDate,
