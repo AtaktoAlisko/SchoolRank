@@ -208,6 +208,7 @@ func main() {
 	router.HandleFunc("/api/my-registrations/{id}", EventsRegistrationController.DeleteMyEventRegistration(db)).Methods("DELETE")
 	router.HandleFunc("/api/event-registrations/{id}/approve-or-cancel", EventsRegistrationController.ApproveOrCancelEventRegistration(db)).Methods("PATCH")
 	router.HandleFunc("/api/school-ranking", EventsRegistrationController.GetSchoolRanking(db)).Methods("GET")
+	router.HandleFunc("/api/school/{school_id}/participants", EventsRegistrationController.GetParticipantsBySchoolID(db)).Methods("GET")
 
 	// router.HandleFunc("/event-registrations/{event_registration_id}/status", eventController.UpdateEventRegistrationStatus(db)).Methods("PUT")
 	// router.HandleFunc("/events/{event_id}/registrations", eventController.GetEventRegistrations(db)).Methods("GET")

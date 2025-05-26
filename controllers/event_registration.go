@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"ranking-school/models"
@@ -891,5 +892,139 @@ func (ec *EventsRegistrationController) GetSchoolRanking(db *sql.DB) http.Handle
 		})
 
 		utils.ResponseJSON(w, rankings)
+	}
+}
+func (ec *EventsRegistrationController) GetParticipantsBySchoolID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Verify token
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			log.Printf("Token verification failed for user %d: %v", userID, err)
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+			return
+		}
+
+		// Check user role
+		var role string
+		var userSchoolID sql.NullInt64
+		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&role, &userSchoolID)
+		if err != nil || (role != "schooladmin" && role != "superadmin") {
+			log.Printf("Access denied for user %d: invalid role or error %v", userID, err)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Access denied"})
+			return
+		}
+
+		// Get school_id from URL parameters
+		vars := mux.Vars(r)
+		schoolIDStr := vars["school_id"]
+		schoolID, err := strconv.Atoi(schoolIDStr)
+		if err != nil || schoolID <= 0 {
+			log.Printf("Invalid school ID %s: %v", schoolIDStr, err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+			return
+		}
+
+		// For schooladmin, ensure they can only access their own school's data
+		if role == "schooladmin" {
+			if !userSchoolID.Valid || int(userSchoolID.Int64) != schoolID {
+				log.Printf("School mismatch for user %d: user school %v, requested school %d", userID, userSchoolID, schoolID)
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only access your school's participants"})
+				return
+			}
+		}
+
+		// Query registrations for the specified school_id
+		rows, err := db.Query(`
+			SELECT 
+				r.event_registration_id,
+				s.first_name,
+				s.last_name,
+				s.patronymic,
+				s.grade,
+				s.role AS student_role,
+				sc.school_name,
+				e.event_name,
+				e.category
+			FROM EventRegistrations r
+			JOIN student s ON r.student_id = s.student_id
+			JOIN Schools sc ON r.school_id = sc.school_id
+			JOIN Events e ON r.event_id = e.id
+			WHERE r.school_id = ? AND r.status = 'registered'`, schoolID)
+		if err != nil {
+			log.Printf("Error querying participant registrations for school %d: %v", schoolID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+			return
+		}
+		defer rows.Close()
+
+		// Define a struct to hold the response data
+		type Participant struct {
+			EventRegistrationID int    `json:"event_registration_id"`
+			FullName            string `json:"full_name"`
+			StudentFirstName    string `json:"student_first_name"`
+			StudentLastName     string `json:"student_last_name"`
+			StudentPatronymic   string `json:"student_patronymic"`
+			StudentGrade        string `json:"student_grade"`
+			StudentRole         string `json:"student_role"`
+			SchoolName          string `json:"school_name"`
+			EventName           string `json:"event_name"`
+			EventCategory       string `json:"event_category,omitempty"`
+		}
+
+		var participants []Participant
+		for rows.Next() {
+			var p Participant
+			var firstName, lastName, patronymic, schoolName, eventName, eventCategory sql.NullString
+			var grade sql.NullString
+			var studentRole sql.NullString
+
+			err := rows.Scan(
+				&p.EventRegistrationID,
+				&firstName,
+				&lastName,
+				&patronymic,
+				&grade,
+				&studentRole,
+				&schoolName,
+				&eventName,
+				&eventCategory,
+			)
+			if err != nil {
+				log.Printf("Error scanning participant: %v", err)
+				continue
+			}
+
+			// Assign values, handling NULLs
+			p.StudentFirstName = firstName.String
+			p.StudentLastName = lastName.String
+			p.StudentPatronymic = patronymic.String
+			p.StudentGrade = grade.String
+			p.SchoolName = schoolName.String
+			p.EventName = eventName.String
+			if eventCategory.Valid {
+				p.EventCategory = eventCategory.String
+			}
+			if studentRole.Valid {
+				p.StudentRole = studentRole.String
+			}
+
+			// Construct FullName
+			fullNameParts := []string{}
+			if firstName.Valid && firstName.String != "" {
+				fullNameParts = append(fullNameParts, firstName.String)
+			}
+			if lastName.Valid && lastName.String != "" {
+				fullNameParts = append(fullNameParts, lastName.String)
+			}
+			if patronymic.Valid && patronymic.String != "" {
+				fullNameParts = append(fullNameParts, patronymic.String)
+			}
+			p.FullName = strings.Join(fullNameParts, " ")
+
+			participants = append(participants, p)
+		}
+
+		log.Printf("Participants found for school %d: %d", schoolID, len(participants))
+		utils.ResponseJSON(w, participants)
 	}
 }
