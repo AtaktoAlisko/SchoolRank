@@ -782,6 +782,101 @@ func (c *OlympiadRegistrationController) GetTotalOlympiadRating(db *sql.DB) http
 		}
 	}
 }
+func (c *OlympiadRegistrationController) GetTotalOlympiadRankBySchoolID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			utils.RespondWithError(w, http.StatusMethodNotAllowed, models.Error{Message: "Method not allowed"})
+			return
+		}
+
+		// Authentication
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
+
+		// Get user role and school ID
+		var role string
+		var userSchoolID sql.NullInt64
+		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&role, &userSchoolID)
+		if err != nil {
+			log.Printf("❌ User with ID %d not found in users table", userID)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "User not found"})
+			return
+		}
+
+		log.Printf("✅ Authenticated user: ID=%d, role=%s, school_id=%v", userID, role, userSchoolID)
+
+		// Handle school ID based on role
+		var schoolID int
+		if role == "superadmin" {
+			// For superadmin, get school_id from URL parameters
+			schoolIDStr := r.URL.Query().Get("school_id")
+			if schoolIDStr == "" {
+				schoolIDStr = mux.Vars(r)["school_id"] // Check if it's in route params
+			}
+
+			if schoolIDStr == "" {
+				// Default school ID 1 for superadmin if not specified
+				schoolID = 1
+			} else {
+				parsedID, err := strconv.Atoi(schoolIDStr)
+				if err != nil || parsedID <= 0 {
+					utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+					return
+				}
+				schoolID = parsedID
+			}
+		} else if role == "schooladmin" {
+			// For schooladmin, use their associated school
+			if !userSchoolID.Valid || userSchoolID.Int64 <= 0 {
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "School not assigned to this administrator"})
+				return
+			}
+			schoolID = int(userSchoolID.Int64)
+		} else {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Access denied for role: " + role})
+			return
+		}
+
+		// Calculate ratings by level
+		cityRating := calculateOlympiadRatingByLevel(db, schoolID, "city", 0.2)
+		regionRating := calculateOlympiadRatingByLevel(db, schoolID, "region", 0.3)
+		republicanRating := calculateOlympiadRatingByLevel(db, schoolID, "republican", 0.5)
+		totalRating := cityRating + regionRating + republicanRating
+
+		// Calculate Olympiad rank
+		olympiadRank := 25.0 * totalRating
+
+		// Get additional school info
+		var schoolName string
+		var schoolCity sql.NullString
+		err = db.QueryRow("SELECT name, city FROM school WHERE school_id = ?", schoolID).Scan(&schoolName, &schoolCity)
+		if err == nil {
+			utils.ResponseJSON(w, map[string]interface{}{
+				"school_id":                  schoolID,
+				"school_name":                schoolName,
+				"school_city":                schoolCity.String,
+				"city_olympiad_rating":       cityRating,
+				"region_olympiad_rating":     regionRating,
+				"republican_olympiad_rating": republicanRating,
+				"total_olympiad_rating":      totalRating,
+				"OlympiadRank":               olympiadRank,
+			})
+		} else {
+			// Fallback if school name/city couldn't be retrieved
+			utils.ResponseJSON(w, map[string]interface{}{
+				"school_id":                  schoolID,
+				"city_olympiad_rating":       cityRating,
+				"region_olympiad_rating":     regionRating,
+				"republican_olympiad_rating": republicanRating,
+				"total_olympiad_rating":      totalRating,
+				"OlympiadRank":               olympiadRank,
+			})
+		}
+	}
+}
 func calculateOlympiadRatingByLevel(db *sql.DB, schoolID int, level string, weight float64) float64 {
 	query := `
 		SELECT o.olympiad_place, o.score

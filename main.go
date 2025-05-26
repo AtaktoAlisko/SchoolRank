@@ -62,6 +62,7 @@ func main() {
 
 	controller := controllers.Controller{}
 	schoolController := controllers.SchoolController{}
+	schoolRatingController := &controllers.SchoolRatingController{}
 	untScoreController := controllers.UNTScoreController{}
 	typeController := controllers.TypeController{}
 	untTypeController := controllers.UNTTypeController{}
@@ -129,6 +130,13 @@ func main() {
 	router.HandleFunc("/api/schools/student", schoolController.GetAllStudents(db)).Methods("GET")
 	router.HandleFunc("/api/schools/total", schoolController.GetTotalSchools(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{id}", schoolController.GetSchoolByID(db)).Methods("GET")
+	router.HandleFunc("/api/schools/ranking/top", schoolController.GetTopSchoolsByRating(db)).Methods("GET")
+
+	// Вариант 2: Или используйте query параметр
+	router.HandleFunc("/api/schools/ranking", schoolController.GetTopSchoolsByRating(db)).Methods("GET")
+
+	// Вариант 3: Или создайте отдельную группу для статистики
+	router.HandleFunc("/api/statistics/schools/top", schoolController.GetTopSchoolsByRating(db)).Methods("GET")
 
 	// =======================
 	// Работа с отзывами (Reviews)
@@ -139,6 +147,7 @@ func main() {
 	router.HandleFunc("/api/reviews/{school_id}", reviewController.GetReviewBySchoolID(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/reviews", reviewController.GetReviewsBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/reviews/average-rating", reviewController.GetAverageRating(db)).Methods("GET")
+	router.HandleFunc("/api/schools/{school_id}/reviews/average-rating/rank", reviewController.GetAverageRatingRank(db)).Methods("GET")
 
 	// =======================
 	// Работа с UNT Scores (оценками)
@@ -151,6 +160,7 @@ func main() {
 	router.HandleFunc("/schools/{school_id}/average-unt-score", untScoreController.GetAverageUNTScoreBySchoolID(db)).Methods("GET")
 	router.HandleFunc("/schools/{school_id}/average-creative-unt-score", untScoreController.GetAverageCreativeUNTScoreBySchoolID(db)).Methods("GET")
 	router.HandleFunc("/schools/{school_id}/combined-average-unt-score", untScoreController.GetCombinedAverageUNTScoreBySchoolID(db)).Methods("GET")
+	router.HandleFunc("/schools/{school_id}/combined-average-unt-score/rank", untScoreController.GetCombinedAverageUNTRankBySchoolID(db)).Methods("GET")
 
 	router.HandleFunc("/api/unt_scores/average-rating-school", untScoreController.GetAverageRatingBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/unt_scores/average-rating-second-school", untScoreController.GetAverageRatingSecondBySchool(db)).Methods("GET")
@@ -187,6 +197,8 @@ func main() {
 	router.HandleFunc("/api/letters", studentController.GetAvailableLetters(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{schoolId}/grades/{grade}/letters/{letter}/students", studentController.GetFilteredStudents(db)).Methods("GET")
 
+	router.HandleFunc("/schools/{school_id}/rating", schoolRatingController.GetSchoolCompleteRating(db)).Methods("GET")
+
 	// =======================
 	// Работа с Events Participiant
 	// =======================
@@ -214,6 +226,9 @@ func main() {
 	router.HandleFunc("/api/event-registrations/{id}/approve-or-cancel", EventsRegistrationController.ApproveOrCancelEventRegistration(db)).Methods("PATCH")
 	router.HandleFunc("/api/school-ranking", EventsRegistrationController.GetSchoolRanking(db)).Methods("GET")
 	router.HandleFunc("/api/school/{school_id}/participants", EventsRegistrationController.GetParticipantsBySchoolID(db)).Methods("GET")
+	router.HandleFunc("/api/event-registrations/counts", EventsRegistrationController.GetEventParticipantsBySchool(db)).Methods("GET")
+	router.HandleFunc("/api/event-registrations/participants", EventsRegistrationController.GetEventParticipantsByAllSchools(db)).Methods("GET")
+	router.HandleFunc("/api/event-registrations/participants/school/{school_id}", EventsRegistrationController.GetEventParticipantsBySchoolID(db)).Methods("GET")
 
 	// router.HandleFunc("/event-registrations/{event_registration_id}/status", eventController.UpdateEventRegistrationStatus(db)).Methods("PUT")
 	// router.HandleFunc("/events/{event_id}/registrations", eventController.GetEventRegistrations(db)).Methods("GET")
@@ -246,6 +261,9 @@ func main() {
 	router.HandleFunc("/api/events/school/data/{school_id}", eventController.GetEventsBySchoolID(db)).Methods("GET")
 	router.HandleFunc("/api/events/category/{category}", eventController.GetEventsByCategory(db)).Methods("GET")
 	router.HandleFunc("/api/event/{id}", eventController.GetEventByID(db)).Methods("GET")
+	router.HandleFunc("/api/events/counts", eventController.GetEventCountsBySchool(db)).Methods("GET")
+	router.HandleFunc("/api/events/counts/score", eventController.GetEventCountsAndScoresBySchool(db)).Methods("GET")
+	router.HandleFunc("/api/events/counts/school/{school_id}", eventController.GetEventCountAndScoreBySchoolID(db)).Methods("GET")
 
 	// =======================
 	// Контактная информация
@@ -258,6 +276,7 @@ func main() {
 	router.HandleFunc("/api/olympiads/registrations/{id}/place", OlympiadRegistrationController.AssignPlaceToRegistration(db)).Methods("POST")
 	router.HandleFunc("/api/olympiads/register/{id}", OlympiadRegistrationController.DeleteRegistration(db)).Methods("DELETE")
 	router.HandleFunc("/api/olympiads/total-rating/{school_id}", OlympiadRegistrationController.GetTotalOlympiadRating(db)).Methods("GET")
+	router.HandleFunc("/api/olympiads/total-rating/{school_id}/total", OlympiadRegistrationController.GetTotalOlympiadRankBySchoolID(db)).Methods("GET")
 	router.HandleFunc("/api/olympiads/participants-count", OlympiadRegistrationController.GetOverallOlympiadParticipationCount(db)).Methods("GET")
 	router.HandleFunc("/api/olympiads/registrations/by-month", OlympiadRegistrationController.GetRegistrationsByMonth(db)).Methods("GET")
 	router.HandleFunc("/api/olympiad-registrations/{id}", OlympiadRegistrationController.GetOlympiadRegistrationByID(db)).Methods("GET")

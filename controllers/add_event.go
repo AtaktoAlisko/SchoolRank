@@ -1700,3 +1700,236 @@ func (ec *EventController) GetEventByID(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, event)
 	}
 }
+func (ec *EventController) GetEventCountsBySchool(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Check that GET method is used
+		if r.Method != http.MethodGet {
+			utils.RespondWithError(w, http.StatusMethodNotAllowed, models.Error{Message: "Method not allowed"})
+			return
+		}
+
+		// Build SQL query to count events per school
+		query := `
+            SELECT s.school_id, s.school_name, COUNT(e.id) as event_count
+            FROM Schools s
+            LEFT JOIN Events e ON s.school_id = e.school_id
+            GROUP BY s.school_id, s.school_name
+            ORDER BY s.school_id ASC
+        `
+
+		// Execute query
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println("Error executing event count query:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch event counts"})
+			return
+		}
+		defer rows.Close()
+
+		// Define struct for response
+		type SchoolEventCount struct {
+			SchoolID   int    `json:"school_id"`
+			SchoolName string `json:"school_name"`
+			EventCount int    `json:"event_count"`
+		}
+
+		// Collect results
+		var schoolEventCounts []SchoolEventCount
+		for rows.Next() {
+			var sec SchoolEventCount
+			err := rows.Scan(&sec.SchoolID, &sec.SchoolName, &sec.EventCount)
+			if err != nil {
+				log.Println("Error scanning event count row:", err)
+				continue
+			}
+			schoolEventCounts = append(schoolEventCounts, sec)
+		}
+
+		if err = rows.Err(); err != nil {
+			log.Println("Error iterating event count rows:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing event count data"})
+			return
+		}
+
+		// Prepare response
+		response := map[string]interface{}{
+			"schools":       schoolEventCounts,
+			"total_schools": len(schoolEventCounts),
+		}
+
+		if len(schoolEventCounts) == 0 {
+			response["message"] = "No schools found with events"
+		}
+
+		utils.ResponseJSON(w, response)
+	}
+}
+func (ec *EventController) GetEventCountsAndScoresBySchool(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Check that GET method is used
+        if r.Method != http.MethodGet {
+            utils.RespondWithError(w, http.StatusMethodNotAllowed, models.Error{Message: "Method not allowed"})
+            return
+        }
+
+        // Build SQL query to count events per school
+        query := `
+            SELECT s.school_id, s.school_name, COUNT(e.id) as event_count
+            FROM Schools s
+            LEFT JOIN Events e ON s.school_id = e.school_id
+            GROUP BY s.school_id, s.school_name
+            ORDER BY s.school_id ASC
+        `
+
+        // Execute query
+        rows, err := db.Query(query)
+        if err != nil {
+            log.Println("Error executing event count query:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch event counts"})
+            return
+        }
+        defer rows.Close()
+
+        // Define struct for response
+        type SchoolEventScore struct {
+            SchoolID   int     `json:"school_id"`
+            SchoolName string  `json:"school_name"`
+            EventCount int     `json:"event_count"`
+            Score      float64 `json:"score"`
+        }
+
+        // Collect results and find maximum event count
+        var schoolEventScores []SchoolEventScore
+        maxEventCount := 0
+        for rows.Next() {
+            var ses SchoolEventScore
+            err := rows.Scan(&ses.SchoolID, &ses.SchoolName, &ses.EventCount)
+            if err != nil {
+                log.Println("Error scanning event count row:", err)
+                continue
+            }
+            if ses.EventCount > maxEventCount {
+                maxEventCount = ses.EventCount
+            }
+            schoolEventScores = append(schoolEventScores, ses)
+        }
+
+        if err = rows.Err(); err != nil {
+            log.Println("Error iterating event count rows:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing event count data"})
+            return
+        }
+
+        // Calculate scores (max event count = 10 points, others scaled proportionally)
+        for i := range schoolEventScores {
+            if maxEventCount == 0 {
+                schoolEventScores[i].Score = 0
+            } else {
+                schoolEventScores[i].Score = (float64(schoolEventScores[i].EventCount) / float64(maxEventCount)) * 10
+            }
+        }
+
+        // Prepare response
+        response := map[string]interface{}{
+            "schools":      schoolEventScores,
+            "total_schools": len(schoolEventScores),
+        }
+
+        if len(schoolEventScores) == 0 {
+            response["message"] = "No schools found with events"
+        }
+
+        utils.ResponseJSON(w, response)
+    }
+}
+func (ec *EventController) GetEventCountAndScoreBySchoolID(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Check that GET method is used
+        if r.Method != http.MethodGet {
+            utils.RespondWithError(w, http.StatusMethodNotAllowed, models.Error{Message: "Method not allowed"})
+            return
+        }
+
+        // Extract school_id from URL parameters
+        vars := mux.Vars(r)
+        schoolIDStr := vars["school_id"]
+        schoolID, err := strconv.Atoi(schoolIDStr)
+        if err != nil {
+            utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID format"})
+            return
+        }
+
+        // Check if school exists
+        var schoolExists bool
+        err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM Schools WHERE school_id = ?)", schoolID).Scan(&schoolExists)
+        if err != nil {
+            log.Println("Error checking if school exists:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking school existence"})
+            return
+        }
+        if !schoolExists {
+            utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "School not found"})
+            return
+        }
+
+        // Get the event count for the specific school
+        var schoolName string
+        var eventCount int
+        err = db.QueryRow(`
+            SELECT s.school_name, COUNT(e.id) as event_count
+            FROM Schools s
+            LEFT JOIN Events e ON s.school_id = e.school_id
+            WHERE s.school_id = ?
+            GROUP BY s.school_id, s.school_name
+        `, schoolID).Scan(&schoolName, &eventCount)
+        if err != nil {
+            log.Println("Error fetching event count for school:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch event count"})
+            return
+        }
+
+        // Get the maximum event count across all schools
+        var maxEventCount int
+        err = db.QueryRow(`
+            SELECT COALESCE(MAX(event_count), 0)
+            FROM (
+                SELECT COUNT(id) as event_count
+                FROM Events
+                GROUP BY school_id
+            ) as counts
+        `).Scan(&maxEventCount)
+        if err != nil {
+            log.Println("Error fetching maximum event count:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to calculate score"})
+            return
+        }
+
+        // Calculate score
+        var score float64
+        if maxEventCount == 0 {
+            score = 0
+        } else {
+            score = (float64(eventCount) / float64(maxEventCount)) * 10
+        }
+
+        // Define struct for response
+        type SchoolEventScore struct {
+            SchoolID   int     `json:"school_id"`
+            SchoolName string  `json:"school_name"`
+            EventCount int     `json:"event_count"`
+            Score      float64 `json:"score"`
+        }
+
+        // Prepare response
+        response := map[string]interface{}{
+            "school": SchoolEventScore{
+                SchoolID:   schoolID,
+                SchoolName: schoolName,
+                EventCount: eventCount,
+                Score:      score,
+            },
+        }
+
+        utils.ResponseJSON(w, response)
+    }
+}

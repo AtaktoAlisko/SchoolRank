@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -407,6 +408,7 @@ func (ec *EventsRegistrationController) UpdateEventRegistrationStatus(db *sql.DB
 		utils.ResponseJSON(w, registration)
 	}
 }
+
 func (ec *EventsRegistrationController) GetEventRegistrations(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, err := utils.VerifyToken(r)
@@ -1096,4 +1098,323 @@ func (ec *EventsRegistrationController) GetParticipantsBySchoolID(db *sql.DB) ht
 		log.Printf("Participants found for school %d: %d", schoolID, len(participants))
 		utils.ResponseJSON(w, participants)
 	}
-} 
+}
+func (ec *EventsRegistrationController) GetEventParticipantsBySchool(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Check that GET method is used
+		if r.Method != http.MethodGet {
+			utils.RespondWithError(w, http.StatusMethodNotAllowed, models.Error{Message: "Method not allowed"})
+			return
+		}
+
+		// Build SQL query to count participants per school
+		query := `
+            SELECT s.school_id, s.school_name, COUNT(r.event_registration_id) as participant_count
+            FROM Schools s
+            LEFT JOIN EventRegistrations r ON s.school_id = r.school_id
+            WHERE r.status = 'registered'
+            GROUP BY s.school_id, s.school_name
+            ORDER BY s.school_id ASC
+        `
+
+		// Execute query
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println("Error executing participant count query:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch participant counts"})
+			return
+		}
+		defer rows.Close()
+
+		// Define struct for response
+		type SchoolParticipantCount struct {
+			SchoolID         int    `json:"school_id"`
+			SchoolName       string `json:"school_name"`
+			ParticipantCount int    `json:"participant_count"`
+		}
+
+		// Collect results
+		var schoolParticipantCounts []SchoolParticipantCount
+		for rows.Next() {
+			var spc SchoolParticipantCount
+			err := rows.Scan(&spc.SchoolID, &spc.SchoolName, &spc.ParticipantCount)
+			if err != nil {
+				log.Println("Error scanning participant count row:", err)
+				continue
+			}
+			schoolParticipantCounts = append(schoolParticipantCounts, spc)
+		}
+
+		if err = rows.Err(); err != nil {
+			log.Println("Error iterating participant count rows:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing participant count data"})
+			return
+		}
+
+		// Prepare response
+		response := map[string]interface{}{
+			"schools":       schoolParticipantCounts,
+			"total_schools": len(schoolParticipantCounts),
+		}
+
+		if len(schoolParticipantCounts) == 0 {
+			response["message"] = "No schools found with event participants"
+		}
+
+		utils.ResponseJSON(w, response)
+	}
+}
+func (ec *EventsRegistrationController) GetEventParticipantsByAllSchools(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Check that GET method is used
+		if r.Method != http.MethodGet {
+			utils.RespondWithError(w, http.StatusMethodNotAllowed, models.Error{Message: "Method not allowed"})
+			return
+		}
+
+		// Get status filter from query parameters
+		statusFilter := r.URL.Query().Get("status")
+		validStatuses := map[string]bool{
+			"registered": true,
+			"accepted":   true,
+			"canceled":   true,
+			"completed":  true, // Added to account for UpdateEventRegistrationStatus
+		}
+		if statusFilter != "" && !validStatuses[statusFilter] {
+			log.Printf("Invalid status filter: %s", statusFilter)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid status filter. Use 'registered', 'accepted', 'canceled', or 'completed'"})
+			return
+		}
+
+		// Build SQL query to count participants per school
+		query := `
+            SELECT s.school_id, s.school_name, COALESCE(COUNT(r.event_registration_id), 0) as participant_count
+            FROM Schools s
+            LEFT JOIN EventRegistrations r ON s.school_id = r.school_id`
+		args := []interface{}{}
+
+		if statusFilter != "" {
+			query += " AND r.status = ?"
+			args = append(args, statusFilter)
+		} else {
+			query += " AND r.status IN ('registered', 'accepted', 'completed')"
+		}
+
+		query += `
+            GROUP BY s.school_id, s.school_name
+            ORDER BY s.school_id ASC`
+
+		// Execute query
+		rows, err := db.Query(query, args...)
+		if err != nil {
+			log.Println("Error executing participant count query:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch participant counts"})
+			return
+		}
+		defer rows.Close()
+
+		// Define struct for response
+		type SchoolParticipantCount struct {
+			SchoolID         int     `json:"school_id"`
+			SchoolName       string  `json:"school_name"`
+			ParticipantCount int     `json:"participant_count"`
+			Points           float64 `json:"points"`
+			Percentage       float64 `json:"percentage"`
+		}
+
+		// Collect results
+		var schoolParticipantCounts []SchoolParticipantCount
+		maxParticipants := 0
+		for rows.Next() {
+			var spc SchoolParticipantCount
+			err := rows.Scan(&spc.SchoolID, &spc.SchoolName, &spc.ParticipantCount)
+			if err != nil {
+				log.Println("Error scanning participant count row:", err)
+				continue
+			}
+			if spc.ParticipantCount > maxParticipants {
+				maxParticipants = spc.ParticipantCount
+			}
+			schoolParticipantCounts = append(schoolParticipantCounts, spc)
+		}
+
+		if err = rows.Err(); err != nil {
+			log.Println("Error iterating participant count rows:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing participant count data"})
+			return
+		}
+
+		// Calculate points and percentage
+		const maxPoints = 30.0
+		for i := range schoolParticipantCounts {
+			if maxParticipants == 0 {
+				schoolParticipantCounts[i].Points = 0
+				schoolParticipantCounts[i].Percentage = 0
+			} else {
+				schoolParticipantCounts[i].Points = (float64(schoolParticipantCounts[i].ParticipantCount) / float64(maxParticipants)) * maxPoints
+				schoolParticipantCounts[i].Percentage = (float64(schoolParticipantCounts[i].ParticipantCount) / float64(maxParticipants)) * 100
+				// Round to 2 decimal places
+				schoolParticipantCounts[i].Points = math.Round(schoolParticipantCounts[i].Points*100) / 100
+				schoolParticipantCounts[i].Percentage = math.Round(schoolParticipantCounts[i].Percentage*100) / 100
+			}
+		}
+
+		// Debug: Log registration status summary
+		summaryQuery := `
+            SELECT status, COUNT(*)
+            FROM EventRegistrations
+            GROUP BY status`
+		summaryRows, err := db.Query(summaryQuery)
+		if err == nil {
+			defer summaryRows.Close()
+			log.Printf("DEBUG: Registration status summary:")
+			for summaryRows.Next() {
+				var status string
+				var count int
+				if err := summaryRows.Scan(&status, &count); err == nil {
+					log.Printf("DEBUG: Status %s: %d registrations", status, count)
+				}
+			}
+		} else {
+			log.Println("Error querying registration status summary:", err)
+		}
+
+		// Debug: Log schools with participants
+		log.Printf("DEBUG: Found %d schools, max participants: %d", len(schoolParticipantCounts), maxParticipants)
+		for _, spc := range schoolParticipantCounts {
+			log.Printf("DEBUG: School %d (%s): %d participants, %.2f points, %.2f%%",
+				spc.SchoolID, spc.SchoolName, spc.ParticipantCount, spc.Points, spc.Percentage)
+		}
+
+		// Debug: Check for NULL school_id registrations
+		var nullSchoolCount int
+		err = db.QueryRow("SELECT COUNT(*) FROM EventRegistrations WHERE school_id IS NULL").Scan(&nullSchoolCount)
+		if err == nil {
+			log.Printf("DEBUG: %d registrations with NULL school_id", nullSchoolCount)
+		}
+
+		// Prepare response
+		response := map[string]interface{}{
+			"schools":       schoolParticipantCounts,
+			"total_schools": len(schoolParticipantCounts),
+		}
+
+		if len(schoolParticipantCounts) == 0 {
+			response["message"] = "No schools found"
+		}
+
+		utils.ResponseJSON(w, response)
+	}
+}
+func (ec *EventsRegistrationController) GetEventParticipantsBySchoolID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			utils.RespondWithError(w, http.StatusMethodNotAllowed, models.Error{Message: "Method not allowed"})
+			return
+		}
+
+		// Получение и проверка параметра status
+		statusFilter := r.URL.Query().Get("status")
+		validStatuses := map[string]bool{
+			"registered": true,
+			"accepted":   true,
+			"canceled":   true,
+			"completed":  true,
+		}
+		if statusFilter != "" && !validStatuses[statusFilter] {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid status filter"})
+			return
+		}
+
+		// Извлечение school_id из URL
+		vars := mux.Vars(r)
+		schoolIDStr := vars["school_id"]
+		schoolID, err := strconv.Atoi(schoolIDStr)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID format"})
+			return
+		}
+
+		// Проверка существования школы
+		var schoolExists bool
+		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM Schools WHERE school_id = ?)", schoolID).Scan(&schoolExists)
+		if err != nil || !schoolExists {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School not found"})
+			return
+		}
+
+		// Получение общего количества участников по всем школам (для вычисления points и percentage)
+		var maxParticipants int
+		countQuery := `
+            SELECT COUNT(r.event_registration_id)
+            FROM Schools s
+            LEFT JOIN EventRegistrations r ON s.school_id = r.school_id
+            WHERE r.status IN ('registered', 'accepted', 'completed')`
+		err = db.QueryRow(countQuery).Scan(&maxParticipants)
+		if err != nil {
+			log.Println("Error fetching max participants:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to calculate max participants"})
+			return
+		}
+
+		// Запрос информации по конкретной школе
+		query := `
+            SELECT 
+                s.school_name, 
+                COUNT(r.event_registration_id) AS participant_count
+            FROM Schools s
+            LEFT JOIN EventRegistrations r ON s.school_id = r.school_id
+            WHERE s.school_id = ?`
+
+		args := []interface{}{schoolID}
+		if statusFilter != "" {
+			query += " AND r.status = ?"
+			args = append(args, statusFilter)
+		} else {
+			query += " AND r.status IN ('registered', 'accepted', 'completed')"
+		}
+
+		query += " GROUP BY s.school_name"
+
+		var schoolName string
+		var participantCount int
+		err = db.QueryRow(query, args...).Scan(&schoolName, &participantCount)
+		if err != nil {
+			log.Println("Error scanning result:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch data"})
+			return
+		}
+
+		// Вычисление points и percentage
+		const maxPoints = 30.0
+		var points float64
+		var percentage float64
+		if maxParticipants > 0 {
+			points = (float64(participantCount) / float64(maxParticipants)) * maxPoints
+			percentage = (float64(participantCount) / float64(maxParticipants)) * 100
+			points = math.Round(points*100) / 100
+			percentage = math.Round(percentage*100) / 100
+		}
+
+		// Ответная структура
+		type SchoolParticipantCount struct {
+			SchoolID         int     `json:"school_id"`
+			SchoolName       string  `json:"school_name"`
+			ParticipantCount int     `json:"participant_count"`
+			Points           float64 `json:"points"`
+			Percentage       float64 `json:"percentage"`
+		}
+
+		response := map[string]interface{}{
+			"school": SchoolParticipantCount{
+				SchoolID:         schoolID,
+				SchoolName:       schoolName,
+				ParticipantCount: participantCount,
+				Points:           points,
+				Percentage:       percentage,
+			},
+		}
+
+		utils.ResponseJSON(w, response)
+	}
+}

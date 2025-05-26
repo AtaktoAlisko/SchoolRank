@@ -1656,3 +1656,131 @@ func (c *UNTScoreController) GetCombinedAverageUNTScoreBySchoolID(db *sql.DB) ht
 		})
 	}
 }
+func (c *UNTScoreController) GetCombinedAverageUNTRankBySchoolID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Get userID from token
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		// Step 2: Check user role and school_id
+		var userRole string
+		var userSchoolID sql.NullInt64
+		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+		if err != nil {
+			log.Println("Ошибка при получении роли пользователя или school_id:", err)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Не удалось получить роль или school_id пользователя"})
+			return
+		}
+
+		// Step 3: Get school_id from URL parameters
+		vars := mux.Vars(r)
+		schoolIDStr := vars["school_id"]
+		schoolID, err := strconv.ParseInt(schoolIDStr, 10, 64)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Некорректный ID школы"})
+			return
+		}
+
+		// Step 4: Check permissions based on role
+		if userRole == "schooladmin" {
+			if !userSchoolID.Valid || userSchoolID.Int64 != schoolID {
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Вы не можете просматривать данные других школ"})
+				return
+			}
+		} else if userRole != "admin" && userRole != "moderator" && userRole != "superadmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "У вас нет прав для просмотра результатов UNT"})
+			return
+		}
+
+		// Step 5: Query for average scores and student counts for both exam types
+		query := `
+            SELECT 
+                exam_type,
+                AVG(total_score) as average_score,
+                COUNT(*) as student_count
+            FROM 
+                UNT_Exams 
+            WHERE 
+                school_id = ? 
+                AND exam_type IN ('regular', 'creative')
+            GROUP BY 
+                exam_type`
+
+		rows, err := db.Query(query, schoolID)
+		if err != nil {
+			log.Printf("Ошибка при запросе среднего балла: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Не удалось получить средний балл"})
+			return
+		}
+		defer rows.Close()
+
+		var regularAverage float64
+		var regularCount int
+		var creativeAverage float64
+		var creativeCount int
+
+		// Step 6: Process query results
+		for rows.Next() {
+			var examType string
+			var avgScore float64
+			var studentCount int
+			if err := rows.Scan(&examType, &avgScore, &studentCount); err != nil {
+				log.Printf("Ошибка при сканировании строки: %v", err)
+				continue
+			}
+			if examType == "regular" {
+				regularAverage = avgScore
+				regularCount = studentCount
+			} else if examType == "creative" {
+				creativeAverage = avgScore
+				creativeCount = studentCount
+			}
+		}
+
+		// Step 7: Check if any exams exist
+		if regularCount == 0 && creativeCount == 0 {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Нет данных об экзаменах для указанной школы"})
+			return
+		}
+
+		// Step 8: Normalize scores to 100-point scale
+		normalizedRegular := 0.0
+		if regularCount > 0 {
+			normalizedRegular = (regularAverage / 140.0) * 100.0
+		}
+
+		normalizedCreative := 0.0
+		if creativeCount > 0 {
+			normalizedCreative = (creativeAverage / 120.0) * 100.0
+		}
+
+		// Step 9: Calculate weighted average
+		var combinedAverage float64
+		totalStudents := regularCount + creativeCount
+
+		if totalStudents > 0 {
+			// Weighted average: (normalizedRegular * regularCount + normalizedCreative * creativeCount) / totalStudents
+			combinedAverage = (normalizedRegular*float64(regularCount) + normalizedCreative*float64(creativeCount)) / float64(totalStudents)
+		} else {
+			combinedAverage = 0.0 // Shouldn't reach here due to earlier check
+		}
+
+		// Step 10: Calculate UNT rank
+		untRank := (25.0 / 100.0) * combinedAverage
+
+		// Step 11: Return the result
+		utils.ResponseJSON(w, map[string]interface{}{
+			"school_id":              schoolID,
+			"regular_average":        regularAverage,
+			"regular_student_count":  regularCount,
+			"creative_average":       creativeAverage,
+			"creative_student_count": creativeCount,
+			"combined_average":       combinedAverage,
+			"unt_rank":               untRank,
+			"max_score_normalized":   100,
+		})
+	}
+}

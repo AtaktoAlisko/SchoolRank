@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"ranking-school/models"
 	"ranking-school/utils"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -958,7 +960,6 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
-
 func (sc *SchoolController) GetSchoolCount(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log.Println("GetSchoolCount endpoint called") // Debug log
@@ -982,4 +983,167 @@ func (sc *SchoolController) GetSchoolCount(db *sql.DB) http.HandlerFunc {
 
 		utils.ResponseJSON(w, response)
 	}
+}
+func (sc *SchoolController) GetTopSchoolsByRating(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Проверяем метод запроса
+		if r.Method != http.MethodGet {
+			utils.RespondWithError(w, http.StatusMethodNotAllowed, models.Error{Message: "Method not allowed"})
+			return
+		}
+
+		// Step 2: Получаем все школы
+		schools, err := getAllSchools(db)
+		if err != nil {
+			log.Printf("Ошибка при получении списка школ: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Ошибка при получении списка школ"})
+			return
+		}
+
+		// Step 3: Вычисляем рейтинг для каждой школы
+		type SchoolWithRating struct {
+			SchoolName        string  `json:"school_name"`
+			City              string  `json:"city"`
+			PhotoURL          string  `json:"photo_url"`
+			Rating            float64 `json:"rating"`
+			UntRank           float64 `json:"unt_rank"`
+			EventScore        float64 `json:"event_score"`
+			ParticipantPoints float64 `json:"participant_points"`
+			AverageRatingRank float64 `json:"average_rating_rank"`
+			OlympiadRank      float64 `json:"olympiad_rank"`
+			TotalRating       float64 `json:"total_rating"`
+			Rank              int     `json:"rank"`
+		}
+
+		var schoolsWithRating []SchoolWithRating
+		src := &SchoolRatingController{}
+
+		for _, school := range schools {
+			schoolWithRating := SchoolWithRating{
+				SchoolName: school.SchoolName,
+				City:       school.City,
+			}
+
+			// Добавляем PhotoURL
+			if school.PhotoURL.Valid && school.PhotoURL.String != "" {
+				schoolWithRating.PhotoURL = school.PhotoURL.String
+			} else {
+				schoolWithRating.PhotoURL = ""
+			}
+
+			// Получаем UNT рейтинг
+			untRank, err := src.getUNTRank(db, int64(school.SchoolID))
+			if err != nil {
+				log.Printf("Ошибка при получении UNT рейтинга для школы %d: %v", school.SchoolID, err)
+				untRank = 0.0
+			}
+			schoolWithRating.UntRank = math.Round(untRank*100) / 100
+
+			// Получаем счет событий
+			eventScore, err := src.getEventScore(db, int64(school.SchoolID))
+			if err != nil {
+				log.Printf("Ошибка при получении счета событий для школы %d: %v", school.SchoolID, err)
+				eventScore = 0.0
+			}
+			schoolWithRating.EventScore = math.Round(eventScore*100) / 100
+
+			// Получаем очки участников
+			participantPoints, err := src.getParticipantPoints(db, int64(school.SchoolID))
+			if err != nil {
+				log.Printf("Ошибка при получении очков участников для школы %d: %v", school.SchoolID, err)
+				participantPoints = 0.0
+			}
+			schoolWithRating.ParticipantPoints = math.Round(participantPoints*100) / 100
+
+			// Получаем рейтинг отзывов
+			averageRatingRank, err := src.getAverageRatingRank(db, int64(school.SchoolID))
+			if err != nil {
+				log.Printf("Ошибка при получении рейтинга отзывов для школы %d: %v", school.SchoolID, err)
+				averageRatingRank = 0.0
+			}
+			schoolWithRating.AverageRatingRank = math.Round(averageRatingRank*100) / 100
+
+			// Получаем рейтинг из отзывов (как в GetAllSchools)
+			var avgRating sql.NullFloat64
+			ratingQuery := `SELECT AVG(rating) FROM Reviews WHERE school_id = ?`
+			err = db.QueryRow(ratingQuery, school.SchoolID).Scan(&avgRating)
+			if err != nil && err != sql.ErrNoRows {
+				log.Printf("Ошибка при получении среднего рейтинга для школы %d: %v", school.SchoolID, err)
+				schoolWithRating.Rating = 0.0
+			} else if avgRating.Valid {
+				schoolWithRating.Rating = math.Round(avgRating.Float64*100) / 100
+			} else {
+				schoolWithRating.Rating = 0.0
+			}
+
+			// Получаем олимпиадный рейтинг
+			olympiadRank, err := src.getOlympiadRank(db, int64(school.SchoolID))
+			if err != nil {
+				log.Printf("Ошибка при получении олимпиадного рейтинга для школы %d: %v", school.SchoolID, err)
+				olympiadRank = 0.0
+			}
+			schoolWithRating.OlympiadRank = math.Round(olympiadRank*100) / 100
+
+			// Вычисляем общий рейтинг
+			totalRating := eventScore + participantPoints + averageRatingRank + untRank + olympiadRank
+			schoolWithRating.TotalRating = math.Round(totalRating*100) / 100
+
+			schoolsWithRating = append(schoolsWithRating, schoolWithRating)
+		}
+
+		// Step 4: Сортируем школы по убыванию общего рейтинга
+		sort.Slice(schoolsWithRating, func(i, j int) bool {
+			return schoolsWithRating[i].TotalRating > schoolsWithRating[j].TotalRating
+		})
+
+		// Step 5: Берем топ-5 школ и добавляем ранги
+		topSchools := schoolsWithRating
+		if len(topSchools) > 5 {
+			topSchools = topSchools[:5]
+		}
+
+		// Добавляем ранги
+		for i := range topSchools {
+			topSchools[i].Rank = i + 1
+		}
+
+		// Step 6: Формируем ответ
+		response := map[string]interface{}{
+			"top_schools": topSchools,
+			"total_count": len(schoolsWithRating),
+		}
+
+		utils.ResponseJSON(w, response)
+	}
+}
+func getAllSchools(db *sql.DB) ([]models.School, error) {
+	query := `
+		SELECT school_id, school_name, city 
+		FROM Schools 
+		ORDER BY school_id
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var schools []models.School
+
+	for rows.Next() {
+		var school models.School
+
+		err := rows.Scan(&school.SchoolID, &school.SchoolName, &school.City)
+		if err != nil {
+			return nil, err
+		}
+		schools = append(schools, school)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return schools, nil
 }

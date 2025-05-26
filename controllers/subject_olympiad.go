@@ -976,7 +976,6 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 		utils.ResponseJSON(w, response)
 	}
 }
-
 func (c *SubjectOlympiadController) GetAllSubjectOlympiadsSchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		_, err := utils.VerifyToken(r)

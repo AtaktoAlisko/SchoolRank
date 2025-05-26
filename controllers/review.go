@@ -540,3 +540,26 @@ func (rc *ReviewController) DeleteReview(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
+func (rc *ReviewController) GetAverageRatingRank(db *sql.DB) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Получаем school_id из параметров запроса
+        schoolID := mux.Vars(r)["school_id"]
+
+        // Запрос на получение среднего рейтинга по школе
+        query := `SELECT AVG(rating) FROM Reviews WHERE school_id = ?`
+        var averageRating float64
+        err := db.QueryRow(query, schoolID).Scan(&averageRating)
+        if err != nil {
+            log.Println("SQL Error:", err)
+            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get average rating rank"})
+            return
+        }
+
+        // Вычисляем average_rating_rank как средний рейтинг, умноженный на 2
+        averageRatingRank := averageRating * 2
+
+        utils.ResponseJSON(w, map[string]interface{}{
+            "average_rating_rank": averageRatingRank,
+        })
+    }
+}
