@@ -944,21 +944,25 @@ func (ec *EventsRegistrationController) GetParticipantsBySchoolID(db *sql.DB) ht
 
 		// Query registrations for the specified school_id with optional status filter
 		query := `
-			SELECT 
-				r.event_registration_id,
-				s.first_name,
-				s.last_name,
-				s.patronymic,
-				s.grade,
-				s.role AS student_role,
-				sc.school_name,
-				e.event_name,
-				e.category
-			FROM EventRegistrations r
-			JOIN student s ON r.student_id = s.student_id
-			JOIN Schools sc ON r.school_id = sc.school_id
-			JOIN Events e ON r.event_id = e.id
-			WHERE r.school_id = ?`
+            SELECT 
+                r.event_registration_id,
+                s.first_name,
+                s.last_name,
+                s.patronymic,
+                s.grade,
+                s.letter,
+                s.role AS student_role,
+                s.email,
+                s.phone,
+                s.iin,
+                sc.school_name,
+                e.event_name,
+                e.category
+            FROM EventRegistrations r
+            JOIN student s ON r.student_id = s.student_id
+            JOIN Schools sc ON r.school_id = sc.school_id
+            JOIN Events e ON r.event_id = e.id
+            WHERE r.school_id = ?`
 		var args []interface{}
 		args = append(args, schoolID)
 
@@ -983,7 +987,11 @@ func (ec *EventsRegistrationController) GetParticipantsBySchoolID(db *sql.DB) ht
 			StudentLastName     string `json:"student_last_name"`
 			StudentPatronymic   string `json:"student_patronymic"`
 			StudentGrade        string `json:"student_grade"`
+			StudentLetter       string `json:"student_letter"`
 			StudentRole         string `json:"student_role"`
+			Email               string `json:"email"`
+			Phone               string `json:"phone"`
+			IIN                 string `json:"iin"`
 			SchoolName          string `json:"school_name"`
 			EventName           string `json:"event_name"`
 			EventCategory       string `json:"event_category,omitempty"`
@@ -992,9 +1000,7 @@ func (ec *EventsRegistrationController) GetParticipantsBySchoolID(db *sql.DB) ht
 		var participants []Participant
 		for rows.Next() {
 			var p Participant
-			var firstName, lastName, patronymic, schoolName, eventName, eventCategory sql.NullString
-			var grade sql.NullString
-			var studentRole sql.NullString
+			var firstName, lastName, patronymic, schoolName, eventName, eventCategory, grade, letter, studentRole, email, phone, iin sql.NullString
 
 			err := rows.Scan(
 				&p.EventRegistrationID,
@@ -1002,7 +1008,11 @@ func (ec *EventsRegistrationController) GetParticipantsBySchoolID(db *sql.DB) ht
 				&lastName,
 				&patronymic,
 				&grade,
+				&letter,
 				&studentRole,
+				&email,
+				&phone,
+				&iin,
 				&schoolName,
 				&eventName,
 				&eventCategory,
@@ -1017,13 +1027,15 @@ func (ec *EventsRegistrationController) GetParticipantsBySchoolID(db *sql.DB) ht
 			p.StudentLastName = lastName.String
 			p.StudentPatronymic = patronymic.String
 			p.StudentGrade = grade.String
+			p.StudentLetter = letter.String
+			p.StudentRole = studentRole.String
+			p.Email = email.String
+			p.Phone = phone.String
+			p.IIN = iin.String
 			p.SchoolName = schoolName.String
 			p.EventName = eventName.String
 			if eventCategory.Valid {
 				p.EventCategory = eventCategory.String
-			}
-			if studentRole.Valid {
-				p.StudentRole = studentRole.String
 			}
 
 			// Construct FullName
@@ -1044,10 +1056,10 @@ func (ec *EventsRegistrationController) GetParticipantsBySchoolID(db *sql.DB) ht
 
 		// Query summary of participant counts by status
 		summaryQuery := `
-			SELECT status, COUNT(*) as count
-			FROM EventRegistrations
-			WHERE school_id = ?
-			GROUP BY status`
+            SELECT status, COUNT(*) as count
+            FROM EventRegistrations
+            WHERE school_id = ?
+            GROUP BY status`
 		rows, err = db.Query(summaryQuery, schoolID)
 		if err != nil {
 			log.Printf("Error querying participant summary for school %d: %v", schoolID, err)
