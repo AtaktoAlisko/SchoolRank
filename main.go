@@ -148,9 +148,14 @@ func main() {
 	router.HandleFunc("/api/unt/school/{school_id}", untScoreController.GetUNTBySchoolID(db)).Methods("GET")
 	router.HandleFunc("/api/unt/{id}", untScoreController.UpdateUNTExam(db)).Methods("PUT")
 	router.HandleFunc("/api/unt/{id}", untScoreController.DeleteUNTExam(db)).Methods("DELETE")
+	router.HandleFunc("/schools/{school_id}/average-unt-score", untScoreController.GetAverageUNTScoreBySchoolID(db)).Methods("GET")
+	router.HandleFunc("/schools/{school_id}/average-creative-unt-score", untScoreController.GetAverageCreativeUNTScoreBySchoolID(db)).Methods("GET")
+	router.HandleFunc("/schools/{school_id}/combined-average-unt-score", untScoreController.GetCombinedAverageUNTScoreBySchoolID(db)).Methods("GET")
+
+	router.HandleFunc("/api/unt_scores/average-rating-school", untScoreController.GetAverageRatingBySchool(db)).Methods("GET")
+	router.HandleFunc("/api/unt_scores/average-rating-second-school", untScoreController.GetAverageRatingSecondBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/unt_scores/total-score-school", untScoreController.GetTotalScoreForSchool(db)).Methods("GET")
-	router.HandleFunc("/api/average-rating/{school_id}", untScoreController.GetAverageRatingBySchool(db)).Methods("GET")
-	router.HandleFunc("/api/school/combined-average-rating", untScoreController.GetCombinedAverageRating(db)).Methods("GET")
+	router.HandleFunc("/api/average-rating/{school_id}", untScoreController.GetCombinedAverageRating(db)).Methods("GET")
 	router.HandleFunc("/api/untscore/{student_id}", untScoreController.GetUNTScoreByStudentID(db)).Methods("GET")
 
 	// =======================

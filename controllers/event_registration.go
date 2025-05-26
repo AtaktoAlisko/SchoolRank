@@ -3,6 +3,7 @@ package controllers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"sort"
@@ -933,8 +934,16 @@ func (ec *EventsRegistrationController) GetParticipantsBySchoolID(db *sql.DB) ht
 			}
 		}
 
-		// Query registrations for the specified school_id
-		rows, err := db.Query(`
+		// Get status filter from query parameters (default to all if not provided)
+		statusFilter := r.URL.Query().Get("status")
+		if statusFilter != "" && statusFilter != "registered" && statusFilter != "accepted" && statusFilter != "canceled" {
+			log.Printf("Invalid status filter %s for school %d", statusFilter, schoolID)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid status filter. Use 'registered', 'accepted', or 'canceled'"})
+			return
+		}
+
+		// Query registrations for the specified school_id with optional status filter
+		query := `
 			SELECT 
 				r.event_registration_id,
 				s.first_name,
@@ -949,7 +958,16 @@ func (ec *EventsRegistrationController) GetParticipantsBySchoolID(db *sql.DB) ht
 			JOIN student s ON r.student_id = s.student_id
 			JOIN Schools sc ON r.school_id = sc.school_id
 			JOIN Events e ON r.event_id = e.id
-			WHERE r.school_id = ? AND r.status = 'registered'`, schoolID)
+			WHERE r.school_id = ?`
+		var args []interface{}
+		args = append(args, schoolID)
+
+		if statusFilter != "" {
+			query += " AND r.status = ?"
+			args = append(args, statusFilter)
+		}
+
+		rows, err := db.Query(query, args...)
 		if err != nil {
 			log.Printf("Error querying participant registrations for school %d: %v", schoolID, err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
@@ -1022,6 +1040,45 @@ func (ec *EventsRegistrationController) GetParticipantsBySchoolID(db *sql.DB) ht
 			p.FullName = strings.Join(fullNameParts, " ")
 
 			participants = append(participants, p)
+		}
+
+		// Query summary of participant counts by status
+		summaryQuery := `
+			SELECT status, COUNT(*) as count
+			FROM EventRegistrations
+			WHERE school_id = ?
+			GROUP BY status`
+		rows, err = db.Query(summaryQuery, schoolID)
+		if err != nil {
+			log.Printf("Error querying participant summary for school %d: %v", schoolID, err)
+			// Continue without summary if query fails
+		} else {
+			defer rows.Close()
+			type StatusCount struct {
+				Status string `json:"status"`
+				Count  int    `json:"count"`
+			}
+			var summary []StatusCount
+			for rows.Next() {
+				var s StatusCount
+				if err := rows.Scan(&s.Status, &s.Count); err != nil {
+					log.Printf("Error scanning status count: %v", err)
+					continue
+				}
+				summary = append(summary, s)
+			}
+			// Add summary to response
+			if len(summary) > 0 {
+				for i := range participants {
+					participants[i].FullName += " (Summary: " + strings.Join(func() []string {
+						var result []string
+						for _, s := range summary {
+							result = append(result, fmt.Sprintf("%s: %d", s.Status, s.Count))
+						}
+						return result
+					}(), ", ") + ")"
+				}
+			}
 		}
 
 		log.Printf("Participants found for school %d: %d", schoolID, len(participants))

@@ -1006,7 +1006,7 @@ func (c *UNTScoreController) GetUNTBySchoolID(db *sql.DB) http.HandlerFunc {
 }
 func (c *TypeController) GetAverageRatingBySchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Извлекаем school_id из параметров URL
+		// Extract school_id from URL parameters
 		vars := mux.Vars(r)
 		schoolID, err := strconv.Atoi(vars["school_id"])
 		if err != nil {
@@ -1015,7 +1015,6 @@ func (c *TypeController) GetAverageRatingBySchool(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Query to get average score by school
-		// Запрос для получения среднего балла по всем предметам для школы
 		query := `
         SELECT 
             AVG(CASE WHEN ft.first_subject_score IS NOT NULL THEN ft.first_subject_score ELSE 0 END) AS avg_first_subject_score,
@@ -1033,7 +1032,8 @@ func (c *TypeController) GetAverageRatingBySchool(db *sql.DB) http.HandlerFunc {
 
 		row := db.QueryRow(query, schoolID)
 
-		var avgFirstSubjectScore, avgSecondSubjectScore, avgHistoryOfKazakhstan, avgMathematicalLiteracy, avgReadingLiteracy, avgTotalScore float64
+		// Use sql.NullFloat64 to handle NULL values
+		var avgFirstSubjectScore, avgSecondSubjectScore, avgHistoryOfKazakhstan, avgMathematicalLiteracy, avgReadingLiteracy, avgTotalScore sql.NullFloat64
 
 		err = row.Scan(&avgFirstSubjectScore, &avgSecondSubjectScore, &avgHistoryOfKazakhstan, &avgMathematicalLiteracy, &avgReadingLiteracy, &avgTotalScore)
 		if err != nil {
@@ -1042,19 +1042,25 @@ func (c *TypeController) GetAverageRatingBySchool(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Response with average score
-		// Ответ с данными среднего балла
-		result := map[string]float64{
-			"avg_first_subject_score":   avgFirstSubjectScore,
-			"avg_second_subject_score":  avgSecondSubjectScore,
-			"avg_history_of_kazakhstan": avgHistoryOfKazakhstan,
-			"avg_mathematical_literacy": avgMathematicalLiteracy,
-			"avg_reading_literacy":      avgReadingLiteracy,
-			"avg_total_score":           avgTotalScore,
+		// Check if all averages are NULL (indicating no data)
+		if !avgFirstSubjectScore.Valid && !avgSecondSubjectScore.Valid && !avgHistoryOfKazakhstan.Valid &&
+			!avgMathematicalLiteracy.Valid && !avgReadingLiteracy.Valid && !avgTotalScore.Valid {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "No scores found for this school"})
+			return
 		}
 
-		utils.ResponseJSON(w, result) // Return result in JSON format
-		utils.ResponseJSON(w, result) // Возвращаем результат в формате JSON
+		// Convert sql.NullFloat64 to float64 for response, using 0 for NULL values
+		result := map[string]float64{
+			"avg_first_subject_score":   avgFirstSubjectScore.Float64,
+			"avg_second_subject_score":  avgSecondSubjectScore.Float64,
+			"avg_history_of_kazakhstan": avgHistoryOfKazakhstan.Float64,
+			"avg_mathematical_literacy": avgMathematicalLiteracy.Float64,
+			"avg_reading_literacy":      avgReadingLiteracy.Float64,
+			"avg_total_score":           avgTotalScore.Float64,
+		}
+
+		// Return result in JSON format
+		utils.ResponseJSON(w, result)
 	}
 }
 func (c *TypeController) GetAverageRatingSecondBySchool(db *sql.DB) http.HandlerFunc {
@@ -1368,5 +1374,285 @@ func (c *UNTScoreController) GetUNTScoreByStudentID(db *sql.DB) http.HandlerFunc
 		}
 
 		utils.ResponseJSON(w, response)
+	}
+}
+func (c *UNTScoreController) GetAverageUNTScoreBySchoolID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Get userID from token
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		// Step 2: Check user role and school_id
+		var userRole string
+		var userSchoolID sql.NullInt64
+		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+		if err != nil {
+			log.Println("Ошибка при получении роли пользователя или school_id:", err)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Не удалось получить роль или school_id пользователя"})
+			return
+		}
+
+		// Step 3: Get school_id from URL parameters
+		vars := mux.Vars(r)
+		schoolIDStr := vars["school_id"]
+		schoolID, err := strconv.ParseInt(schoolIDStr, 10, 64)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Некорректный ID школы"})
+			return
+		}
+
+		// Step 4: Check permissions based on role
+		if userRole == "schooladmin" {
+			if !userSchoolID.Valid || userSchoolID.Int64 != schoolID {
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Вы не можете просматривать данные других школ"})
+				return
+			}
+		} else if userRole != "admin" && userRole != "moderator" && userRole != "superadmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "У вас нет прав для просмотра результатов UNT"})
+			return
+		}
+
+		// Step 5: Query for average score of regular exams
+		query := `
+			SELECT 
+				AVG(total_score) as average_score,
+				COUNT(*) as student_count
+			FROM 
+				UNT_Exams 
+			WHERE 
+				school_id = ? AND exam_type = 'regular'`
+
+		var averageScore float64
+		var studentCount int
+		err = db.QueryRow(query, schoolID).Scan(&averageScore, &studentCount)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Нет данных о регулярных экзаменах для указанной школы"})
+				return
+			}
+			log.Printf("Ошибка при запросе среднего балла: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Не удалось получить средний балл"})
+			return
+		}
+
+		// Step 6: Check if there are any regular exams
+		if studentCount == 0 {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Нет регулярных экзаменов для указанной школы"})
+			return
+		}
+
+		// Step 7: Return the result
+		utils.ResponseJSON(w, map[string]interface{}{
+			"school_id":     schoolID,
+			"exam_type":     "regular",
+			"average_score": averageScore,
+			"student_count": studentCount,
+			"max_score":     140,
+		})
+	}
+}
+func (c *UNTScoreController) GetAverageCreativeUNTScoreBySchoolID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Get userID from token
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		// Step 2: Check user role and school_id
+		var userRole string
+		var userSchoolID sql.NullInt64
+		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+		if err != nil {
+			log.Println("Ошибка при получении роли пользователя или school_id:", err)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Не удалось получить роль или school_id пользователя"})
+			return
+		}
+
+		// Step 3: Get school_id from URL parameters
+		vars := mux.Vars(r)
+		schoolIDStr := vars["school_id"]
+		schoolID, err := strconv.ParseInt(schoolIDStr, 10, 64)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Некорректный ID школы"})
+			return
+		}
+
+		// Step 4: Check permissions based on role
+		if userRole == "schooladmin" {
+			if !userSchoolID.Valid || userSchoolID.Int64 != schoolID {
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Вы не можете просматривать данные других школ"})
+				return
+			}
+		} else if userRole != "admin" && userRole != "moderator" && userRole != "superadmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "У вас нет прав для просмотра результатов UNT"})
+			return
+		}
+
+		// Step 5: Query for average score of creative exams
+		query := `
+			SELECT 
+				AVG(total_score) as average_score,
+				COUNT(*) as student_count
+			FROM 
+				UNT_Exams 
+			WHERE 
+				school_id = ? AND exam_type = 'creative'`
+
+		var averageScore float64
+		var studentCount int
+		err = db.QueryRow(query, schoolID).Scan(&averageScore, &studentCount)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Нет данных о творческих экзаменах для указанной школы"})
+				return
+			}
+			log.Printf("Ошибка при запросе среднего балла: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Не удалось получить средний балл"})
+			return
+		}
+
+		// Step 6: Check if there are any creative exams
+		if studentCount == 0 {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Нет творческих экзаменов для указанной школы"})
+			return
+		}
+
+		// Step 7: Return the result
+		utils.ResponseJSON(w, map[string]interface{}{
+			"school_id":     schoolID,
+			"exam_type":     "creative",
+			"average_score": averageScore,
+			"student_count": studentCount,
+			"max_score":     120,
+		})
+	}
+}
+func (c *UNTScoreController) GetCombinedAverageUNTScoreBySchoolID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Get userID from token
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		// Step 2: Check user role and school_id
+		var userRole string
+		var userSchoolID sql.NullInt64
+		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+		if err != nil {
+			log.Println("Ошибка при получении роли пользователя или school_id:", err)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Не удалось получить роль или school_id пользователя"})
+			return
+		}
+
+		// Step 3: Get school_id from URL parameters
+		vars := mux.Vars(r)
+		schoolIDStr := vars["school_id"]
+		schoolID, err := strconv.ParseInt(schoolIDStr, 10, 64)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Некорректный ID школы"})
+			return
+		}
+
+		// Step 4: Check permissions based on role
+		if userRole == "schooladmin" {
+			if !userSchoolID.Valid || userSchoolID.Int64 != schoolID {
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Вы не можете просматривать данные других школ"})
+				return
+			}
+		} else if userRole != "admin" && userRole != "moderator" && userRole != "superadmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "У вас нет прав для просмотра результатов UNT"})
+			return
+		}
+
+		// Step 5: Query for average scores and student counts for both exam types
+		query := `
+			SELECT 
+				exam_type,
+				AVG(total_score) as average_score,
+				COUNT(*) as student_count
+			FROM 
+				UNT_Exams 
+			WHERE 
+				school_id = ? 
+				AND exam_type IN ('regular', 'creative')
+			GROUP BY 
+				exam_type`
+
+		rows, err := db.Query(query, schoolID)
+		if err != nil {
+			log.Printf("Ошибка при запросе среднего балла: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Не удалось получить средний балл"})
+			return
+		}
+		defer rows.Close()
+
+		var regularAverage float64
+		var regularCount int
+		var creativeAverage float64
+		var creativeCount int
+
+		// Step 6: Process query results
+		for rows.Next() {
+			var examType string
+			var avgScore float64
+			var studentCount int
+			if err := rows.Scan(&examType, &avgScore, &studentCount); err != nil {
+				log.Printf("Ошибка при сканировании строки: %v", err)
+				continue
+			}
+			if examType == "regular" {
+				regularAverage = avgScore
+				regularCount = studentCount
+			} else if examType == "creative" {
+				creativeAverage = avgScore
+				creativeCount = studentCount
+			}
+		}
+
+		// Step 7: Check if any exams exist
+		if regularCount == 0 && creativeCount == 0 {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Нет данных об экзаменах для указанной школы"})
+			return
+		}
+
+		// Step 8: Normalize scores to 100-point scale
+		normalizedRegular := 0.0
+		if regularCount > 0 {
+			normalizedRegular = (regularAverage / 140.0) * 100.0
+		}
+
+		normalizedCreative := 0.0
+		if creativeCount > 0 {
+			normalizedCreative = (creativeAverage / 120.0) * 100.0
+		}
+
+		// Step 9: Calculate weighted average
+		var combinedAverage float64
+		totalStudents := regularCount + creativeCount
+
+		if totalStudents > 0 {
+			// Weighted average: (normalizedRegular * regularCount + normalizedCreative * creativeCount) / totalStudents
+			combinedAverage = (normalizedRegular*float64(regularCount) + normalizedCreative*float64(creativeCount)) / float64(totalStudents)
+		} else {
+			combinedAverage = 0.0 // Shouldn't reach here due to earlier check
+		}
+
+		// Step 10: Return the result
+		utils.ResponseJSON(w, map[string]interface{}{
+			"school_id":              schoolID,
+			"regular_average":        regularAverage,
+			"regular_student_count":  regularCount,
+			"creative_average":       creativeAverage,
+			"creative_student_count": creativeCount,
+			"combined_average":       combinedAverage,
+			"max_score_normalized":   100,
+		})
 	}
 }

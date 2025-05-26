@@ -82,49 +82,65 @@ func (usc *UNTScoreController) GetTotalScoreForSchool(db *sql.DB) http.HandlerFu
 }
 func (usc *UNTScoreController) GetAverageRatingBySchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Извлекаем school_id из параметров URL
-		vars := mux.Vars(r)
-		schoolID, err := strconv.Atoi(vars["school_id"])
-		if err != nil {
+		// Получение school_id из query параметров
+		schoolIDStr := r.URL.Query().Get("school_id")
+		if schoolIDStr == "" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "school_id is required"})
+			return
+		}
+
+		log.Printf("Получен school_id из query: %s", schoolIDStr)
+
+		schoolID, err := strconv.Atoi(schoolIDStr)
+		if err != nil || schoolID <= 0 {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
 			return
 		}
 
-		// Запрос для получения среднего балла по школе
+		// SQL-запрос на получение средних значений
 		query := `
-        SELECT 
-            AVG(CASE WHEN ft.first_subject_score IS NOT NULL THEN ft.first_subject_score ELSE 0 END) AS avg_first_subject_score,
-            AVG(CASE WHEN ft.second_subject_score IS NOT NULL THEN ft.second_subject_score ELSE 0 END) AS avg_second_subject_score,
-            AVG(CASE WHEN ft.history_of_kazakhstan IS NOT NULL THEN ft.history_of_kazakhstan ELSE 0 END) AS avg_history_of_kazakhstan,
-            AVG(CASE WHEN ft.mathematical_literacy IS NOT NULL THEN ft.mathematical_literacy ELSE 0 END) AS avg_mathematical_literacy,
-            AVG(CASE WHEN ft.reading_literacy IS NOT NULL THEN ft.reading_literacy ELSE 0 END) AS avg_reading_literacy,
-            AVG(CASE WHEN ft.first_subject_score IS NOT NULL AND ft.second_subject_score IS NOT NULL AND 
-                     ft.history_of_kazakhstan IS NOT NULL AND ft.mathematical_literacy IS NOT NULL AND 
-                     ft.reading_literacy IS NOT NULL 
-                     THEN (ft.first_subject_score + ft.second_subject_score + ft.history_of_kazakhstan + 
-                           ft.mathematical_literacy + ft.reading_literacy) ELSE 0 END) AS avg_total_score
-        FROM First_Type ft
-        WHERE ft.school_id = ?`
+			SELECT 
+				AVG(CASE WHEN ft.first_subject_score IS NOT NULL THEN ft.first_subject_score ELSE 0 END) AS avg_first_subject_score,
+				AVG(CASE WHEN ft.second_subject_score IS NOT NULL THEN ft.second_subject_score ELSE 0 END) AS avg_second_subject_score,
+				AVG(CASE WHEN ft.history_of_kazakhstan IS NOT NULL THEN ft.history_of_kazakhstan ELSE 0 END) AS avg_history_of_kazakhstan,
+				AVG(CASE WHEN ft.mathematical_literacy IS NOT NULL THEN ft.mathematical_literacy ELSE 0 END) AS avg_mathematical_literacy,
+				AVG(CASE WHEN ft.reading_literacy IS NOT NULL THEN ft.reading_literacy ELSE 0 END) AS avg_reading_literacy,
+				AVG(CASE WHEN ft.first_subject_score IS NOT NULL AND ft.second_subject_score IS NOT NULL AND 
+						 ft.history_of_kazakhstan IS NOT NULL AND ft.mathematical_literacy IS NOT NULL AND 
+						 ft.reading_literacy IS NOT NULL 
+						 THEN (ft.first_subject_score + ft.second_subject_score + ft.history_of_kazakhstan + 
+							   ft.mathematical_literacy + ft.reading_literacy) ELSE 0 END) AS avg_total_score
+			FROM First_Type ft
+			WHERE ft.school_id = ?;
+		`
 
 		row := db.QueryRow(query, schoolID)
 
-		var avgFirstSubjectScore, avgSecondSubjectScore, avgHistoryOfKazakhstan, avgMathematicalLiteracy, avgReadingLiteracy, avgTotalScore float64
+		// Переменные с null-защитой
+		var avgFirstSubjectScore, avgSecondSubjectScore, avgHistoryOfKazakhstan, avgMathematicalLiteracy, avgReadingLiteracy, avgTotalScore sql.NullFloat64
 
-		err = row.Scan(&avgFirstSubjectScore, &avgSecondSubjectScore, &avgHistoryOfKazakhstan, &avgMathematicalLiteracy, &avgReadingLiteracy, &avgTotalScore)
+		err = row.Scan(
+			&avgFirstSubjectScore,
+			&avgSecondSubjectScore,
+			&avgHistoryOfKazakhstan,
+			&avgMathematicalLiteracy,
+			&avgReadingLiteracy,
+			&avgTotalScore,
+		)
 		if err != nil {
-			log.Println("SQL Error:", err)
+			log.Println("SQL Error while scanning average rating result:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to calculate average rating"})
 			return
 		}
 
-		// Response with average score
+		// Подготовка ответа
 		result := map[string]float64{
-			"avg_first_subject_score":   avgFirstSubjectScore,
-			"avg_second_subject_score":  avgSecondSubjectScore,
-			"avg_history_of_kazakhstan": avgHistoryOfKazakhstan,
-			"avg_mathematical_literacy": avgMathematicalLiteracy,
-			"avg_reading_literacy":      avgReadingLiteracy,
-			"avg_total_score":           avgTotalScore,
+			"avg_first_subject_score":   avgFirstSubjectScore.Float64,
+			"avg_second_subject_score":  avgSecondSubjectScore.Float64,
+			"avg_history_of_kazakhstan": avgHistoryOfKazakhstan.Float64,
+			"avg_mathematical_literacy": avgMathematicalLiteracy.Float64,
+			"avg_reading_literacy":      avgReadingLiteracy.Float64,
+			"avg_total_score":           avgTotalScore.Float64,
 		}
 
 		utils.ResponseJSON(w, result)
