@@ -1457,15 +1457,16 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 		// Get optional query parameters for additional filtering
 		query := r.URL.Query()
 		schoolID := query.Get("school_id")
+		id := query.Get("id")
 		limit := query.Get("limit")
 		offset := query.Get("offset")
 
-		log.Printf("GetEventsByCategory called with category: %s, school_id: %s", category, schoolID)
+		log.Printf("GetEventsByCategory called with category: %s, school_id: %s, id: %s", category, schoolID, id)
 
-		// Build SQL query - selecting only the required fields
+		// Build SQL query - selecting only the required fields, including e.id
 		queryBuilder := strings.Builder{}
 		queryBuilder.WriteString(`
-            SELECT e.school_id, s.school_name, e.event_name, e.photo as photo_url, 
+            SELECT e.id, e.school_id, s.school_name, e.event_name, e.photo as photo_url, 
                    (SELECT COUNT(*) FROM EventRegistrations r WHERE r.event_id = e.id AND r.status = 'registered') as participants,
                    e.limit_count as ` + "`limit`" + `,
                    e.start_date, e.end_date, e.location
@@ -1486,6 +1487,17 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 			}
 			queryBuilder.WriteString(" AND e.school_id = ?")
 			args = append(args, schoolIDInt)
+		}
+
+		// Add id filter if provided
+		if id != "" {
+			idInt, err := strconv.Atoi(id)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid id format"})
+				return
+			}
+			queryBuilder.WriteString(" AND e.id = ?")
+			args = append(args, idInt)
 		}
 
 		// Add sorting by school_id and start_date
@@ -1527,6 +1539,7 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 
 		// Define structs for the response
 		type Event struct {
+			EventID      int64  `json:"event_id"` // Added event_id
 			EventName    string `json:"event_name"`
 			PhotoURL     string `json:"photo_url"`
 			Participants int    `json:"participants"`
@@ -1545,11 +1558,12 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 		// Collect results, grouping by school
 		schoolMap := make(map[int]*School)
 		for rows.Next() {
+			var eventID int64 // Added to store e.id
 			var schoolID int
 			var schoolName string
 			var event Event
 			err := rows.Scan(
-				&schoolID, &schoolName, &event.EventName, &event.PhotoURL,
+				&eventID, &schoolID, &schoolName, &event.EventName, &event.PhotoURL,
 				&event.Participants, &event.Limit,
 				&event.StartDate, &event.EndDate, &event.Location,
 			)
@@ -1557,6 +1571,9 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 				log.Println("Error scanning event row:", err)
 				continue
 			}
+
+			// Assign eventID to event struct
+			event.EventID = eventID
 
 			// If school doesn't exist in map, create it
 			if _, exists := schoolMap[schoolID]; !exists {

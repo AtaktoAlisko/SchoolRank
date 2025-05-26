@@ -1096,4 +1096,4 @@ func (ec *EventsRegistrationController) GetParticipantsBySchoolID(db *sql.DB) ht
 		log.Printf("Participants found for school %d: %d", schoolID, len(participants))
 		utils.ResponseJSON(w, participants)
 	}
-}
+} 
