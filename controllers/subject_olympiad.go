@@ -1219,3 +1219,45 @@ func (c *SubjectOlympiadController) GetOlympiadParticipants(db *sql.DB) http.Han
 		utils.ResponseJSON(w, result)
 	}
 }
+func (c *SubjectOlympiadController) GetSchoolOlympiadStats(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Проверка токена
+		_, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
+
+		// Получение school_id из URL параметров
+		vars := mux.Vars(r)
+		schoolID := vars["school_id"]
+
+		if schoolID == "" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School ID is required"})
+			return
+		}
+
+		// Запрос для подсчета количества олимпиад, созданных школой
+		query := `
+			SELECT COUNT(*) as olympiad_count
+			FROM subject_olympiads
+			WHERE school_id = ?
+		`
+
+		var olympiadCount int
+		err = db.QueryRow(query, schoolID).Scan(&olympiadCount)
+		if err != nil {
+			log.Println("Query error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get olympiad stats"})
+			return
+		}
+
+		// Формирование ответа
+		stats := map[string]interface{}{
+			"school_id":      schoolID,
+			"olympiad_count": olympiadCount,
+		}
+
+		utils.ResponseJSON(w, stats)
+	}
+}

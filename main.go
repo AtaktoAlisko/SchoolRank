@@ -249,6 +249,7 @@ func main() {
 	router.HandleFunc("/api/subject-olympiads/{id}", SubjectOlympiadController.EditOlympiadsCreated(db)).Methods("PUT")
 	router.HandleFunc("/api/subject-olympiads/{id}", SubjectOlympiadController.DeleteSubjectOlympiad(db)).Methods("DELETE")
 	router.HandleFunc("/api/subject-olympiads/participants/{subject_olympiad_id}", SubjectOlympiadController.GetOlympiadParticipants(db)).Methods("GET")
+	router.HandleFunc("/api/schools/{school_id}/olympiad-stats", SubjectOlympiadController.GetSchoolOlympiadStats(db)).Methods("GET")
 
 	// =======================
 	// Контактная Events
