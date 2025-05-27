@@ -1,19 +1,19 @@
 package models
 
-// Review представляет отзыв пользователя о школе.
+
 type Review struct {
-	ID         int     `json:"id"`         // Идентификатор отзыва
-	SchoolID   int     `json:"school_id"`  // Идентификатор школы
-	UserID     int     `json:"user_id"`    // Идентификатор пользователя
-	Rating     float64 `json:"rating"`     // Оценка от 1 до 5
-	Comment    string  `json:"comment"`    // Текст отзыва
-	CreatedAt  string  `json:"created_at"` // Дата и время создания отзыва
+	ID         int     `json:"id"`         
+	SchoolID   int     `json:"school_id"`  
+	UserID     int     `json:"user_id"`   
+	Rating     float64 `json:"rating"`   
+	Comment    string  `json:"comment"`   
+	CreatedAt  string  `json:"created_at"` 
 	SchoolName string  `json:"school_name"`
-	Likes      int     `json:"likes"` // Количество лайков
+	Likes      int     `json:"likes"` 
 }
 type Like struct {
-	ID        int    `json:"id"`         // Идентификатор лайка
-	ReviewID  int    `json:"review_id"`  // Идентификатор отзыва
-	UserID    int    `json:"user_id"`    // Идентификатор пользователя
-	CreatedAt string `json:"created_at"` // Дата и время создания лайка
+	ID        int    `json:"id"`         
+	ReviewID  int    `json:"review_id"`  
+	UserID    int    `json:"user_id"`    
+	CreatedAt string `json:"created_at"` 
 }

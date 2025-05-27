@@ -1,6 +1,6 @@
 package models
 
-// Структура для хранения данных студента с рейтингом
+
 type StudentRating struct {
     StudentID          int     `json:"student_id"`
     Year               int     `json:"year"`
@@ -14,6 +14,6 @@ type StudentRating struct {
     HistoryKazakhstan  int     `json:"history_of_kazakhstan"`
     ReadingLiteracy    int     `json:"reading_literacy"`
  MathematicalLiteracy int    `json:"mathematical_literacy"`
-    Rating             float64 `json:"rating"` // Рассчитанный рейтинг
+    Rating             float64 `json:"rating"` 
     
 }

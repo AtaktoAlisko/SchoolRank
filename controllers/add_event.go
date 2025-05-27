@@ -1418,8 +1418,6 @@ func getEventByID(db *sql.DB, id int) (models.Event, error) {
 	}
 	return event, nil
 }
-
-// GetEventsByCategory returns events filtered by category with specific fields
 func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check that GET method is used

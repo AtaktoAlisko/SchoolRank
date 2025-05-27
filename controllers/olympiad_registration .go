@@ -1216,3 +1216,48 @@ func (c *OlympiadRegistrationController) GetOlympiadRegistrationsBySchoolID(db *
 		utils.ResponseJSON(w, registrations)
 	}
 }
+func (c *OlympiadRegistrationController) GetOlympiadPrizeStatsBySchoolID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Verify JWT token
+		_, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
+
+		// Extract school_id from URL parameters
+		vars := mux.Vars(r)
+		schoolIDStr := vars["school_id"]
+		schoolID, err := strconv.Atoi(schoolIDStr)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+			return
+		}
+
+		// Query to count places by school_id
+		query := `
+			SELECT 
+				COALESCE(SUM(CASE WHEN olympiad_place = 1 THEN 1 ELSE 0 END), 0) as first_place,
+				COALESCE(SUM(CASE WHEN olympiad_place = 2 THEN 1 ELSE 0 END), 0) as second_place,
+				COALESCE(SUM(CASE WHEN olympiad_place = 3 THEN 1 ELSE 0 END), 0) as third_place
+			FROM olympiad_registrations 
+			WHERE school_id = ? AND olympiad_place IS NOT NULL
+		`
+
+		var firstPlace, secondPlace, thirdPlace int
+		err = db.QueryRow(query, schoolID).Scan(&firstPlace, &secondPlace, &thirdPlace)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error querying prize statistics"})
+			return
+		}
+
+		// Prepare response
+		response := map[string]int{
+			"FirstPlace":  firstPlace,
+			"SecondPlace": secondPlace,
+			"ThirdPlace":  thirdPlace,
+		}
+
+		utils.ResponseJSON(w, response)
+	}
+}

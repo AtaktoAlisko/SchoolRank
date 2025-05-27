@@ -14,7 +14,7 @@ import (
 
 type UNTTypeController struct{}
 
-// Функция создания UNT типа
+
 func (sc UNTTypeController) CreateUNTType(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var untType models.UNTType

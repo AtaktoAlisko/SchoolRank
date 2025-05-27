@@ -15,7 +15,7 @@ import (
 
 type SchoolRatingController struct{}
 
-// GetSchoolCompleteRating возвращает полный рейтинг школы, включающий все компоненты
+
 func (src *SchoolRatingController) GetSchoolCompleteRating(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Step 1: Проверяем метод запроса
@@ -130,8 +130,6 @@ func (src *SchoolRatingController) GetSchoolCompleteRating(db *sql.DB) http.Hand
 		utils.ResponseJSON(w, response)
 	}
 }
-
-// getUNTRank получает UNT рейтинг школы
 func (src *SchoolRatingController) getUNTRank(db *sql.DB, schoolID int64) (float64, error) {
 	query := `
         SELECT 
@@ -199,8 +197,6 @@ func (src *SchoolRatingController) getUNTRank(db *sql.DB, schoolID int64) (float
 	untRank := (25.0 / 100.0) * combinedAverage
 	return untRank, nil
 }
-
-// getEventScore получает счет событий школы
 func (src *SchoolRatingController) getEventScore(db *sql.DB, schoolID int64) (float64, error) {
 	// Получаем количество событий для школы
 	var eventCount int
@@ -236,8 +232,6 @@ func (src *SchoolRatingController) getEventScore(db *sql.DB, schoolID int64) (fl
 
 	return score, nil
 }
-
-// getParticipantPoints получает очки участников школы
 func (src *SchoolRatingController) getParticipantPoints(db *sql.DB, schoolID int64) (float64, error) {
 	// Получаем общее количество участников по всем школам
 	var maxParticipants int
@@ -272,8 +266,6 @@ func (src *SchoolRatingController) getParticipantPoints(db *sql.DB, schoolID int
 
 	return points, nil
 }
-
-// getAverageRatingRank получает рейтинг отзывов школы
 func (src *SchoolRatingController) getAverageRatingRank(db *sql.DB, schoolID int64) (float64, error) {
 	query := `SELECT AVG(rating) FROM Reviews WHERE school_id = ?`
 	var averageRating float64
@@ -290,8 +282,6 @@ func (src *SchoolRatingController) getAverageRatingRank(db *sql.DB, schoolID int
 	averageRatingRank := averageRating * 2
 	return averageRatingRank, nil
 }
-
-// getOlympiadRank получает олимпиадный рейтинг школы
 func (src *SchoolRatingController) getOlympiadRank(db *sql.DB, schoolID int64) (float64, error) {
 	// Используем существующую функцию calculateOlympiadRatingByLevel
 	cityRating := calculateOlympiadRatingByLevel(db, int(schoolID), "city", 0.2)

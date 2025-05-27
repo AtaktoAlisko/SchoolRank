@@ -15,6 +15,6 @@ type SubjectOlympiad struct {
 	SchoolName       string  `json:"school_name"`
 	Expired          bool    `json:"expired"`
 	PhotoURL         *string `json:"photo_url"`
-	Participants     int     `json:"participants"` // <- new
-	Location         string  `json:"location"`     // <- renamed
+	Participants     int     `json:"participants"`
+	Location         string  `json:"location"`    
 }

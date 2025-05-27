@@ -1147,3 +1147,4 @@ func getAllSchools(db *sql.DB) ([]models.School, error) {
 
 	return schools, nil
 }
+

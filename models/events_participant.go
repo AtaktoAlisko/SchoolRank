@@ -1,6 +1,6 @@
 package models
 
-// EventsParticipant represents a participant in a school event
+
 type EventsParticipant struct {
 	ID         int    `json:"id"`
 	SchoolID   int    `json:"school_id"`
@@ -12,7 +12,6 @@ type EventsParticipant struct {
 	Category   string `json:"category"`
 	Role       string `json:"role"`
 	Date       string `json:"date"`
-	// Additional fields for response enrichment
 	StudentName      string `json:"student_name,omitempty"`
 	StudentLastName  string `json:"student_lastname,omitempty"`
 	SchoolName       string `json:"school_name,omitempty"`

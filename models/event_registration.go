@@ -11,7 +11,7 @@ type EventRegistration struct {
 	SchoolID            int       `json:"school_id"`
 	Message             string    `json:"message"`
 
-	// Student data from Students table
+
 	StudentName       string `json:"student_name"`
 	StudentFirstName  string `json:"student_first_name"`
 	StudentLastName   string `json:"student_last_name"`
@@ -19,10 +19,9 @@ type EventRegistration struct {
 	StudentGrade      string `json:"student_grade"`
 	StudentLetter     string `json:"student_letter"`
 	StudentRole       string `json:"student_role"`
-	// School data from Schools table
 	SchoolName string `json:"school_name"`
 
-	// Event data from Events table (optional, for when you need full event info)
+
 	EventName      string `json:"event_name,omitempty"`
 	EventLocation  string `json:"event_location,omitempty"`
 	EventStartDate string `json:"event_start_date,omitempty"`

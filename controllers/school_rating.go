@@ -6,7 +6,7 @@ import (
 	"math"
 )
 
-// 1. Event Participants Percentage
+
 func GetEventParticipantRank(db *sql.DB, schoolID int) (float64, string, error) {
 	var schoolName string
 	var participantCount int
@@ -40,8 +40,6 @@ func GetEventParticipantRank(db *sql.DB, schoolID int) (float64, string, error) 
 
 	return percentage, schoolName, nil
 }
-
-// 2. Event Score
 func GetEventScoreRank(db *sql.DB, schoolID int) (float64, error) {
 	var eventCount int
 	err := db.QueryRow(`
@@ -64,8 +62,6 @@ func GetEventScoreRank(db *sql.DB, schoolID int) (float64, error) {
 	score := (float64(eventCount) / float64(maxEventCount)) * 10
 	return math.Round(score*100) / 100, nil
 }
-
-// 3. UNT Rank (25% of normalized score)
 func GetUNTRank(db *sql.DB, schoolID int) (float64, error) {
 	query := `
 		SELECT exam_type, AVG(total_score), COUNT(*)
@@ -110,8 +106,6 @@ func GetUNTRank(db *sql.DB, schoolID int) (float64, error) {
 	untRank := (25.0 / 100.0) * combined
 	return math.Round(untRank*100) / 100, nil
 }
-
-// 4. Review Rank (rating * 2)
 func GetReviewRank(db *sql.DB, schoolID int) (float64, error) {
 	var avgRating float64
 	err := db.QueryRow(`SELECT AVG(rating) FROM Reviews WHERE school_id = ?`, schoolID).Scan(&avgRating)
@@ -120,8 +114,6 @@ func GetReviewRank(db *sql.DB, schoolID int) (float64, error) {
 	}
 	return math.Round(avgRating*2*100) / 100, nil
 }
-
-// 5. Olympiad Rank (sum of weighted levels * 25)
 func GetOlympiadRank(db *sql.DB, schoolID int) (float64, string, error) {
 	getLevelRating := func(level string, weight float64) float64 {
 		var count int

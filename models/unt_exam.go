@@ -1,6 +1,6 @@
 package models
 
-// UNTExam represents a unified structure for both Regular and Creative exam types
+
 type UNTExam struct {
 	ID                   int    `json:"id"`
 	ExamType             string `json:"exam_type"` // "regular" or "creative"
