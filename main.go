@@ -281,7 +281,7 @@ func main() {
 	router.HandleFunc("/api/olympiads/registrations/by-month", OlympiadRegistrationController.GetRegistrationsByMonth(db)).Methods("GET")
 	router.HandleFunc("/api/olympiad-registrations/{id}", OlympiadRegistrationController.GetOlympiadRegistrationByID(db)).Methods("GET")
 	router.HandleFunc("/api/olympiad-registrations/school/{school_id}", OlympiadRegistrationController.GetOlympiadRegistrationsBySchoolID(db)).Methods("GET")
-	router.HandleFunc("/api/schools/${school_id}/olympiad-prize-stats", OlympiadRegistrationController.GetOlympiadPrizeStatsBySchoolID(db)).Methods("GET")
+	router.HandleFunc("/api/schools/{school_id}/olympiad-prize-stats", OlympiadRegistrationController.GetOlympiadPrizeStatsBySchoolID(db)).Methods("GET")
 
 	// =======================
 	// Dashboard (superadmin)
