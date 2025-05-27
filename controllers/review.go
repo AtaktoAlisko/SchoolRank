@@ -214,8 +214,8 @@ func (rc *ReviewController) GetAverageRating(db *sql.DB) http.HandlerFunc {
 		// Получаем school_id из параметров запроса
 		schoolID := mux.Vars(r)["school_id"]
 
-		// Запрос на получение среднего рейтинга по школе
-		query := `SELECT AVG(rating) FROM Reviews WHERE school_id = ?`
+		// Запрос на получение среднего рейтинга по школе с обработкой NULL
+		query := `SELECT COALESCE(AVG(rating), 0) FROM Reviews WHERE school_id = ?`
 		var averageRating float64
 		err := db.QueryRow(query, schoolID).Scan(&averageRating)
 		if err != nil {
