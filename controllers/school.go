@@ -630,6 +630,7 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 			SchoolName       string   `json:"school_name"`
 			SchoolAddress    *string  `json:"school_address"`
 			City             string   `json:"city"`
+			AboutSchool      *string  `json:"about_school"`
 			PhotoURL         *string  `json:"photo_url"`
 			SchoolPhone      *string  `json:"school_phone"`
 			SchoolAdminLogin *string  `json:"school_admin_login"`
@@ -687,6 +688,11 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 				schoolAddress = &school.SchoolAddress.String
 			}
 
+			var aboutSchool *string
+			if school.AboutSchool.Valid {
+				aboutSchool = &school.AboutSchool.String
+			}
+
 			var photoURL *string
 			if school.PhotoURL.Valid && school.PhotoURL.String != "" {
 				photoURL = &school.PhotoURL.String
@@ -722,6 +728,7 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 				SchoolName       string   `json:"school_name"`
 				SchoolAddress    *string  `json:"school_address"`
 				City             string   `json:"city"`
+				AboutSchool      *string  `json:"about_school"`
 				PhotoURL         *string  `json:"photo_url"`
 				SchoolPhone      *string  `json:"school_phone"`
 				SchoolAdminLogin *string  `json:"school_admin_login"`
@@ -735,6 +742,7 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 				SchoolName:       school.SchoolName,
 				SchoolAddress:    schoolAddress,
 				City:             school.City,
+				AboutSchool:      aboutSchool,
 				PhotoURL:         photoURL,
 				SchoolPhone:      schoolPhone,
 				SchoolAdminLogin: adminLogin,
@@ -1147,4 +1155,3 @@ func getAllSchools(db *sql.DB) ([]models.School, error) {
 
 	return schools, nil
 }
-
