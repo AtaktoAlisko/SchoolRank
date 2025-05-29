@@ -541,25 +541,133 @@ func (rc *ReviewController) DeleteReview(db *sql.DB) http.HandlerFunc {
 	}
 }
 func (rc *ReviewController) GetAverageRatingRank(db *sql.DB) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        // Получаем school_id из параметров запроса
-        schoolID := mux.Vars(r)["school_id"]
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Получаем school_id из параметров запроса
+		schoolID := mux.Vars(r)["school_id"]
 
-        // Запрос на получение среднего рейтинга по школе
-        query := `SELECT AVG(rating) FROM Reviews WHERE school_id = ?`
-        var averageRating float64
-        err := db.QueryRow(query, schoolID).Scan(&averageRating)
-        if err != nil {
-            log.Println("SQL Error:", err)
-            utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get average rating rank"})
-            return
-        }
+		// Запрос на получение среднего рейтинга по школе
+		query := `SELECT AVG(rating) FROM Reviews WHERE school_id = ?`
+		var averageRating float64
+		err := db.QueryRow(query, schoolID).Scan(&averageRating)
+		if err != nil {
+			log.Println("SQL Error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get average rating rank"})
+			return
+		}
 
-        // Вычисляем average_rating_rank как средний рейтинг, умноженный на 2
-        averageRatingRank := averageRating * 2
+		// Вычисляем average_rating_rank как средний рейтинг, умноженный на 2
+		averageRatingRank := averageRating * 2
 
-        utils.ResponseJSON(w, map[string]interface{}{
-            "average_rating_rank": averageRatingRank,
-        })
-    }
+		utils.ResponseJSON(w, map[string]interface{}{
+			"average_rating_rank": averageRatingRank,
+		})
+	}
+}
+
+type ReviewResponse struct {
+	*models.Review
+	FirstName *string `json:"first_name,omitempty"`
+	LastName  *string `json:"last_name,omitempty"`
+	AvatarURL *string `json:"avatar_url"` // Removed omitempty to ensure field is always present
+}
+
+func (rc *ReviewController) GetReviewUserBySchoolID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Get the school ID from the URL parameters
+		vars := mux.Vars(r)
+		schoolID := vars["school_id"]
+
+		// Convert the school ID to integer
+		schoolIDInt, err := strconv.Atoi(schoolID)
+		if err != nil {
+			log.Println("Invalid school ID:", err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+			return
+		}
+
+		// Step 2: Get reviews for the specific school, including user details
+		reviewsQuery := `
+			SELECT 
+				r.id, 
+				r.school_id, 
+				r.user_id, 
+				r.rating, 
+				r.comment, 
+				r.created_at,
+				s.school_name,
+				(SELECT COUNT(*) FROM Likes l WHERE l.review_id = r.id) as likes,
+				u.first_name,
+				u.last_name,
+				u.avatar_url
+			FROM Reviews r
+			JOIN Schools s ON r.school_id = s.school_id
+			JOIN users u ON r.user_id = u.id
+			WHERE r.school_id = ?
+		`
+		rows, err := db.Query(reviewsQuery, schoolIDInt)
+		if err != nil {
+			log.Println("SQL Error (Reviews):", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get reviews"})
+			return
+		}
+		defer rows.Close()
+
+		// Create a slice to hold the review responses
+		var reviews []ReviewResponse
+
+		// Step 3: Scan reviews into the slice
+		for rows.Next() {
+			var review ReviewResponse
+			review.Review = &models.Review{} // Initialize the embedded Review struct
+			var firstName, lastName, avatarURL sql.NullString
+
+			// Scan the row into the ReviewResponse struct
+			err := rows.Scan(
+				&review.ID,
+				&review.SchoolID,
+				&review.UserID,
+				&review.Rating,
+				&review.Comment,
+				&review.CreatedAt,
+				&review.SchoolName,
+				&review.Likes,
+				&firstName,
+				&lastName,
+				&avatarURL,
+			)
+			if err != nil {
+				log.Println("Scan Error:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to parse reviews"})
+				return
+			}
+
+			// Handle nullable first_name and last_name
+			if firstName.Valid {
+				review.FirstName = &firstName.String
+			}
+			if lastName.Valid {
+				review.LastName = &lastName.String
+			}
+
+			// Handle nullable avatar_url
+			if avatarURL.Valid && avatarURL.String != "" {
+				review.AvatarURL = &avatarURL.String
+			} else {
+				review.AvatarURL = nil
+			}
+
+			// Append the review to the slice
+			reviews = append(reviews, review)
+		}
+
+		// Check for errors after processing all rows
+		if err := rows.Err(); err != nil {
+			log.Println("Rows Error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing reviews"})
+			return
+		}
+
+		// Step 4: Return the list of reviews with school names and user details
+		utils.ResponseJSON(w, reviews)
+	}
 }

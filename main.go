@@ -132,10 +132,7 @@ func main() {
 	router.HandleFunc("/api/schools/{id}", schoolController.GetSchoolByID(db)).Methods("GET")
 	router.HandleFunc("/api/schools/ranking/top", schoolController.GetTopSchoolsByRating(db)).Methods("GET")
 
-	// Вариант 2: Или используйте query параметр
 	router.HandleFunc("/api/schools/ranking", schoolController.GetTopSchoolsByRating(db)).Methods("GET")
-
-	// Вариант 3: Или создайте отдельную группу для статистики
 	router.HandleFunc("/api/statistics/schools/top", schoolController.GetTopSchoolsByRating(db)).Methods("GET")
 
 	// =======================
@@ -148,6 +145,8 @@ func main() {
 	router.HandleFunc("/api/schools/{school_id}/reviews", reviewController.GetReviewsBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/reviews/average-rating", reviewController.GetAverageRating(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/reviews/average-rating/rank", reviewController.GetAverageRatingRank(db)).Methods("GET")
+	// router.HandleFunc("/api/reviews/user", reviewController.GetReviews(db)).Methods("GET") //GetAllReviews сиякты бырак атымен
+	router.HandleFunc("/api/reviews/user/{school_id}", reviewController.GetReviewUserBySchoolID(db)).Methods("GET")
 
 	// =======================
 	// Работа с UNT Scores (оценками)
