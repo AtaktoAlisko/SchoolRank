@@ -269,7 +269,6 @@ func main() {
 	// Контактная информация
 	// =======================
 	router.HandleFunc("/api/contact", contactController.CreateContactRequest(db)).Methods("POST")
-	router.HandleFunc("/api/olympiads", olympiadController.CreateOlympiad(db)).Methods("POST")
 
 	router.HandleFunc("/api/olympiads/register", OlympiadRegistrationController.RegisterStudent(db)).Methods("POST")
 	router.HandleFunc("/api/olympiads/registrations", OlympiadRegistrationController.GetOlympiadRegistrations(db)).Methods("GET")
