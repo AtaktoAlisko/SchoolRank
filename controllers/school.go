@@ -1024,13 +1024,7 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Return response with school data
-		response := struct {
-			School interface{} `json:"school"`
-		}{
-			School: responseSchool,
-		}
-
-		utils.ResponseJSON(w, response)
+		utils.ResponseJSON(w, responseSchool)
 	}
 }
 func (sc *SchoolController) GetSchoolCount(db *sql.DB) http.HandlerFunc {

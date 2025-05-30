@@ -1302,10 +1302,7 @@ func (c *UNTScoreController) GetTop3UNTStudentsBySchoolID(db *sql.DB) http.Handl
 
 		// Step 9: Return the response
 		log.Printf("Successfully retrieved top 3 UNT students for school ID %d, user ID %d", schoolID, userID)
-		utils.ResponseJSON(w, map[string]interface{}{
-			"message": "Top 3 UNT students for the school",
-			"data":    topStudents,
-		})
+		utils.ResponseJSON(w, topStudents)
 	}
 }
 func (c *UNTScoreController) GetUNTScoreByStudentID(db *sql.DB) http.HandlerFunc {

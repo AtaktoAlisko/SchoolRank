@@ -74,6 +74,7 @@ func main() {
 	eventController := controllers.EventController{}
 	EventsParticipantController := controllers.EventsParticipantController{}
 	EventsRegistrationController := controllers.EventsRegistrationController{}
+	olympiadController := &controllers.OlympiadController{}
 
 	router := mux.NewRouter()
 
@@ -146,7 +147,6 @@ func main() {
 	router.HandleFunc("/api/schools/{school_id}/reviews/average-rating", reviewController.GetAverageRating(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/reviews/average-rating/rank", reviewController.GetAverageRatingRank(db)).Methods("GET")
 	// router.HandleFunc("/api/reviews/user", reviewController.GetReviews(db)).Methods("GET") //GetAllReviews сиякты бырак атымен
-	router.HandleFunc("/api/reviews/user/{school_id}", reviewController.GetReviewUserBySchoolID(db)).Methods("GET")
 
 	// =======================
 	// Работа с UNT Scores (оценками)
@@ -269,6 +269,7 @@ func main() {
 	// Контактная информация
 	// =======================
 	router.HandleFunc("/api/contact", contactController.CreateContactRequest(db)).Methods("POST")
+	router.HandleFunc("/api/olympiads", olympiadController.CreateOlympiad(db)).Methods("POST")
 
 	router.HandleFunc("/api/olympiads/register", OlympiadRegistrationController.RegisterStudent(db)).Methods("POST")
 	router.HandleFunc("/api/olympiads/registrations", OlympiadRegistrationController.GetOlympiadRegistrations(db)).Methods("GET")
@@ -300,6 +301,12 @@ func main() {
 	router.HandleFunc("/api/schools/{school_id}/event-stats", EventsParticipantController.CountOlympiadParticipantsBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/top-3-unt-students", untScoreController.GetTop3UNTStudentsBySchoolID(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/reviews/average-rating", reviewController.GetAverageRating(db)).Methods("GET")
+	// olympiad participants
+	router.HandleFunc("/api/olympiads", olympiadController.CreateOlympiad(db)).Methods("POST")
+	router.HandleFunc("/api/olympiads", olympiadController.GetOlympiad(db)).Methods("GET")
+	router.HandleFunc("/api/olympiads/{school_id}", olympiadController.GetOlympiadById(db)).Methods("GET")
+	router.HandleFunc("/api/olympiads/{olympiad_id}", olympiadController.DeleteOlympiad(db)).Methods("DELETE")
+	router.HandleFunc("/api/olympiads/{olympiad_id}", olympiadController.UpdateOlympiad(db)).Methods("PUT")
 
 	// Включаем CORS
 	handler := corsMiddleware(router)
