@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"ranking-school/models"
 	"ranking-school/utils"
@@ -15,6 +17,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/golang-jwt/jwt"
 	"github.com/gorilla/mux"
 )
@@ -81,46 +87,163 @@ func (oc *OlympiadController) CreateOlympiad(db *sql.DB) http.HandlerFunc {
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch user info"})
 			return
 		}
+
 		var studentSchoolID int
 		err = db.QueryRow("SELECT school_id FROM student WHERE student_id = ?", studentID).Scan(&studentSchoolID)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Student not found"})
 			return
 		}
+
 		if role == "schooladmin" && (!schoolID.Valid || int(schoolID.Int64) != studentSchoolID) {
 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Student does not belong to your school"})
 			return
 		}
 
 		// Загрузка файла
-		file, handler, err := r.FormFile("document")
 		var documentURL string
-		if err == nil {
+		file, handler, err := r.FormFile("document")
+		if err != nil {
+			// Файл не был загружен или произошла ошибка при получении файла
+			if err != http.ErrMissingFile {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Error getting file from form"})
+				return
+			}
+			// Если файл просто отсутствует, оставляем documentURL пустым
+			documentURL = ""
+		} else {
 			defer file.Close()
+
+			// Проверяем размер файла
+			if handler.Size > 10<<20 { // 10MB
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "File size exceeds 10MB limit"})
+				return
+			}
+
 			fileExt := filepath.Ext(handler.Filename)
 			fileName := fmt.Sprintf("olympiads/%d_%s%s", studentID, time.Now().Format("20060102150405"), fileExt)
 
-			// Загружаем файл в S3 вместо локального хранилища
-			documentURL, err = utils.UploadFileToS3(file, fileName, "olympiaddoc") // Указываем полный путь к функции
+			// Загружаем файл в S3
+			documentURL, err = utils.UploadFileToS3(file, fileName, "olympiaddoc")
 			if err != nil {
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: fmt.Sprintf("Failed to upload document to S3: %v", err)})
 				return
 			}
-		} else {
-			documentURL = ""
 		}
 
 		// Вставка в БД с учетом поля date
-		query := `INSERT INTO Olympiads (student_id, olympiad_place, score, school_id, level, olympiad_name, document_url, date) 
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-		_, err = db.Exec(query, studentID, place, score, studentSchoolID, level, name, documentURL, date)
+		query := `INSERT INTO Olympiads (student_id, olympiad_place, score, school_id, level, olympiad_name, document_url, date)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+
+		result, err := db.Exec(query, studentID, place, score, studentSchoolID, level, name, documentURL, date)
 		if err != nil {
+			// Если файл был загружен в S3, но произошла ошибка при записи в БД,
+			// можно добавить логику для удаления файла из S3
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to insert olympiad"})
 			return
 		}
 
-		utils.ResponseJSON(w, "Olympiad created with document successfully")
+		// Получаем ID созданной записи для подтверждения
+		olympiadID, _ := result.LastInsertId()
+
+		response := map[string]interface{}{
+			"message":      "Olympiad created successfully",
+			"olympiad_id":  olympiadID,
+			"document_url": documentURL,
+		}
+
+		utils.ResponseJSON(w, response)
 	}
+}
+
+func UploadFileToS3(file multipart.File, fileName string, fileType string) (string, error) {
+	var accessKey, secretKey, region, bucketName string
+
+	// Выбираем набор ключей и бакет в зависимости от типа файла
+	switch fileType {
+	case "avatar":
+		accessKey = os.Getenv("AWS_ACCESS_KEY2_ID")
+		secretKey = os.Getenv("AWS_SECRET_ACCESS2_KEY")
+		region = os.Getenv("AWS_REGION2")
+		bucketName = "avatarschoolrank" // Бакет для аватаров
+	case "schoolphoto":
+		accessKey = os.Getenv("AWS_ACCESS_KEY_ID")
+		secretKey = os.Getenv("AWS_SECRET_ACCESS_KEY")
+		region = os.Getenv("AWS_REGION")
+		bucketName = "schoolrank-schoolphotos" // Бакет для школьных фото
+	case "olympiaddoc":
+		accessKey = os.Getenv("AWS_ACCESS_KEY3_ID")
+		secretKey = os.Getenv("AWS_SECRET_ACCESS3_KEY")
+		region = os.Getenv("AWS_REGION3")
+		bucketName = "olympiaddocument" // Бакет для документов олимпиад
+	default:
+		return "", fmt.Errorf("unknown file type: %s", fileType)
+	}
+
+	// Проверяем, что ключи и регион заданы
+	if accessKey == "" || secretKey == "" || region == "" || bucketName == "" {
+		return "", fmt.Errorf("AWS credentials, region or bucket name not set in environment for %s", fileType)
+	}
+
+	// Создаем сессию с AWS
+	sess, err := session.NewSession(&aws.Config{
+		Region:      aws.String(region),
+		Credentials: credentials.NewStaticCredentials(accessKey, secretKey, ""),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create AWS session: %v", err)
+	}
+
+	// Создаем клиент для S3
+	svc := s3.New(sess)
+
+	// Считываем файл в буфер
+	buf := new(bytes.Buffer)
+	_, err = io.Copy(buf, file)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file buffer: %v", err)
+	}
+
+	// Сброс указателя файла в начало (на случай, если файл читался ранее)
+	if seeker, ok := file.(io.Seeker); ok {
+		seeker.Seek(0, io.SeekStart)
+	}
+
+	// Определяем Content-Type на основе расширения файла
+	contentType := "application/octet-stream" // По умолчанию
+	if ext := filepath.Ext(fileName); ext != "" {
+		switch strings.ToLower(ext) {
+		case ".pdf":
+			contentType = "application/pdf"
+		case ".doc":
+			contentType = "application/msword"
+		case ".docx":
+			contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+		case ".jpg", ".jpeg":
+			contentType = "image/jpeg"
+		case ".png":
+			contentType = "image/png"
+		}
+	}
+
+	// Задаем параметры для загрузки
+	input := &s3.PutObjectInput{
+		Bucket:      aws.String(bucketName),
+		Key:         aws.String(fileName),
+		Body:        bytes.NewReader(buf.Bytes()),
+		ContentType: aws.String(contentType),
+		ACL:         aws.String("public-read"), // Делаем файл публично доступным
+	}
+
+	// Загружаем файл в S3
+	_, err = svc.PutObject(input)
+	if err != nil {
+		return "", fmt.Errorf("failed to upload file to S3: %v", err)
+	}
+
+	// Формируем URL для доступа к файлу
+	url := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", bucketName, region, fileName)
+	return url, nil
 }
 func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
