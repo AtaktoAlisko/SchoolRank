@@ -15,7 +15,6 @@ import (
 
 type SchoolRatingController struct{}
 
-
 func (src *SchoolRatingController) GetSchoolCompleteRating(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Step 1: Проверяем метод запроса
@@ -267,18 +266,15 @@ func (src *SchoolRatingController) getParticipantPoints(db *sql.DB, schoolID int
 	return points, nil
 }
 func (src *SchoolRatingController) getAverageRatingRank(db *sql.DB, schoolID int64) (float64, error) {
-	query := `SELECT AVG(rating) FROM Reviews WHERE school_id = ?`
+	query := `SELECT COALESCE(AVG(rating), 0) FROM Reviews WHERE school_id = ?`
 	var averageRating float64
 	err := db.QueryRow(query, schoolID).Scan(&averageRating)
 	if err != nil {
-		// Если нет отзывов, возвращаем 0
-		if err == sql.ErrNoRows {
-			return 0.0, nil
-		}
+		// Log the error and return 0.0 with the error for upstream handling
 		return 0.0, err
 	}
 
-	// Вычисляем average_rating_rank как средний рейтинг, умноженный на 2
+	// Calculate average_rating_rank as the average rating multiplied by 2
 	averageRatingRank := averageRating * 2
 	return averageRatingRank, nil
 }

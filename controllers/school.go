@@ -1004,30 +1004,40 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 			// Continue without exam data rather than failing the entire request
 		}
 
+		// Calculate high achievers percentage
+		var highAchieversPercentage *float64
+		if regularCount > 0 {
+			percentage := (float64(highAchieversCount) / float64(regularCount)) * 100
+			roundedPercentage := math.Round(percentage*100) / 100 // Round to 2 decimal places
+			highAchieversPercentage = &roundedPercentage
+		}
+
 		// Prepare response struct for JSON serialization
 		responseSchool := struct {
-			SchoolID           int      `json:"school_id"`
-			UserID             int      `json:"user_id"`
-			SchoolName         string   `json:"school_name"`
-			SchoolAddress      *string  `json:"school_address"`
-			City               string   `json:"city"`
-			PhotoURL           *string  `json:"photo_url"`
-			SchoolEmail        *string  `json:"school_email"`
-			SchoolPhone        *string  `json:"school_phone"`
-			SchoolAdminLogin   *string  `json:"school_admin_login"`
-			Specializations    []string `json:"specializations"`
-			AboutSchool        *string  `json:"about_school"`
-			RegularExamAverage *float64 `json:"regular_exam_average,omitempty"`
-			RegularExamCount   int      `json:"regular_exam_count"`
-			HighAchieversCount int      `json:"high_achievers_count"`
+			SchoolID                int      `json:"school_id"`
+			UserID                  int      `json:"user_id"`
+			SchoolName              string   `json:"school_name"`
+			SchoolAddress           *string  `json:"school_address"`
+			City                    string   `json:"city"`
+			PhotoURL                *string  `json:"photo_url"`
+			SchoolEmail             *string  `json:"school_email"`
+			SchoolPhone             *string  `json:"school_phone"`
+			SchoolAdminLogin        *string  `json:"school_admin_login"`
+			Specializations         []string `json:"specializations"`
+			AboutSchool             *string  `json:"about_school"`
+			RegularExamAverage      *float64 `json:"regular_exam_average,omitempty"`
+			RegularExamCount        int      `json:"regular_exam_count"`
+			HighAchieversCount      int      `json:"high_achievers_count"`
+			HighAchieversPercentage *float64 `json:"high_achievers_percentage,omitempty"`
 		}{
-			SchoolID:           school.SchoolID,
-			UserID:             school.UserID,
-			SchoolName:         school.SchoolName,
-			City:               school.City,
-			Specializations:    school.Specializations,
-			RegularExamCount:   regularCount,
-			HighAchieversCount: highAchieversCount,
+			SchoolID:                school.SchoolID,
+			UserID:                  school.UserID,
+			SchoolName:              school.SchoolName,
+			City:                    school.City,
+			Specializations:         school.Specializations,
+			RegularExamCount:        regularCount,
+			HighAchieversCount:      highAchieversCount,
+			HighAchieversPercentage: highAchieversPercentage,
 		}
 
 		// Assign nullable fields
