@@ -1210,12 +1210,8 @@ func (c *UNTScoreController) GetTop3UNTStudentsBySchoolID(db *sql.DB) http.Handl
 			return
 		}
 
-		// Step 3: Check access permissions
-		if userRole != "superadmin" && userRole != "schooladmin" {
-			log.Printf("Access denied for user ID %d with role %s", userID, userRole)
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view UNT statistics"})
-			return
-		}
+		// Step 3: Check access permissions - теперь разрешаем всем авторизованным пользователям
+		// Убираем ограничение по ролям, так как теперь все роли могут просматривать статистику
 
 		// Step 4: Extract school_id from URL
 		vars := mux.Vars(r)
@@ -1227,7 +1223,7 @@ func (c *UNTScoreController) GetTop3UNTStudentsBySchoolID(db *sql.DB) http.Handl
 			return
 		}
 
-		// Step 5: Restrict schooladmin to their school
+		// Step 5: Restrict schooladmin to their school (остальные роли могут смотреть любые школы)
 		if userRole == "schooladmin" {
 			if !userSchoolID.Valid {
 				log.Printf("No school_id associated with schooladmin user ID %d", userID)
@@ -1237,6 +1233,30 @@ func (c *UNTScoreController) GetTop3UNTStudentsBySchoolID(db *sql.DB) http.Handl
 			if int(userSchoolID.Int64) != schoolID {
 				log.Printf("Schooladmin user ID %d attempted to access school ID %d, but is assigned to school ID %d", userID, schoolID, userSchoolID.Int64)
 				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view this school's data"})
+				return
+			}
+		}
+
+		// Дополнительная проверка для role "student" - студент может смотреть только свою школу
+		if userRole == "student" {
+			// Получаем school_id студента из таблицы student
+			var studentSchoolID int
+			studentQuery := `SELECT school_id FROM student WHERE user_id = ?`
+			err = db.QueryRow(studentQuery, userID).Scan(&studentSchoolID)
+			if err != nil {
+				if err == sql.ErrNoRows {
+					log.Printf("Student record not found for user ID %d", userID)
+					utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Student record not found"})
+					return
+				}
+				log.Printf("Error fetching student school_id for user ID %d: %v", userID, err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching student details"})
+				return
+			}
+
+			if studentSchoolID != schoolID {
+				log.Printf("Student user ID %d attempted to access school ID %d, but belongs to school ID %d", userID, schoolID, studentSchoolID)
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only view your own school's data"})
 				return
 			}
 		}
@@ -1301,7 +1321,7 @@ func (c *UNTScoreController) GetTop3UNTStudentsBySchoolID(db *sql.DB) http.Handl
 		}
 
 		// Step 9: Return the response
-		log.Printf("Successfully retrieved top 3 UNT students for school ID %d, user ID %d", schoolID, userID)
+		log.Printf("Successfully retrieved top 3 UNT students for school ID %d, user ID %d (role: %s)", schoolID, userID, userRole)
 		utils.ResponseJSON(w, topStudents)
 	}
 }
