@@ -1004,6 +1004,25 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 			// Continue without exam data rather than failing the entire request
 		}
 
+		// Get review statistics for this school
+		var reviewCount int
+		var averageRating sql.NullFloat64
+
+		reviewQuery := `
+			SELECT 
+				COUNT(*) as review_count,
+				AVG(rating) as average_rating
+			FROM 
+				Reviews 
+			WHERE 
+				school_id = ?`
+
+		err = db.QueryRow(reviewQuery, schoolID).Scan(&reviewCount, &averageRating)
+		if err != nil && err != sql.ErrNoRows {
+			log.Printf("Error getting review data: %v", err)
+			// Continue without review data rather than failing the entire request
+		}
+
 		// Calculate high achievers percentage
 		var highAchieversPercentage *float64
 		if regularCount > 0 {
@@ -1029,6 +1048,8 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 			RegularExamCount        int      `json:"regular_exam_count"`
 			HighAchieversCount      int      `json:"high_achievers_count"`
 			HighAchieversPercentage *float64 `json:"high_achievers_percentage,omitempty"`
+			ReviewCount             int      `json:"review_count"`
+			AverageRating           *float64 `json:"average_rating,omitempty"`
 		}{
 			SchoolID:                school.SchoolID,
 			UserID:                  school.UserID,
@@ -1038,6 +1059,7 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 			RegularExamCount:        regularCount,
 			HighAchieversCount:      highAchieversCount,
 			HighAchieversPercentage: highAchieversPercentage,
+			ReviewCount:             reviewCount,
 		}
 
 		// Assign nullable fields
@@ -1064,6 +1086,12 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 		if regularAverage.Valid && regularCount > 0 {
 			roundedAverage := math.Round(regularAverage.Float64)
 			responseSchool.RegularExamAverage = &roundedAverage
+		}
+
+		// Add average rating if exists (rounded to 1 decimal place)
+		if averageRating.Valid && reviewCount > 0 {
+			roundedRating := math.Round(averageRating.Float64*10) / 10
+			responseSchool.AverageRating = &roundedRating
 		}
 
 		// Return response with school data
