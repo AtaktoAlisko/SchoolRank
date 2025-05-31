@@ -991,7 +991,7 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 			SELECT 
 				AVG(total_score) as average_score,
 				COUNT(*) as student_count,
-				SUM(CASE WHEN total_score > 100 THEN 1 ELSE 0 END) as high_achievers_count
+				COALESCE(SUM(CASE WHEN total_score > 100 THEN 1 ELSE 0 END), 0) as high_achievers_count
 			FROM 
 				UNT_Exams 
 			WHERE 
