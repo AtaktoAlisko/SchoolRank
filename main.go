@@ -139,6 +139,9 @@ func main() {
 	// =======================
 	// Работа с отзывами (Reviews)
 	// =======================
+	router.HandleFunc("/api/reviews/myreviews", reviewController.GetMyReviews(db)).Methods("GET")
+	router.HandleFunc("/api/reviews/myreviews/{review_id}", reviewController.DeleteMyReview(db)).Methods("DELETE")
+	router.HandleFunc("/api/reviews/myreviews/{review_id}", reviewController.UpdateMyReview(db)).Methods("PUT")
 	router.HandleFunc("/api/reviews", reviewController.CreateReview(db)).Methods("POST")
 	router.HandleFunc("/api/reviews/{id}", reviewController.DeleteReview(db)).Methods("DELETE")
 	router.HandleFunc("/api/reviews", reviewController.GetAllReviews(db)).Methods("GET")
@@ -146,6 +149,7 @@ func main() {
 	router.HandleFunc("/api/schools/{school_id}/reviews", reviewController.GetReviewsBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/reviews/average-rating", reviewController.GetAverageRating(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/reviews/average-rating/rank", reviewController.GetAverageRatingRank(db)).Methods("GET")
+
 	// router.HandleFunc("/api/reviews/user", reviewController.GetReviews(db)).Methods("GET") //GetAllReviews сиякты бырак атымен
 
 	// =======================

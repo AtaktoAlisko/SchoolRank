@@ -1253,9 +1253,9 @@ func (c *OlympiadRegistrationController) GetOlympiadPrizeStatsBySchoolID(db *sql
 
 		// Prepare response
 		response := map[string]int{
-			"FirstPlace":  firstPlace,
-			"SecondPlace": secondPlace,
-			"ThirdPlace":  thirdPlace,
+			"first_place":  firstPlace,
+			"second_place": secondPlace,
+			"third_place":  thirdPlace,
 		}
 
 		utils.ResponseJSON(w, response)

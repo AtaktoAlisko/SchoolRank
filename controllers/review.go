@@ -33,20 +33,16 @@ func (rc *ReviewController) CreateReview(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Validate that token user ID matches review user ID
-		if tokenUserID != review.UserID {
-			log.Println("Token user ID doesn't match review user ID")
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only submit reviews as yourself"})
-			return
-		}
+		// Automatically set user ID from token
+		review.UserID = tokenUserID
 
 		// Validate required fields
-		if review.SchoolID <= 0 || review.UserID <= 0 || review.Rating < 1 || review.Rating > 5 {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid review data: school_id and user_id must be positive, rating must be between 1 and 5"})
+		if review.SchoolID <= 0 || review.Rating < 1 || review.Rating > 5 {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid review data: school_id must be positive, rating must be between 1 and 5"})
 			return
 		}
 
-		// Check if user exists
+		// Check if user exists (optional check since we got ID from valid token)
 		var userExists bool
 		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)", review.UserID).Scan(&userExists)
 		if err != nil {
@@ -583,5 +579,269 @@ func (rc *ReviewController) GetReviewBySchoolID(db *sql.DB) http.HandlerFunc {
 
 		// Step 4: Return the list of reviews with school names and user details
 		utils.ResponseJSON(w, reviews)
+	}
+}
+func (rc *ReviewController) GetMyReviews(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Verify the user's token and get user ID
+		tokenUserID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		// Query to get all reviews by the current user with school information
+		query := `
+			SELECT 
+				r.id,
+				r.school_id,
+				s.school_name,
+				r.rating,
+				r.comment,
+				r.likes,
+				r.created_at
+			FROM Reviews r
+			LEFT JOIN Schools s ON r.school_id = s.school_id
+			WHERE r.user_id = ?
+			ORDER BY r.created_at DESC
+		`
+
+		rows, err := db.Query(query, tokenUserID)
+		if err != nil {
+			log.Println("Error querying user reviews:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error retrieving reviews"})
+			return
+		}
+		defer rows.Close()
+
+		var reviews []map[string]interface{}
+
+		for rows.Next() {
+			var reviewID, schoolID, rating, likes int
+			var schoolName, comment, createdAt sql.NullString
+
+			err := rows.Scan(&reviewID, &schoolID, &schoolName, &rating, &comment, &likes, &createdAt)
+			if err != nil {
+				log.Println("Error scanning review row:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing reviews"})
+				return
+			}
+
+			// Handle null values
+			schoolNameStr := ""
+			if schoolName.Valid {
+				schoolNameStr = schoolName.String
+			}
+
+			commentStr := ""
+			if comment.Valid {
+				commentStr = comment.String
+			}
+
+			createdAtStr := ""
+			if createdAt.Valid {
+				createdAtStr = createdAt.String
+			}
+
+			review := map[string]interface{}{
+				"id":          reviewID,
+				"review_id":   reviewID, // добавил review_id
+				"school_id":   schoolID,
+				"school_name": schoolNameStr,
+				"rating":      rating,
+				"comment":     commentStr,
+				"likes":       likes,
+				"created_at":  createdAtStr,
+			}
+
+			reviews = append(reviews, review)
+		}
+
+		// Check for errors during iteration
+		if err = rows.Err(); err != nil {
+			log.Println("Error during rows iteration:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing reviews"})
+			return
+		}
+
+		// Return reviews directly without wrapper
+		utils.ResponseJSON(w, reviews)
+	}
+}
+func (rc *ReviewController) DeleteMyReview(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Verify the user's token and get user ID
+		tokenUserID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		// Extract review_id from URL parameters
+		vars := mux.Vars(r)
+		reviewIDStr := vars["review_id"]
+		reviewID, err := strconv.Atoi(reviewIDStr)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid review ID"})
+			return
+		}
+
+		// Check if the review exists and belongs to the user
+		var existingUserID int
+		err = db.QueryRow("SELECT user_id FROM Reviews WHERE id = ?", reviewID).Scan(&existingUserID)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Review not found"})
+				return
+			}
+			log.Println("Error checking review ownership:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking review"})
+			return
+		}
+
+		// Verify that the review belongs to the current user
+		if existingUserID != tokenUserID {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only delete your own reviews"})
+			return
+		}
+
+		// Delete the review
+		result, err := db.Exec("DELETE FROM Reviews WHERE id = ? AND user_id = ?", reviewID, tokenUserID)
+		if err != nil {
+			log.Println("Error deleting review:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete review"})
+			return
+		}
+
+		// Check if any rows were affected
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			log.Println("Error checking rows affected:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error deleting review"})
+			return
+		}
+
+		if rowsAffected == 0 {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Review not found"})
+			return
+		}
+
+		// Success response
+		response := map[string]interface{}{
+			"message": "Review deleted successfully",
+		}
+
+		utils.ResponseJSON(w, response)
+	}
+}
+func (rc *ReviewController) UpdateMyReview(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Verify the user's token and get user ID
+		tokenUserID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		// Extract review_id from URL parameters
+		vars := mux.Vars(r)
+		reviewIDStr := vars["review_id"]
+		reviewID, err := strconv.Atoi(reviewIDStr)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid review ID"})
+			return
+		}
+
+		// Parse request body
+		var updateData struct {
+			Rating  int    `json:"rating"`
+			Comment string `json:"comment"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&updateData); err != nil {
+			log.Println("Error decoding request body:", err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request body"})
+			return
+		}
+
+		// Validate rating
+		if updateData.Rating < 1 || updateData.Rating > 5 {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Rating must be between 1 and 5"})
+			return
+		}
+
+		// Check if the review exists and belongs to the user
+		var existingUserID int
+		err = db.QueryRow("SELECT user_id FROM Reviews WHERE id = ?", reviewID).Scan(&existingUserID)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Review not found"})
+				return
+			}
+			log.Println("Error checking review ownership:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking review"})
+			return
+		}
+
+		// Verify that the review belongs to the current user
+		if existingUserID != tokenUserID {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only edit your own reviews"})
+			return
+		}
+
+		// Update the review
+		result, err := db.Exec(
+			"UPDATE Reviews SET rating = ?, comment = ? WHERE id = ? AND user_id = ?",
+			updateData.Rating, updateData.Comment, reviewID, tokenUserID,
+		)
+		if err != nil {
+			log.Println("Error updating review:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update review"})
+			return
+		}
+
+		// Check if any rows were affected
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			log.Println("Error checking rows affected:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error updating review"})
+			return
+		}
+
+		if rowsAffected == 0 {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Review not found"})
+			return
+		}
+
+		// Get updated review data to return
+		var updatedReview models.Review
+		err = db.QueryRow(`
+			SELECT r.id, r.school_id, r.rating, r.comment, r.likes, r.created_at, s.school_name
+			FROM Reviews r
+			LEFT JOIN Schools s ON r.school_id = s.school_id
+			WHERE r.id = ?
+		`, reviewID).Scan(
+			&updatedReview.ID, &updatedReview.SchoolID, &updatedReview.Rating,
+			&updatedReview.Comment, &updatedReview.Likes, &updatedReview.CreatedAt,
+			&updatedReview.SchoolName,
+		)
+
+		if err != nil {
+			log.Println("Error getting updated review:", err)
+			// Still return success even if we can't get the updated data
+			response := map[string]interface{}{
+				"message": "Review updated successfully",
+			}
+			utils.ResponseJSON(w, response)
+			return
+		}
+
+		// Success response with updated review
+		response := map[string]interface{}{
+			"message": "Review updated successfully",
+			"review":  updatedReview,
+		}
+
+		utils.ResponseJSON(w, response)
 	}
 }

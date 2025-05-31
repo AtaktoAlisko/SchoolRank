@@ -933,15 +933,15 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 
 		query := `
             SELECT 
-                school_id, 
-                user_id, 
-                school_name, 
-                school_address, 
-                city, 
-                photo_url, 
-                school_email, 
-                school_phone, 
-                school_admin_login, 
+                school_id,
+                user_id,
+                school_name,
+                school_address,
+                city,
+                photo_url,
+                school_email,
+                school_phone,
+                school_admin_login,
                 specializations,
                 about_school
             FROM Schools 
@@ -982,25 +982,52 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 			school.Specializations = []string{}
 		}
 
+		// Get regular exam average score and high achievers count for this school
+		var regularAverage sql.NullFloat64
+		var regularCount int
+		var highAchieversCount int
+
+		examQuery := `
+			SELECT 
+				AVG(total_score) as average_score,
+				COUNT(*) as student_count,
+				SUM(CASE WHEN total_score > 100 THEN 1 ELSE 0 END) as high_achievers_count
+			FROM 
+				UNT_Exams 
+			WHERE 
+				school_id = ? 
+				AND exam_type = 'regular'`
+
+		err = db.QueryRow(examQuery, schoolID).Scan(&regularAverage, &regularCount, &highAchieversCount)
+		if err != nil && err != sql.ErrNoRows {
+			log.Printf("Error getting regular exam data: %v", err)
+			// Continue without exam data rather than failing the entire request
+		}
+
 		// Prepare response struct for JSON serialization
 		responseSchool := struct {
-			SchoolID         int      `json:"school_id"`
-			UserID           int      `json:"user_id"`
-			SchoolName       string   `json:"school_name"`
-			SchoolAddress    *string  `json:"school_address"`
-			City             string   `json:"city"`
-			PhotoURL         *string  `json:"photo_url"`
-			SchoolEmail      *string  `json:"school_email"`
-			SchoolPhone      *string  `json:"school_phone"`
-			SchoolAdminLogin *string  `json:"school_admin_login"`
-			Specializations  []string `json:"specializations"`
-			AboutSchool      *string  `json:"about_school"`
+			SchoolID           int      `json:"school_id"`
+			UserID             int      `json:"user_id"`
+			SchoolName         string   `json:"school_name"`
+			SchoolAddress      *string  `json:"school_address"`
+			City               string   `json:"city"`
+			PhotoURL           *string  `json:"photo_url"`
+			SchoolEmail        *string  `json:"school_email"`
+			SchoolPhone        *string  `json:"school_phone"`
+			SchoolAdminLogin   *string  `json:"school_admin_login"`
+			Specializations    []string `json:"specializations"`
+			AboutSchool        *string  `json:"about_school"`
+			RegularExamAverage *float64 `json:"regular_exam_average,omitempty"`
+			RegularExamCount   int      `json:"regular_exam_count"`
+			HighAchieversCount int      `json:"high_achievers_count"`
 		}{
-			SchoolID:        school.SchoolID,
-			UserID:          school.UserID,
-			SchoolName:      school.SchoolName,
-			City:            school.City,
-			Specializations: school.Specializations,
+			SchoolID:           school.SchoolID,
+			UserID:             school.UserID,
+			SchoolName:         school.SchoolName,
+			City:               school.City,
+			Specializations:    school.Specializations,
+			RegularExamCount:   regularCount,
+			HighAchieversCount: highAchieversCount,
 		}
 
 		// Assign nullable fields
@@ -1021,6 +1048,12 @@ func (sc *SchoolController) GetSchoolByID(db *sql.DB) http.HandlerFunc {
 		}
 		if aboutSchool.Valid {
 			responseSchool.AboutSchool = &aboutSchool.String
+		}
+
+		// Add regular exam average if exists (rounded to nearest integer)
+		if regularAverage.Valid && regularCount > 0 {
+			roundedAverage := math.Round(regularAverage.Float64)
+			responseSchool.RegularExamAverage = &roundedAverage
 		}
 
 		// Return response with school data
