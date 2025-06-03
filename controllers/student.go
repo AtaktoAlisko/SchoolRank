@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"math/big"
 	"net/http"
@@ -1161,103 +1162,164 @@ func (sc *StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, updatedStudent)
 	}
 }
+
+// func (sc *StudentController) DeleteStudent(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		// Извлекаем student_id из URL параметров
+// 		vars := mux.Vars(r)
+// 		studentIDParam := vars["student_id"]
+// 		studentID, err := strconv.Atoi(studentIDParam)
+// 		if err != nil {
+// 			log.Println("Invalid student ID:", studentIDParam) // Log invalid student ID
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid student ID"})
+// 			return
+// 		}
+
+// 		// Шаг 1: Проверка существования студента
+// 		var existingStudent models.Student
+// 		err = db.QueryRow("SELECT student_id FROM student WHERE student_id = ?", studentID).Scan(&existingStudent.ID)
+// 		if err != nil {
+// 			if err == sql.ErrNoRows {
+// 				log.Println("No student found with ID:", studentID) // Log when student is not found
+// 				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found"})
+// 			} else {
+// 				log.Println("Error fetching student details:", err) // Log any other error while fetching
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching student details"})
+// 			}
+// 			return
+// 		}
+
+// 		// Шаг 2: Удаление студента из базы данных
+// 		_, err = db.Exec("DELETE FROM student WHERE student_id = ?", studentID)
+// 		if err != nil {
+// 			log.Println("Error deleting student with ID:", studentID, err) // Log error while deleting student
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete student"})
+// 			return
+// 		}
+
+// 		// Шаг 3: Ответ с успешным сообщением
+// 		log.Println("Student with ID:", studentID, "deleted successfully.") // Log successful deletion
+// 		utils.ResponseJSON(w, map[string]string{"message": "Student deleted successfully"})
+// 	}
+// }
+// func (sc StudentController) GetStudentData(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		// Step 1: Verify the user's token and get userID
+// 		userID, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+// 			return
+// 		}
+
+// 		// Step 2: Get user role and school ID
+// 		var userRole string
+// 		var userSchoolID sql.NullInt64
+// 		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+// 		if err != nil {
+// 			log.Println("Error fetching user role and school ID:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+// 			return
+// 		}
+
+// 		// Step 3: Ensure the user is a director and has a school assigned
+// 		if userRole != "schooladmin" {
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view student data"})
+// 			return
+// 		}
+
+// 		if !userSchoolID.Valid {
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Director does not have an assigned school"})
+// 			return
+// 		}
+
+// 		// Step 4: Extract student_id from the URL
+// 		vars := mux.Vars(r)
+// 		studentID, err := strconv.Atoi(vars["student_id"])
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid student ID"})
+// 			return
+// 		}
+
+// 		// Step 5: Retrieve student data from the database
+// 		var student models.Student
+// 		query := `SELECT id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email
+//                   FROM student WHERE id = ? AND school_id = ?`
+// 		err = db.QueryRow(query, studentID, userSchoolID.Int64).Scan(&student.ID, &student.FirstName, &student.LastName, &student.Patronymic, &student.IIN, &student.SchoolID, &student.DateOfBirth, &student.Grade, &student.Letter, &student.Gender, &student.Phone, &student.Email)
+
+// 		if err != nil {
+// 			if err == sql.ErrNoRows {
+// 				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found or does not belong to this school"})
+// 				return
+// 			}
+// 			log.Println("Error fetching student data:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching student data"})
+// 			return
+// 		}
+
+// 		// Step 6: Respond with student data
+// 		utils.ResponseJSON(w, student)
+// 	}
+// }
+
 func (sc *StudentController) DeleteStudent(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Извлекаем student_id из URL параметров
 		vars := mux.Vars(r)
 		studentIDParam := vars["student_id"]
 		studentID, err := strconv.Atoi(studentIDParam)
 		if err != nil {
-			log.Println("Invalid student ID:", studentIDParam) // Log invalid student ID
+			log.Println("Invalid student ID:", studentIDParam)
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid student ID"})
 			return
 		}
 
-		// Шаг 1: Проверка существования студента
 		var existingStudent models.Student
 		err = db.QueryRow("SELECT student_id FROM student WHERE student_id = ?", studentID).Scan(&existingStudent.ID)
 		if err != nil {
 			if err == sql.ErrNoRows {
-				log.Println("No student found with ID:", studentID) // Log when student is not found
+				log.Println("No student found with ID:", studentID)
 				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found"})
 			} else {
-				log.Println("Error fetching student details:", err) // Log any other error while fetching
+				log.Println("Error fetching student details:", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching student details"})
 			}
 			return
 		}
 
-		// Шаг 2: Удаление студента из базы данных
+		relatedTables := []string{
+			"UNT_Exams",
+			"EventRegistrations",
+			"events_participants",
+			"olympiad_registrations",
+			"Olympiads",
+			"student_ratings",
+			"First_Type",
+			"Second_Type",
+			"UNT_Score",
+			"student_types",
+			"subject_olympiad_registrations",
+		}
+
+		for _, table := range relatedTables {
+			query := fmt.Sprintf("DELETE FROM %s WHERE student_id = ?", table)
+			_, err = db.Exec(query, studentID)
+			if err != nil {
+				log.Printf("Failed to delete from %s for student_id %d: %v\n", table, studentID, err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete related student data"})
+				return
+			}
+		}
+
 		_, err = db.Exec("DELETE FROM student WHERE student_id = ?", studentID)
 		if err != nil {
-			log.Println("Error deleting student with ID:", studentID, err) // Log error while deleting student
+			log.Println("Error deleting student with ID:", studentID, err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete student"})
 			return
 		}
-
-		// Шаг 3: Ответ с успешным сообщением
-		log.Println("Student with ID:", studentID, "deleted successfully.") // Log successful deletion
+		log.Println("Student with ID:", studentID, "deleted successfully.")
 		utils.ResponseJSON(w, map[string]string{"message": "Student deleted successfully"})
 	}
 }
-func (sc StudentController) GetStudentData(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Step 1: Verify the user's token and get userID
-		userID, err := utils.VerifyToken(r)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
-			return
-		}
 
-		// Step 2: Get user role and school ID
-		var userRole string
-		var userSchoolID sql.NullInt64
-		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
-		if err != nil {
-			log.Println("Error fetching user role and school ID:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
-			return
-		}
-
-		// Step 3: Ensure the user is a director and has a school assigned
-		if userRole != "schooladmin" {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view student data"})
-			return
-		}
-
-		if !userSchoolID.Valid {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Director does not have an assigned school"})
-			return
-		}
-
-		// Step 4: Extract student_id from the URL
-		vars := mux.Vars(r)
-		studentID, err := strconv.Atoi(vars["student_id"])
-		if err != nil {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid student ID"})
-			return
-		}
-
-		// Step 5: Retrieve student data from the database
-		var student models.Student
-		query := `SELECT id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email 
-                  FROM student WHERE id = ? AND school_id = ?`
-		err = db.QueryRow(query, studentID, userSchoolID.Int64).Scan(&student.ID, &student.FirstName, &student.LastName, &student.Patronymic, &student.IIN, &student.SchoolID, &student.DateOfBirth, &student.Grade, &student.Letter, &student.Gender, &student.Phone, &student.Email)
-
-		if err != nil {
-			if err == sql.ErrNoRows {
-				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found or does not belong to this school"})
-				return
-			}
-			log.Println("Error fetching student data:", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching student data"})
-			return
-		}
-
-		// Step 6: Respond with student data
-		utils.ResponseJSON(w, student)
-	}
-}
 func (sc StudentController) SuperadminUpdateStudent(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Извлекаем student_id из URL параметров
