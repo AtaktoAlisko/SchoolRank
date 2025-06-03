@@ -109,7 +109,7 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 
 		query = `SELECT so.id, so.subject_name, so.date, so.end_date, so.description, 
 			so.school_id, so.level, so.limit_participants, 
-			u.id as creator_id, u.first_name, u.last_name, s.name as school_name
+			u.id as creator_id, u.first_name, u.last_name, s.school_name as school_name
 			FROM subject_olympiads so
 			LEFT JOIN users u ON so.creator_id = u.id
 			LEFT JOIN Schools s ON so.school_id = s.id
@@ -177,7 +177,7 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 				so.subject_name,
 				so.date,
 				so.end_date,
-				COALESCE(so.description, '') as location,
+				COALESCE(so.description, '') as description,
 				so.school_id,
 				so.level,
 				so.limit_participants,
@@ -202,6 +202,7 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 			&olympiad.StartDate,
 			&olympiad.EndDate,
 			&olympiad.Location,
+			&olympiad.Description,
 			&olympiad.SchoolID,
 			&olympiad.Level,
 			&olympiad.Limit,
