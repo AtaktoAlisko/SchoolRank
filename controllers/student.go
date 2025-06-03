@@ -1202,64 +1202,6 @@ func (sc *StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 // 		utils.ResponseJSON(w, map[string]string{"message": "Student deleted successfully"})
 // 	}
 // }
-// func (sc StudentController) GetStudentData(db *sql.DB) http.HandlerFunc {
-// 	return func(w http.ResponseWriter, r *http.Request) {
-// 		// Step 1: Verify the user's token and get userID
-// 		userID, err := utils.VerifyToken(r)
-// 		if err != nil {
-// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
-// 			return
-// 		}
-
-// 		// Step 2: Get user role and school ID
-// 		var userRole string
-// 		var userSchoolID sql.NullInt64
-// 		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
-// 		if err != nil {
-// 			log.Println("Error fetching user role and school ID:", err)
-// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
-// 			return
-// 		}
-
-// 		// Step 3: Ensure the user is a director and has a school assigned
-// 		if userRole != "schooladmin" {
-// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view student data"})
-// 			return
-// 		}
-
-// 		if !userSchoolID.Valid {
-// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Director does not have an assigned school"})
-// 			return
-// 		}
-
-// 		// Step 4: Extract student_id from the URL
-// 		vars := mux.Vars(r)
-// 		studentID, err := strconv.Atoi(vars["student_id"])
-// 		if err != nil {
-// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid student ID"})
-// 			return
-// 		}
-
-// 		// Step 5: Retrieve student data from the database
-// 		var student models.Student
-// 		query := `SELECT id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email
-//                   FROM student WHERE id = ? AND school_id = ?`
-// 		err = db.QueryRow(query, studentID, userSchoolID.Int64).Scan(&student.ID, &student.FirstName, &student.LastName, &student.Patronymic, &student.IIN, &student.SchoolID, &student.DateOfBirth, &student.Grade, &student.Letter, &student.Gender, &student.Phone, &student.Email)
-
-// 		if err != nil {
-// 			if err == sql.ErrNoRows {
-// 				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found or does not belong to this school"})
-// 				return
-// 			}
-// 			log.Println("Error fetching student data:", err)
-// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching student data"})
-// 			return
-// 		}
-
-// 		// Step 6: Respond with student data
-// 		utils.ResponseJSON(w, student)
-// 	}
-// }
 
 func (sc *StudentController) DeleteStudent(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -1412,6 +1354,65 @@ func (sc StudentController) SuperadminUpdateStudent(db *sql.DB) http.HandlerFunc
 
 		// Step 7: Respond with the updated student
 		utils.ResponseJSON(w, updatedStudent)
+	}
+}
+
+func (sc StudentController) GetStudentData(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify the user's token and get userID
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		// Step 2: Get user role and school ID
+		var userRole string
+		var userSchoolID sql.NullInt64
+		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+		if err != nil {
+			log.Println("Error fetching user role and school ID:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
+
+		// Step 3: Ensure the user is a director and has a school assigned
+		if userRole != "schooladmin" {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view student data"})
+			return
+		}
+
+		if !userSchoolID.Valid {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Director does not have an assigned school"})
+			return
+		}
+
+		// Step 4: Extract student_id from the URL
+		vars := mux.Vars(r)
+		studentID, err := strconv.Atoi(vars["student_id"])
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid student ID"})
+			return
+		}
+
+		// Step 5: Retrieve student data from the database
+		var student models.Student
+		query := `SELECT id, first_name, last_name, patronymic, iin, school_id, date_of_birth, grade, letter, gender, phone, email
+                  FROM student WHERE id = ? AND school_id = ?`
+		err = db.QueryRow(query, studentID, userSchoolID.Int64).Scan(&student.ID, &student.FirstName, &student.LastName, &student.Patronymic, &student.IIN, &student.SchoolID, &student.DateOfBirth, &student.Grade, &student.Letter, &student.Gender, &student.Phone, &student.Email)
+
+		if err != nil {
+			if err == sql.ErrNoRows {
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found or does not belong to this school"})
+				return
+			}
+			log.Println("Error fetching student data:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching student data"})
+			return
+		}
+
+		// Step 6: Respond with student data
+		utils.ResponseJSON(w, student)
 	}
 }
 func (sc StudentController) SuperadminDeleteStudent(db *sql.DB) http.HandlerFunc {
