@@ -395,6 +395,115 @@ func (c *UNTScoreController) CreateUNT(db *sql.DB) http.HandlerFunc {
 		})
 	}
 }
+
+// func (c *UNTScoreController) GetUNTExams(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		// Step 1: Get userID from token
+// 		userID, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+// 			return
+// 		}
+
+// 		// Step 2: Check user role and school_id
+// 		var userRole string
+// 		var userSchoolID sql.NullInt64
+// 		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
+// 		if err != nil {
+// 			log.Println("Ошибка при получении роли пользователя или school_id:", err)
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Не удалось получить роль или school_id пользователя"})
+// 			return
+// 		}
+
+// 		// Step 3: Get query parameters
+// 		studentID := r.URL.Query().Get("student_id")
+// 		examType := r.URL.Query().Get("exam_type")
+// 		schoolID := r.URL.Query().Get("school_id")
+// 		dateFrom := r.URL.Query().Get("date_from")
+// 		dateTo := r.URL.Query().Get("date_to")
+
+// 		// Step 4: Build query based on user role and parameters
+// 		query := `SELECT id, exam_type, first_subject, first_subject_score, second_subject,
+// 				second_subject_score, history_of_kazakhstan, mathematical_literacy,
+// 				reading_literacy, total_score, student_id, school_id, document_url, date
+// 				FROM UNT_Exams WHERE 1=1`
+
+// 		var args []interface{}
+
+// 		// Apply user role restrictions
+// 		if userRole == "schooladmin" {
+// 			if !userSchoolID.Valid {
+// 				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "У вас нет прав для просмотра экзаменов"})
+// 				return
+// 			}
+// 			query += " AND school_id = ?"
+// 			args = append(args, userSchoolID.Int64)
+// 		}
+
+// 		// Apply filters from query parameters
+// 		if studentID != "" {
+// 			query += " AND student_id = ?"
+// 			args = append(args, studentID)
+// 		}
+
+// 		if examType != "" {
+// 			query += " AND exam_type = ?"
+// 			args = append(args, strings.ToLower(examType))
+// 		}
+
+// 		// School admins can't override their school_id
+// 		if schoolID != "" && (userRole == "admin" || userRole == "moderator" || userRole == "superadmin") {
+// 			query += " AND school_id = ?"
+// 			args = append(args, schoolID)
+// 		}
+
+// 		if dateFrom != "" {
+// 			query += " AND date >= ?"
+// 			args = append(args, dateFrom)
+// 		}
+
+// 		if dateTo != "" {
+// 			query += " AND date <= ?"
+// 			args = append(args, dateTo)
+// 		}
+
+// 		// Add order by clause
+// 		query += " ORDER BY date DESC"
+
+// 		// Step 5: Execute query
+// 		rows, err := db.Query(query, args...)
+// 		if err != nil {
+// 			log.Printf("Ошибка при запросе экзаменов: %v", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Не удалось получить список экзаменов"})
+// 			return
+// 		}
+// 		defer rows.Close()
+
+// 		// Step 6: Collect results
+// 		var exams []models.UNTExam
+// 		for rows.Next() {
+// 			var exam models.UNTExam
+// 			err := rows.Scan(
+// 				&exam.ID, &exam.ExamType, &exam.FirstSubject, &exam.FirstSubjectScore,
+// 				&exam.SecondSubject, &exam.SecondSubjectScore, &exam.HistoryOfKazakhstan,
+// 				&exam.MathematicalLiteracy, &exam.ReadingLiteracy, &exam.TotalScore,
+// 				&exam.StudentID, &exam.SchoolID, &exam.DocumentURL, &exam.Date,
+// 			)
+// 			if err != nil {
+// 				log.Printf("Ошибка при сканировании строки: %v", err)
+// 				continue
+// 			}
+// 			exams = append(exams, exam)
+// 		}
+
+// 		// Step 7: Return results
+// 		utils.ResponseJSON(w, map[string]interface{}{
+// 			"count": len(exams),
+// 			"data":  exams,
+// 		})
+// 	}
+// }
+
 func (c *UNTScoreController) GetUNTExams(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Step 1: Get userID from token
@@ -404,13 +513,13 @@ func (c *UNTScoreController) GetUNTExams(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Step 2: Check user role and school_id
+		// Step 2: Get role and school_id
 		var userRole string
 		var userSchoolID sql.NullInt64
 		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&userRole, &userSchoolID)
 		if err != nil {
-			log.Println("Ошибка при получении роли пользователя или school_id:", err)
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Не удалось получить роль или school_id пользователя"})
+			log.Println("Ошибка при получении роли или school_id пользователя:", err)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Ошибка при получении пользователя"})
 			return
 		}
 
@@ -421,64 +530,62 @@ func (c *UNTScoreController) GetUNTExams(db *sql.DB) http.HandlerFunc {
 		dateFrom := r.URL.Query().Get("date_from")
 		dateTo := r.URL.Query().Get("date_to")
 
-		// Step 4: Build query based on user role and parameters
-		query := `SELECT id, exam_type, first_subject, first_subject_score, second_subject, 
-				second_subject_score, history_of_kazakhstan, mathematical_literacy, 
-				reading_literacy, total_score, student_id, school_id, document_url, date 
-				FROM UNT_Exams WHERE 1=1`
+		// Step 4: Build query
+		query := `SELECT 
+					e.id, e.exam_type, e.first_subject, e.first_subject_score, e.second_subject, 
+					e.second_subject_score, e.history_of_kazakhstan, e.mathematical_literacy, 
+					e.reading_literacy, e.total_score, e.student_id, e.school_id, 
+					e.document_url, e.date, s.school_name
+				  FROM UNT_Exams e
+				  LEFT JOIN Schools s ON e.school_id = s.school_id
+				  WHERE 1=1`
 
 		var args []interface{}
 
-		// Apply user role restrictions
+		// Step 5: Apply role filter
 		if userRole == "schooladmin" {
 			if !userSchoolID.Valid {
-				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "У вас нет прав для просмотра экзаменов"})
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Нет доступа к экзаменам"})
 				return
 			}
-			query += " AND school_id = ?"
+			query += " AND e.school_id = ?"
 			args = append(args, userSchoolID.Int64)
 		}
 
-		// Apply filters from query parameters
+		// Step 6: Apply query parameters
 		if studentID != "" {
-			query += " AND student_id = ?"
+			query += " AND e.student_id = ?"
 			args = append(args, studentID)
 		}
-
 		if examType != "" {
-			query += " AND exam_type = ?"
+			query += " AND e.exam_type = ?"
 			args = append(args, strings.ToLower(examType))
 		}
-
-		// School admins can't override their school_id
-		if schoolID != "" && (userRole == "admin" || userRole == "moderator" || userRole == "superadmin") {
-			query += " AND school_id = ?"
+		if schoolID != "" && (userRole == "superadmin" || userRole == "admin" || userRole == "moderator") {
+			query += " AND e.school_id = ?"
 			args = append(args, schoolID)
 		}
-
 		if dateFrom != "" {
-			query += " AND date >= ?"
+			query += " AND e.date >= ?"
 			args = append(args, dateFrom)
 		}
-
 		if dateTo != "" {
-			query += " AND date <= ?"
+			query += " AND e.date <= ?"
 			args = append(args, dateTo)
 		}
 
-		// Add order by clause
-		query += " ORDER BY date DESC"
+		query += " ORDER BY e.date DESC"
 
-		// Step 5: Execute query
+		// Step 7: Execute query
 		rows, err := db.Query(query, args...)
 		if err != nil {
 			log.Printf("Ошибка при запросе экзаменов: %v", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Не удалось получить список экзаменов"})
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Ошибка при получении экзаменов"})
 			return
 		}
 		defer rows.Close()
 
-		// Step 6: Collect results
+		// Step 8: Parse results
 		var exams []models.UNTExam
 		for rows.Next() {
 			var exam models.UNTExam
@@ -487,6 +594,7 @@ func (c *UNTScoreController) GetUNTExams(db *sql.DB) http.HandlerFunc {
 				&exam.SecondSubject, &exam.SecondSubjectScore, &exam.HistoryOfKazakhstan,
 				&exam.MathematicalLiteracy, &exam.ReadingLiteracy, &exam.TotalScore,
 				&exam.StudentID, &exam.SchoolID, &exam.DocumentURL, &exam.Date,
+				&exam.SchoolName, // получаем school_name
 			)
 			if err != nil {
 				log.Printf("Ошибка при сканировании строки: %v", err)
@@ -495,7 +603,7 @@ func (c *UNTScoreController) GetUNTExams(db *sql.DB) http.HandlerFunc {
 			exams = append(exams, exam)
 		}
 
-		// Step 7: Return results
+		// Step 9: Return JSON
 		utils.ResponseJSON(w, map[string]interface{}{
 			"count": len(exams),
 			"data":  exams,
