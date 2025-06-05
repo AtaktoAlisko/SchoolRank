@@ -1304,3 +1304,54 @@ func (c *SubjectOlympiadController) GetSchoolOlympiadStats(db *sql.DB) http.Hand
 		utils.ResponseJSON(w, stats)
 	}
 }
+
+func (c *SubjectOlympiadController) CountOlympiadsBySchool(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Step 1: Verify the token
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			log.Printf("Token verification failed: %v", err)
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+			return
+		}
+
+		// Step 2: Get user role and school_id (if schooladmin)
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil {
+			log.Printf("Error fetching user role for user ID %d: %v", userID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+			return
+		}
+
+		// Step 3: Extract school_id from URL
+		vars := mux.Vars(r)
+		schoolIDParam := vars["school_id"]
+		schoolID, err := strconv.Atoi(schoolIDParam)
+		if err != nil || schoolID <= 0 {
+			log.Printf("Invalid school_id format: %s, error: %v", schoolIDParam, err)
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school_id format"})
+			return
+		}
+
+		// Step 4: Check access permissions
+		if userRole != "superadmin" && userRole != "schooladmin" {
+			log.Printf("Access denied for user ID %d with role %s", userID, userRole)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view olympiad count"})
+			return
+		}
+
+		// Step 5: Query to count olympiads
+		query := "SELECT COUNT(*) FROM subject_olympiads WHERE school_id = ?"
+		var count int
+		err = db.QueryRow(query, schoolID).Scan(&count)
+		if err != nil {
+			log.Printf("Error counting olympiads for school_id %d: %v", schoolID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to count olympiads"})
+			return
+		}
+
+		// Step 6: Return the count
+		utils.ResponseJSON(w, map[string]int{"olympiads_count": count})
+	}
+}
