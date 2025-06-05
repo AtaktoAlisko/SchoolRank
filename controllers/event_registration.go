@@ -327,20 +327,20 @@ func (ec *EventsRegistrationController) UpdateEventRegistrationStatus(db *sql.DB
 		}
 		defer tx.Rollback()
 
-		if role == "schooladmin" {
-			var regSchoolID int
-			err = tx.QueryRow("SELECT school_id FROM EventRegistrations WHERE event_registration_id = ?", regID).Scan(&regSchoolID)
-			if err != nil {
-				log.Printf("Error fetching school ID for registration %d: %v", regID, err)
-				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Registration not found"})
-				return
-			}
-			if !userSchoolID.Valid || regSchoolID != int(userSchoolID.Int64) {
-				log.Printf("School mismatch for user %d, registration %d: user school %v, reg school %d", userID, regID, userSchoolID, regSchoolID)
-				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only update registrations for your school"})
-				return
-			}
-		}
+		// if role == "schooladmin" {
+		// 	var regSchoolID int
+		// 	err = tx.QueryRow("SELECT school_id FROM EventRegistrations WHERE event_registration_id = ?", regID).Scan(&regSchoolID)
+		// 	if err != nil {
+		// 		log.Printf("Error fetching school ID for registration %d: %v", regID, err)
+		// 		utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Registration not found"})
+		// 		return
+		// 	}
+		// 	if !userSchoolID.Valid || regSchoolID != int(userSchoolID.Int64) {
+		// 		log.Printf("School mismatch for user %d, registration %d: user school %v, reg school %d", userID, regID, userSchoolID, regSchoolID)
+		// 		utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only update registrations for your school"})
+		// 		return
+		// 	}
+		// }
 
 		_, err = tx.Exec("UPDATE EventRegistrations SET status = ? WHERE event_registration_id = ?", body.Status, regID)
 		if err != nil {
