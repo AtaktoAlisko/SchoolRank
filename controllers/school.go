@@ -554,15 +554,71 @@ func (sc *SchoolController) UpdateSchool(db *sql.DB) http.HandlerFunc {
 		})
 	}
 }
+
+// func (sc SchoolController) DeleteSchool(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		// 1. Проверка токена и роли
+// 		userID, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+// 			return
+// 		}
+
+// 		var userRole string
+// 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+// 		if err != nil {
+// 			log.Println("Error fetching user role:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user role"})
+// 			return
+// 		}
+
+// 		if userRole != "superadmin" {
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only superadmin can delete a school"})
+// 			return
+// 		}
+
+// 		// ✅ 2. Получаем school_id из path-параметра
+// 		vars := mux.Vars(r)
+// 		schoolID := vars["id"]
+// 		if schoolID == "" {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School ID is required"})
+// 			return
+// 		}
+
+// 		// 3. Удаляем школу
+// 		result, err := db.Exec("DELETE FROM Schools WHERE school_id = ?", schoolID)
+// 		if err != nil {
+// 			log.Println("SQL Delete Error:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete school"})
+// 			return
+// 		}
+
+// 		// 4. Проверка затронутых строк
+// 		rowsAffected, _ := result.RowsAffected()
+// 		if rowsAffected == 0 {
+// 			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "School not found"})
+// 			return
+// 		}
+
+// 		// 5. Успешный ответ
+// 		utils.ResponseJSON(w, map[string]interface{}{
+// 			"message":    "School deleted successfully",
+// 			"school_id":  schoolID,
+// 			"deleted_by": userID,
+// 		})
+// 	}
+// }
+
 func (sc SchoolController) DeleteSchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// 1. Проверка токена и роли
+		// 1. Проверка токена
 		userID, err := utils.VerifyToken(r)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
 			return
 		}
 
+		// 2. Проверка роли
 		var userRole string
 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
 		if err != nil {
@@ -570,13 +626,12 @@ func (sc SchoolController) DeleteSchool(db *sql.DB) http.HandlerFunc {
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user role"})
 			return
 		}
-
 		if userRole != "superadmin" {
 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only superadmin can delete a school"})
 			return
 		}
 
-		// ✅ 2. Получаем school_id из path-параметра
+		// 3. Получение school_id из path
 		vars := mux.Vars(r)
 		schoolID := vars["id"]
 		if schoolID == "" {
@@ -584,7 +639,24 @@ func (sc SchoolController) DeleteSchool(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// 3. Удаляем школу
+		// 4. Удаление зависимых данных
+		relatedTables := []string{
+			"events_participants",
+			"subject_olympiads",
+			"student",
+			"Events",
+		}
+
+		for _, table := range relatedTables {
+			_, err := db.Exec(fmt.Sprintf("DELETE FROM %s WHERE school_id = ?", table), schoolID)
+			if err != nil {
+				log.Printf("Failed to delete from %s for school_id=%s: %v", table, schoolID, err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete related data from " + table})
+				return
+			}
+		}
+
+		// 5. Удаление школы
 		result, err := db.Exec("DELETE FROM Schools WHERE school_id = ?", schoolID)
 		if err != nil {
 			log.Println("SQL Delete Error:", err)
@@ -592,14 +664,13 @@ func (sc SchoolController) DeleteSchool(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// 4. Проверка затронутых строк
 		rowsAffected, _ := result.RowsAffected()
 		if rowsAffected == 0 {
 			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "School not found"})
 			return
 		}
 
-		// 5. Успешный ответ
+		// 6. Успешный ответ
 		utils.ResponseJSON(w, map[string]interface{}{
 			"message":    "School deleted successfully",
 			"school_id":  schoolID,
@@ -607,6 +678,7 @@ func (sc SchoolController) DeleteSchool(db *sql.DB) http.HandlerFunc {
 		})
 	}
 }
+
 func atoi(s string) int {
 	i, _ := strconv.Atoi(s)
 	return i
