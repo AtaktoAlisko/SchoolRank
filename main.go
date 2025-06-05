@@ -78,9 +78,7 @@ func main() {
 
 	router := mux.NewRouter()
 
-	// =======================
-	// Аутентификация и авторизация
-	// =======================
+	// Authentication and Authorization
 	router.HandleFunc("/api/auth/signup", controller.Signup(db)).Methods("POST")
 	router.HandleFunc("/api/auth/login", controller.Login(db)).Methods("POST")
 	router.HandleFunc("/api/auth/logout", controller.Logout).Methods("POST")
@@ -222,6 +220,10 @@ func main() {
 	// Event registration routes
 	// =======================
 	router.HandleFunc("/events/register", EventsRegistrationController.RegisterForEvent(db)).Methods("POST")
+
+	// for admin panel
+	router.HandleFunc("/api/event-registrations/event/{event_id}", EventsRegistrationController.GetEventRegistrationsByEventID(db)).Methods("GET")
+
 	router.HandleFunc("/api/event-registrations/{id}", EventsRegistrationController.UpdateEventRegistrationStatus(db)).Methods("PATCH")
 	router.HandleFunc("/api/event-registrations", EventsRegistrationController.GetEventRegistrations(db)).Methods("GET")
 	router.HandleFunc("/api/event-registrations/{id}", EventsRegistrationController.DeleteEventRegistrationByID(db)).Methods("DELETE")
