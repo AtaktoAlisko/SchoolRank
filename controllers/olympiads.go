@@ -95,10 +95,10 @@ func (oc *OlympiadController) CreateOlympiad(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		if role == "schooladmin" && (!schoolID.Valid || int(schoolID.Int64) != studentSchoolID) {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Student does not belong to your school"})
-			return
-		}
+		// if role == "schooladmin" && (!schoolID.Valid || int(schoolID.Int64) != studentSchoolID) {
+		// 	utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Student does not belong to your school"})
+		// 	return
+		// }
 
 		// Загрузка файла
 		var documentURL string
