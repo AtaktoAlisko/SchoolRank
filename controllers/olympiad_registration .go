@@ -1260,3 +1260,83 @@ func (c *OlympiadRegistrationController) GetOlympiadPrizeStatsBySchoolID(db *sql
 		utils.ResponseJSON(w, response)
 	}
 }
+
+func (c *OlympiadRegistrationController) GetOlympiadRegistrationsByOlympID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+			return
+		}
+
+		vars := mux.Vars(r)
+		subjectOlympiadIDStr := vars["olympiad_id"]
+		subjectOlympiadID, err := strconv.Atoi(subjectOlympiadIDStr)
+		if err != nil || subjectOlympiadID <= 0 {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid olympiad ID"})
+			return
+		}
+
+		rows, err := db.Query(`
+			SELECT 
+				r.olympiads_registrations_id, r.student_id, r.subject_olympiad_id, r.registration_date, r.status,
+				r.school_id,
+				s.first_name, s.last_name, s.patronymic, s.grade, s.letter,
+				sch.school_name,
+				o.subject_name, o.date, o.end_date, o.level
+			FROM olympiad_registrations r
+			JOIN student s ON r.student_id = s.student_id
+			JOIN subject_olympiads o ON r.subject_olympiad_id = o.subject_olympiad_id
+			JOIN Schools sch ON r.school_id = sch.school_id
+			WHERE r.subject_olympiad_id = ?
+		`, subjectOlympiadID)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+			return
+		}
+		defer rows.Close()
+
+		var registrations []models.OlympiadRegistration
+		for rows.Next() {
+			var reg models.OlympiadRegistration
+			var regDateStr string
+			var olympiadEnd sql.NullString
+			var level sql.NullString
+
+			err := rows.Scan(
+				&reg.OlympiadsRegistrationsID,
+				&reg.StudentID,
+				&reg.SubjectOlympiadID,
+				&regDateStr,
+				&reg.Status,
+				&reg.SchoolID,
+				&reg.StudentFirstName,
+				&reg.StudentLastName,
+				&reg.StudentPatronymic,
+				&reg.StudentGrade,
+				&reg.StudentLetter,
+				&reg.SchoolName,
+				&reg.OlympiadName,
+				&reg.OlympiadStartDate,
+				&olympiadEnd,
+				&level,
+			)
+			if err != nil {
+				log.Println("Scan error:", err)
+				continue
+			}
+
+			reg.RegistrationDate, _ = time.Parse("2006-01-02 15:04:05", regDateStr)
+			if olympiadEnd.Valid {
+				reg.OlympiadEndDate = olympiadEnd.String
+			}
+			if level.Valid {
+				reg.Level = level.String
+			}
+
+			registrations = append(registrations, reg)
+		}
+
+		utils.ResponseJSON(w, registrations)
+	}
+}
