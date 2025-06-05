@@ -1418,3 +1418,102 @@ func (ec *EventsRegistrationController) GetEventParticipantsBySchoolID(db *sql.D
 		utils.ResponseJSON(w, response)
 	}
 }
+
+func (ec *EventsRegistrationController) GetEventRegistrationsByEventID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			log.Printf("Token verification failed: %v", err)
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+			return
+		}
+
+		var role string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&role)
+		if err != nil || (role != "schooladmin" && role != "superadmin") {
+			log.Printf("Access denied for user %d: %v", userID, err)
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Access denied"})
+			return
+		}
+
+		// Получение event_id из пути
+		vars := mux.Vars(r)
+		eventIDStr := vars["event_id"]
+		eventID, err := strconv.Atoi(eventIDStr)
+		if err != nil || eventID <= 0 {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid event_id"})
+			return
+		}
+
+		rows, err := db.Query(`
+			SELECT r.event_registration_id, r.student_id, r.event_id, r.registration_date, r.status,
+				   r.school_id,
+				   s.first_name, s.last_name, s.patronymic, s.grade, s.letter, s.role,
+				   sc.school_name,
+				   e.event_name, e.start_date, e.end_date, e.category
+			FROM EventRegistrations r
+			JOIN student s ON r.student_id = s.student_id
+			JOIN Schools sc ON r.school_id = sc.school_id
+			JOIN Events e ON r.event_id = e.id
+			WHERE r.event_id = ?`, eventID)
+
+		if err != nil {
+			log.Printf("Query error: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+			return
+		}
+		defer rows.Close()
+
+		var registrations []models.EventRegistration
+		for rows.Next() {
+			var reg models.EventRegistration
+			var regDateStr string
+			var endDate, schoolName, status, studentRole, eventCategory sql.NullString
+
+			err := rows.Scan(
+				&reg.EventRegistrationID,
+				&reg.StudentID,
+				&reg.EventID,
+				&regDateStr,
+				&status,
+				&reg.SchoolID,
+				&reg.StudentFirstName,
+				&reg.StudentLastName,
+				&reg.StudentPatronymic,
+				&reg.StudentGrade,
+				&reg.StudentLetter,
+				&studentRole,
+				&schoolName,
+				&reg.EventName,
+				&reg.EventStartDate,
+				&endDate,
+				&eventCategory,
+			)
+			if err != nil {
+				log.Printf("Scan error: %v", err)
+				continue
+			}
+
+			reg.RegistrationDate, _ = time.Parse("2006-01-02 15:04:05", regDateStr)
+			if status.Valid {
+				reg.Status = status.String
+			}
+			if endDate.Valid {
+				reg.EventEndDate = endDate.String
+			}
+			if schoolName.Valid {
+				reg.SchoolName = schoolName.String
+			}
+			if studentRole.Valid {
+				reg.StudentRole = studentRole.String
+			}
+			if eventCategory.Valid {
+				reg.EventCategory = eventCategory.String
+			}
+
+			registrations = append(registrations, reg)
+		}
+
+		utils.ResponseJSON(w, registrations)
+	}
+}
