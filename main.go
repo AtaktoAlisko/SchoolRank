@@ -276,6 +276,10 @@ func main() {
 	// =======================
 	router.HandleFunc("/api/contact", contactController.CreateContactRequest(db)).Methods("POST")
 
+	// olympiad registration
+	router.HandleFunc("/api/olympiad-registrations/olympiad/{olympiad_id}",
+		OlympiadRegistrationController.GetOlympiadRegistrationsByOlympID(db)).Methods("GET")
+
 	router.HandleFunc("/api/olympiads/register", OlympiadRegistrationController.RegisterStudent(db)).Methods("POST")
 	router.HandleFunc("/api/olympiads/registrations", OlympiadRegistrationController.GetOlympiadRegistrations(db)).Methods("GET")
 	router.HandleFunc("/api/olympiads/register/{id}", OlympiadRegistrationController.UpdateRegistrationStatus(db)).Methods("PATCH")
