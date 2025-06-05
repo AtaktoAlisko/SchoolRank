@@ -235,7 +235,7 @@ func (c *OlympiadRegistrationController) GetOlympiadRegistrations(db *sql.DB) ht
 
 		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&role, &schoolID)
 		if err != nil {
-			log.Printf("❌ User with ID %d not found", userID)
+			log.Printf("User with ID %d not found", userID)
 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "User not found"})
 			return
 		}
@@ -394,7 +394,6 @@ func (c *OlympiadRegistrationController) UpdateRegistrationStatus(db *sql.DB) ht
 			return
 		}
 
-		// ✅ Поддерживаемые статусы
 		validStatuses := map[string]bool{
 			"registered": true,
 			"accepted":   true,
@@ -409,18 +408,18 @@ func (c *OlympiadRegistrationController) UpdateRegistrationStatus(db *sql.DB) ht
 		}
 
 		// Проверка школы для schooladmin
-		if role == "schooladmin" {
-			var regSchoolID int
-			err = db.QueryRow("SELECT school_id FROM olympiad_registrations WHERE olympiads_registrations_id = ?", regID).Scan(&regSchoolID)
-			if err != nil {
-				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Registration not found"})
-				return
-			}
-			if !userSchoolID.Valid || regSchoolID != int(userSchoolID.Int64) {
-				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only update registrations for your school"})
-				return
-			}
-		}
+		// if role == "schooladmin" {
+		// 	var regSchoolID int
+		// 	err = db.QueryRow("SELECT school_id FROM olympiad_registrations WHERE olympiads_registrations_id = ?", regID).Scan(&regSchoolID)
+		// 	if err != nil {
+		// 		utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Registration not found"})
+		// 		return
+		// 	}
+		// 	if !userSchoolID.Valid || regSchoolID != int(userSchoolID.Int64) {
+		// 		utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only update registrations for your school"})
+		// 		return
+		// 	}
+		// }
 
 		// Обновление
 		_, err = db.Exec("UPDATE olympiad_registrations SET status = ? WHERE olympiads_registrations_id = ?", body.Status, regID)
