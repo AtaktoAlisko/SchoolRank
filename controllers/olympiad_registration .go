@@ -710,12 +710,12 @@ func (c *OlympiadRegistrationController) GetTotalOlympiadRating(db *sql.DB) http
 		var userSchoolID sql.NullInt64
 		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&role, &userSchoolID)
 		if err != nil {
-			log.Printf("❌ User with ID %d not found in users table", userID)
+			log.Printf("User with ID %d not found in users table", userID)
 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "User not found"})
 			return
 		}
 
-		log.Printf("✅ Authenticated user: ID=%d, role=%s, school_id=%v", userID, role, userSchoolID)
+		log.Printf("Authenticated user: ID=%d, role=%s, school_id=%v", userID, role, userSchoolID)
 
 		// Handle school ID based on role
 		var schoolID int
@@ -800,12 +800,12 @@ func (c *OlympiadRegistrationController) GetTotalOlympiadRankBySchoolID(db *sql.
 		var userSchoolID sql.NullInt64
 		err = db.QueryRow("SELECT role, school_id FROM users WHERE id = ?", userID).Scan(&role, &userSchoolID)
 		if err != nil {
-			log.Printf("❌ User with ID %d not found in users table", userID)
+			log.Printf("User with ID %d not found in users table", userID)
 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "User not found"})
 			return
 		}
 
-		log.Printf("✅ Authenticated user: ID=%d, role=%s, school_id=%v", userID, role, userSchoolID)
+		log.Printf("Authenticated user: ID=%d, role=%s, school_id=%v", userID, role, userSchoolID)
 
 		// Handle school ID based on role
 		var schoolID int
