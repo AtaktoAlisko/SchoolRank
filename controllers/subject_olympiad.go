@@ -15,6 +15,283 @@ import (
 
 type SubjectOlympiadController struct{}
 
+// func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		// Шаг 1: Проверка токена
+// 		userID, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token."})
+// 			return
+// 		}
+
+// 		// Шаг 2: Получение роли пользователя
+// 		var userRole string
+// 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+// 		if err != nil {
+// 			log.Println("Error fetching user role:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+// 			return
+// 		}
+
+// 		// Шаг 3: Проверка прав доступа
+// 		if userRole != "superadmin" && userRole != "schooladmin" {
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create an olympiad"})
+// 			return
+// 		}
+
+// 		// Шаг 4: Получение school_id из URL
+// 		var schoolID int
+// 		schoolIDStr := r.URL.Path[len("/api/subject-olympiads/create/"):]
+// 		schoolID, err = strconv.Atoi(schoolIDStr)
+// 		if err != nil || schoolID <= 0 {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid or missing school_id in URL"})
+// 			return
+// 		}
+
+// 		// Шаг 5: Парсинг формы
+// 		err = r.ParseMultipartForm(10 << 20)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Error parsing form data"})
+// 			log.Printf("Error parsing multipart form: %v", err)
+// 			return
+// 		}
+
+// 		// Шаг 6: Парсинг остальных полей
+// 		subjectName := r.FormValue("subject_name")
+// 		startDate := r.FormValue("date")
+// 		endDate := r.FormValue("end_date")
+// 		description := r.FormValue("description")
+// 		level := r.FormValue("level")
+// 		limitStr := r.FormValue("limit_participants")
+
+// 		if subjectName == "" || startDate == "" || endDate == "" || description == "" || level == "" || limitStr == "" {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "subject_name, start date, end date, description, level, and limit are required fields."})
+// 			return
+// 		}
+
+// 		limit, err := strconv.Atoi(limitStr)
+// 		if err != nil || limit <= 0 {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid participant limit format or value"})
+// 			return
+// 		}
+
+// 		// Шаг 7: Вставка в БД и получение ID
+// 		query := `INSERT INTO subject_olympiads
+// 			(subject_name, date, end_date, description, school_id, level, limit_participants, creator_id)
+// 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+
+// 		result, err := db.Exec(query,
+// 			subjectName,
+// 			startDate,
+// 			endDate,
+// 			description,
+// 			schoolID,
+// 			level,
+// 			limit,
+// 			userID)
+
+// 		if err != nil {
+// 			log.Println("Error inserting olympiad:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create olympiad"})
+// 			return
+// 		}
+
+// 		// Получение ID созданной олимпиады
+// 		olympiadID, err := result.LastInsertId()
+// 		if err != nil {
+// 			log.Println("Error getting last insert ID:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve olympiad ID"})
+// 			return
+// 		}
+
+// 		// Получаем полные данные олимпиады из БД для корректного ответа
+// 		var olympiad models.SubjectOlympiad
+
+// 		query = `SELECT so.id, so.subject_name, so.date, so.end_date, so.description,
+// 			so.school_id, so.level, so.limit_participants,
+// 			u.id as creator_id, u.first_name, u.last_name, s.school_name as school_name
+// 			FROM subject_olympiads so
+// 			LEFT JOIN users u ON so.creator_id = u.id
+// 			LEFT JOIN Schools s ON so.school_id = s.id
+// 			WHERE so.id = ?`
+
+// 		err = db.QueryRow(query, olympiadID).Scan(
+// 			&olympiad.ID,
+// 			&olympiad.SubjectName,
+// 			&olympiad.StartDate,
+// 			&olympiad.EndDate,
+// 			&olympiad.Description,
+// 			&olympiad.SchoolID,
+// 			&olympiad.Level,
+// 			&olympiad.Limit,
+// 			&olympiad.CreatorID,
+// 			&olympiad.CreatorFirstName,
+// 			&olympiad.CreatorLastName,
+// 			&olympiad.SchoolName,
+// 		)
+
+// 		if err != nil {
+// 			log.Println("Error fetching created olympiad:", err)
+// 			// Если не удалось получить полные данные, вернем базовую информацию
+// 			utils.ResponseJSON(w, models.SubjectOlympiad{
+// 				ID:          int(olympiadID),
+// 				SubjectName: subjectName,
+// 				StartDate:   startDate,
+// 				EndDate:     endDate,
+// 				Description: description,
+// 				SchoolID:    schoolID,
+// 				Level:       level,
+// 				Limit:       limit,
+// 				CreatorID:   userID,
+// 			})
+// 			return
+// 		}
+
+// 		utils.ResponseJSON(w, olympiad)
+// 	}
+// }
+
+// func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		// Шаг 1: Проверка токена
+// 		userID, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token."})
+// 			return
+// 		}
+
+// 		// Шаг 2: Получение роли пользователя
+// 		var userRole string
+// 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+// 		if err != nil {
+// 			log.Println("Error fetching user role:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+// 			return
+// 		}
+
+// 		// Шаг 3: Проверка прав доступа
+// 		if userRole != "superadmin" && userRole != "schooladmin" {
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to create an olympiad"})
+// 			return
+// 		}
+
+// 		// Шаг 4: Получение school_id из URL
+// 		var schoolID int
+// 		schoolIDStr := r.URL.Path[len("/api/subject-olympiads/create/"):]
+// 		schoolID, err = strconv.Atoi(schoolIDStr)
+// 		if err != nil || schoolID <= 0 {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid or missing school_id in URL"})
+// 			return
+// 		}
+
+// 		// Шаг 5: Парсинг формы
+// 		err = r.ParseMultipartForm(10 << 20)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Error parsing form data"})
+// 			log.Printf("Error parsing multipart form: %v", err)
+// 			return
+// 		}
+
+// 		// Шаг 6: Парсинг остальных полей
+// 		subjectName := r.FormValue("subject_name")
+// 		startDate := r.FormValue("date")
+// 		endDate := r.FormValue("end_date")
+// 		description := r.FormValue("description")
+// 		level := r.FormValue("level")
+// 		limitStr := r.FormValue("limit_participants")
+// 		gradeStr := r.FormValue("grade")
+
+// 		if subjectName == "" || startDate == "" || endDate == "" || description == "" || level == "" || limitStr == "" || gradeStr == "" {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "subject_name, start date, end date, description, level, grade, and limit are required fields."})
+// 			return
+// 		}
+
+// 		limit, err := strconv.Atoi(limitStr)
+// 		if err != nil || limit <= 0 {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid participant limit format or value"})
+// 			return
+// 		}
+
+// 		grade, err := strconv.Atoi(gradeStr)
+// 		if err != nil || grade <= 0 {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade value"})
+// 			return
+// 		}
+
+// 		// Шаг 7: Вставка в БД
+// 		query := `INSERT INTO subject_olympiads
+// 			(subject_name, date, end_date, description, school_id, level, grade, limit_participants, creator_id)
+// 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+// 		result, err := db.Exec(query,
+// 			subjectName,
+// 			startDate,
+// 			endDate,
+// 			description,
+// 			schoolID,
+// 			level,
+// 			grade,
+// 			limit,
+// 			userID)
+// 		if err != nil {
+// 			log.Println("Error inserting olympiad:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create olympiad"})
+// 			return
+// 		}
+
+// 		olympiadID, err := result.LastInsertId()
+// 		if err != nil {
+// 			log.Println("Error getting last insert ID:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve olympiad ID"})
+// 			return
+// 		}
+
+// 		// Шаг 8: Получение полной информации
+// 		var olympiad models.SubjectOlympiad
+// 		query = `SELECT so.subject_olympiad_id, so.subject_name, so.date, so.end_date, so.description,
+// 			so.school_id, so.level, so.grade, so.limit_participants,
+// 			u.id as creator_id, u.first_name, u.last_name, s.school_name as school_name
+// 			FROM subject_olympiads so
+// 			LEFT JOIN users u ON so.creator_id = u.id
+// 			LEFT JOIN Schools s ON so.school_id = s.school_id
+// 			WHERE so.subject_olympiad_id = ?`
+
+// 		err = db.QueryRow(query, olympiadID).Scan(
+// 			&olympiad.ID,
+// 			&olympiad.SubjectName,
+// 			&olympiad.StartDate,
+// 			&olympiad.EndDate,
+// 			&olympiad.Description,
+// 			&olympiad.SchoolID,
+// 			&olympiad.Level,
+// 			&olympiad.Grade,
+// 			&olympiad.Limit,
+// 			&olympiad.CreatorID,
+// 			&olympiad.CreatorFirstName,
+// 			&olympiad.CreatorLastName,
+// 			&olympiad.SchoolName,
+// 		)
+// 		if err != nil {
+// 			log.Println("Error fetching created olympiad:", err)
+// 			utils.ResponseJSON(w, models.SubjectOlympiad{
+// 				ID:          int(olympiadID),
+// 				SubjectName: subjectName,
+// 				StartDate:   startDate,
+// 				EndDate:     endDate,
+// 				Description: description,
+// 				SchoolID:    schoolID,
+// 				Level:       level,
+// 				Grade:       grade,
+// 				Limit:       limit,
+// 				CreatorID:   userID,
+// 			})
+// 			return
+// 		}
+
+// 		utils.ResponseJSON(w, olympiad)
+// 	}
+// }
+
 func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Шаг 1: Проверка токена
@@ -63,9 +340,10 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 		description := r.FormValue("description")
 		level := r.FormValue("level")
 		limitStr := r.FormValue("limit_participants")
+		gradeStr := r.FormValue("grade")
 
-		if subjectName == "" || startDate == "" || endDate == "" || description == "" || level == "" || limitStr == "" {
-			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "subject_name, start date, end date, description, level, and limit are required fields."})
+		if subjectName == "" || startDate == "" || endDate == "" || description == "" || level == "" || limitStr == "" || gradeStr == "" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "subject_name, start date, end date, description, level, grade, and limit are required fields."})
 			return
 		}
 
@@ -75,10 +353,16 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 			return
 		}
 
-		// Шаг 7: Вставка в БД и получение ID
+		grade, err := strconv.Atoi(gradeStr)
+		if err != nil || grade <= 0 {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade value"})
+			return
+		}
+
+		// Шаг 7: Вставка в БД
 		query := `INSERT INTO subject_olympiads 
-			(subject_name, date, end_date, description, school_id, level, limit_participants, creator_id) 
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+			(subject_name, date, end_date, description, school_id, level, grade, limit_participants, creator_id) 
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 		result, err := db.Exec(query,
 			subjectName,
@@ -87,16 +371,15 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 			description,
 			schoolID,
 			level,
+			grade,
 			limit,
 			userID)
-
 		if err != nil {
 			log.Println("Error inserting olympiad:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to create olympiad"})
 			return
 		}
 
-		// Получение ID созданной олимпиады
 		olympiadID, err := result.LastInsertId()
 		if err != nil {
 			log.Println("Error getting last insert ID:", err)
@@ -104,16 +387,15 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 			return
 		}
 
-		// Получаем полные данные олимпиады из БД для корректного ответа
+		// Шаг 8: Получение полной информации
 		var olympiad models.SubjectOlympiad
-
-		query = `SELECT so.id, so.subject_name, so.date, so.end_date, so.description, 
-			so.school_id, so.level, so.limit_participants, 
+		query = `SELECT so.subject_olympiad_id, so.subject_name, so.date, so.end_date, so.description, 
+			so.school_id, so.level, so.grade, so.limit_participants, 
 			u.id as creator_id, u.first_name, u.last_name, s.school_name as school_name
 			FROM subject_olympiads so
 			LEFT JOIN users u ON so.creator_id = u.id
-			LEFT JOIN Schools s ON so.school_id = s.id
-			WHERE so.id = ?`
+			LEFT JOIN Schools s ON so.school_id = s.school_id
+			WHERE so.subject_olympiad_id = ?`
 
 		err = db.QueryRow(query, olympiadID).Scan(
 			&olympiad.ID,
@@ -123,16 +405,15 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 			&olympiad.Description,
 			&olympiad.SchoolID,
 			&olympiad.Level,
+			&olympiad.Grade,
 			&olympiad.Limit,
 			&olympiad.CreatorID,
 			&olympiad.CreatorFirstName,
 			&olympiad.CreatorLastName,
 			&olympiad.SchoolName,
 		)
-
 		if err != nil {
 			log.Println("Error fetching created olympiad:", err)
-			// Если не удалось получить полные данные, вернем базовую информацию
 			utils.ResponseJSON(w, models.SubjectOlympiad{
 				ID:          int(olympiadID),
 				SubjectName: subjectName,
@@ -141,6 +422,7 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 				Description: description,
 				SchoolID:    schoolID,
 				Level:       level,
+				Grade:       grade,
 				Limit:       limit,
 				CreatorID:   userID,
 			})
@@ -150,6 +432,7 @@ func (c *SubjectOlympiadController) CreateSubjectOlympiad(db *sql.DB) http.Handl
 		utils.ResponseJSON(w, olympiad)
 	}
 }
+
 func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, err := utils.VerifyToken(r)
@@ -273,6 +556,257 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 		utils.ResponseJSON(w, olympiad)
 	}
 }
+
+// func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		// Step 1: Verify token
+// 		userID, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token."})
+// 			return
+// 		}
+
+// 		// Step 2: Fetch user role
+// 		var userRole string
+// 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+// 		if err != nil {
+// 			log.Printf("Error fetching user role for userID %d: %v", userID, err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+// 			return
+// 		}
+
+// 		// Step 3: Check permissions
+// 		if userRole != "superadmin" && userRole != "schooladmin" {
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to edit olympiads"})
+// 			return
+// 		}
+
+// 		// Step 4: Get olympiad_id from URL
+// 		vars := mux.Vars(r)
+// 		olympiadID, err := strconv.Atoi(vars["id"])
+// 		if err != nil || olympiadID <= 0 {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid olympiad ID"})
+// 			return
+// 		}
+
+// 		// Step 5: Verify olympiad ownership for schooladmin
+// 		if userRole == "schooladmin" {
+// 			var count int
+// 			err = db.QueryRow(`
+// 				SELECT COUNT(*)
+// 				FROM subject_olympiads so
+// 				JOIN Schools s ON so.school_id = s.school_id
+// 				WHERE so.subject_olympiad_id = ? AND s.user_id = ?
+// 			`, olympiadID, userID).Scan(&count)
+
+// 			if err != nil {
+// 				log.Printf("Error verifying olympiad ownership for olympiadID %d, userID %d: %v", olympiadID, userID, err)
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to verify olympiad ownership"})
+// 				return
+// 			}
+
+// 			if count == 0 {
+// 				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only edit olympiads for your school"})
+// 				return
+// 			}
+// 		}
+
+// 		// Step 6: Parse form data
+// 		err = r.ParseMultipartForm(10 << 20)
+// 		if err != nil {
+// 			log.Printf("Error parsing multipart form: %v", err)
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Error parsing form data"})
+// 			return
+// 		}
+
+// 		// Log all form field names for debugging
+// 		log.Printf("Received form fields:")
+// 		for key, values := range r.Form {
+// 			log.Printf("Field: %s, value: %v", key, values)
+// 		}
+
+// 		// Step 7: Fetch current olympiad data
+// 		var currentOlympiad models.SubjectOlympiad
+// 		err = db.QueryRow(`
+// 			SELECT
+// 				subject_name, date, end_date, description, school_id, level, limit_participants
+// 			FROM
+// 				subject_olympiads
+// 			WHERE
+// 				subject_olympiad_id = ?
+// 		`, olympiadID).Scan(
+// 			&currentOlympiad.SubjectName,
+// 			&currentOlympiad.StartDate,
+// 			&currentOlympiad.EndDate,
+// 			&currentOlympiad.Description,
+// 			&currentOlympiad.SchoolID,
+// 			&currentOlympiad.Level,
+// 			&currentOlympiad.Limit,
+// 		)
+// 		if err != nil {
+// 			log.Printf("Error fetching current olympiad data for olympiadID %d: %v", olympiadID, err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch current olympiad data"})
+// 			return
+// 		}
+
+// 		// Step 8: Get form data (use current data as defaults)
+// 		// Try both possible field names for subject name
+// 		subjectName := r.FormValue("subject_name")
+// 		if subjectName == "" {
+// 			subjectName = r.FormValue("olympiad_name")
+// 			if subjectName == "" {
+// 				subjectName = currentOlympiad.SubjectName
+// 			}
+// 		}
+
+// 		// Try both possible field names for start date
+// 		startDate := r.FormValue("start_date")
+// 		if startDate == "" {
+// 			startDate = r.FormValue("date")
+// 			if startDate == "" {
+// 				startDate = currentOlympiad.StartDate
+// 			}
+// 		}
+
+// 		endDate := r.FormValue("end_date")
+// 		if endDate == "" {
+// 			endDate = currentOlympiad.EndDate
+// 		}
+
+// 		description := r.FormValue("description")
+// 		if description == "" {
+// 			description = currentOlympiad.Description
+// 		}
+
+// 		level := r.FormValue("level")
+// 		if level == "" {
+// 			level = currentOlympiad.Level
+// 		}
+
+// 		var limit int
+// 		limitStr := r.FormValue("limit_participants")
+// 		if limitStr == "" {
+// 			limitStr = r.FormValue("limit") // Try alternative field name
+// 			if limitStr == "" {
+// 				limit = currentOlympiad.Limit
+// 			} else {
+// 				limit, err = strconv.Atoi(limitStr)
+// 				if err != nil || limit <= 0 {
+// 					utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid participant limit format or value"})
+// 					return
+// 				}
+// 			}
+// 		} else {
+// 			limit, err = strconv.Atoi(limitStr)
+// 			if err != nil || limit <= 0 {
+// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid participant limit format or value"})
+// 				return
+// 			}
+// 		}
+
+// 		// Handle school_id (allow superadmin to change, restrict schooladmin)
+// 		var schoolID int = currentOlympiad.SchoolID
+// 		schoolIDStr := r.FormValue("school_id")
+// 		if schoolIDStr != "" {
+// 			newSchoolID, err := strconv.Atoi(schoolIDStr)
+// 			if err != nil || newSchoolID <= 0 {
+// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+// 				return
+// 			}
+
+// 			// Validate school_id exists
+// 			var count int
+// 			err = db.QueryRow("SELECT COUNT(*) FROM Schools WHERE school_id = ?", newSchoolID).Scan(&count)
+// 			if err != nil || count == 0 {
+// 				log.Printf("Invalid school_id %d: %v", newSchoolID, err)
+// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "School does not exist"})
+// 				return
+// 			}
+
+// 			if userRole == "schooladmin" {
+// 				// Ensure schooladmin can only set school_id to their own school
+// 				err = db.QueryRow(`
+// 					SELECT COUNT(*)
+// 					FROM Schools
+// 					WHERE school_id = ? AND user_id = ?
+// 				`, newSchoolID, userID).Scan(&count)
+// 				if err != nil || count == 0 {
+// 					log.Printf("Schooladmin %d attempted to set invalid school_id %d", userID, newSchoolID)
+// 					utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only set your own school"})
+// 					return
+// 				}
+// 			}
+
+// 			schoolID = newSchoolID
+// 		}
+
+// 		// Log updated form data for debugging
+// 		log.Printf("Processed form data - olympiadID: %d, subject_name: %s, start_date: %s, end_date: %s, school_id: %d, level: %s, limit: %d",
+// 			olympiadID, subjectName, startDate, endDate, schoolID, level, limit)
+
+// 		// Step 9: Update olympiad (including school_id and creator_id)
+// 		_, err = db.Exec(`
+// 			UPDATE subject_olympiads
+// 			SET subject_name = ?, date = ?, end_date = ?, description = ?,
+// 				school_id = ?, level = ?, limit_participants = ?, creator_id = ?
+// 			WHERE subject_olympiad_id = ?
+// 		`, subjectName, startDate, endDate, description, schoolID, level, limit, userID, olympiadID)
+
+// 		if err != nil {
+// 			log.Printf("Error updating olympiad for olympiadID %d: %v", olympiadID, err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update olympiad"})
+// 			return
+// 		}
+
+// 		// Step 10: Fetch updated olympiad data
+// 		var updatedOlympiad models.SubjectOlympiad
+// 		err = db.QueryRow(`
+// 			SELECT
+// 				so.subject_olympiad_id,
+// 				so.subject_name,
+// 				so.date,
+// 				so.end_date,
+// 				so.description,
+// 				so.school_id,
+// 				so.level,
+// 				so.limit_participants,
+// 				COALESCE(so.creator_id, 0) as creator_id,
+// 				COALESCE(u.first_name, '') as creator_first_name,
+// 				COALESCE(u.last_name, '') as creator_last_name,
+// 				COALESCE(s.school_name, '') as school_name
+// 			FROM
+// 				subject_olympiads so
+// 			LEFT JOIN
+// 				Schools s ON so.school_id = s.school_id
+// 			LEFT JOIN
+// 				users u ON so.creator_id = u.id
+// 			WHERE
+// 				so.subject_olympiad_id = ?
+// 		`, olympiadID).Scan(
+// 			&updatedOlympiad.ID,
+// 			&updatedOlympiad.SubjectName,
+// 			&updatedOlympiad.StartDate,
+// 			&updatedOlympiad.EndDate,
+// 			&updatedOlympiad.Description,
+// 			&updatedOlympiad.SchoolID,
+// 			&updatedOlympiad.Level,
+// 			&updatedOlympiad.Limit,
+// 			&updatedOlympiad.CreatorID,
+// 			&updatedOlympiad.CreatorFirstName,
+// 			&updatedOlympiad.CreatorLastName,
+// 			&updatedOlympiad.SchoolName,
+// 		)
+
+// 		if err != nil {
+// 			log.Printf("Error fetching updated olympiad for olympiadID %d: %v", olympiadID, err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Olympiad updated but failed to fetch updated data"})
+// 			return
+// 		}
+
+// 		utils.ResponseJSON(w, updatedOlympiad)
+// 	}
+// }
+
 func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Step 1: Verify token
@@ -335,7 +869,6 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 			return
 		}
 
-		// Log all form field names for debugging
 		log.Printf("Received form fields:")
 		for key, values := range r.Form {
 			log.Printf("Field: %s, value: %v", key, values)
@@ -345,7 +878,7 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 		var currentOlympiad models.SubjectOlympiad
 		err = db.QueryRow(`
 			SELECT 
-				subject_name, date, end_date, description, school_id, level, limit_participants
+				subject_name, date, end_date, description, school_id, level, grade, limit_participants
 			FROM 
 				subject_olympiads
 			WHERE 
@@ -357,6 +890,7 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 			&currentOlympiad.Description,
 			&currentOlympiad.SchoolID,
 			&currentOlympiad.Level,
+			&currentOlympiad.Grade,
 			&currentOlympiad.Limit,
 		)
 		if err != nil {
@@ -365,8 +899,6 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 			return
 		}
 
-		// Step 8: Get form data (use current data as defaults)
-		// Try both possible field names for subject name
 		subjectName := r.FormValue("subject_name")
 		if subjectName == "" {
 			subjectName = r.FormValue("olympiad_name")
@@ -375,7 +907,6 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 			}
 		}
 
-		// Try both possible field names for start date
 		startDate := r.FormValue("start_date")
 		if startDate == "" {
 			startDate = r.FormValue("date")
@@ -399,10 +930,20 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 			level = currentOlympiad.Level
 		}
 
+		gradeStr := r.FormValue("grade")
+		grade := currentOlympiad.Grade
+		if gradeStr != "" {
+			grade, err = strconv.Atoi(gradeStr)
+			if err != nil || grade <= 0 {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade value"})
+				return
+			}
+		}
+
 		var limit int
 		limitStr := r.FormValue("limit_participants")
 		if limitStr == "" {
-			limitStr = r.FormValue("limit") // Try alternative field name
+			limitStr = r.FormValue("limit")
 			if limitStr == "" {
 				limit = currentOlympiad.Limit
 			} else {
@@ -420,7 +961,6 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 			}
 		}
 
-		// Handle school_id (allow superadmin to change, restrict schooladmin)
 		var schoolID int = currentOlympiad.SchoolID
 		schoolIDStr := r.FormValue("school_id")
 		if schoolIDStr != "" {
@@ -430,7 +970,6 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 				return
 			}
 
-			// Validate school_id exists
 			var count int
 			err = db.QueryRow("SELECT COUNT(*) FROM Schools WHERE school_id = ?", newSchoolID).Scan(&count)
 			if err != nil || count == 0 {
@@ -440,7 +979,6 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 			}
 
 			if userRole == "schooladmin" {
-				// Ensure schooladmin can only set school_id to their own school
 				err = db.QueryRow(`
 					SELECT COUNT(*) 
 					FROM Schools 
@@ -456,17 +994,15 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 			schoolID = newSchoolID
 		}
 
-		// Log updated form data for debugging
-		log.Printf("Processed form data - olympiadID: %d, subject_name: %s, start_date: %s, end_date: %s, school_id: %d, level: %s, limit: %d",
-			olympiadID, subjectName, startDate, endDate, schoolID, level, limit)
+		log.Printf("Processed form data - olympiadID: %d, subject_name: %s, start_date: %s, end_date: %s, school_id: %d, level: %s, grade: %d, limit: %d",
+			olympiadID, subjectName, startDate, endDate, schoolID, level, grade, limit)
 
-		// Step 9: Update olympiad (including school_id and creator_id)
 		_, err = db.Exec(`
 			UPDATE subject_olympiads
 			SET subject_name = ?, date = ?, end_date = ?, description = ?, 
-				school_id = ?, level = ?, limit_participants = ?, creator_id = ?
+				school_id = ?, level = ?, grade = ?, limit_participants = ?, creator_id = ?
 			WHERE subject_olympiad_id = ?
-		`, subjectName, startDate, endDate, description, schoolID, level, limit, userID, olympiadID)
+		`, subjectName, startDate, endDate, description, schoolID, level, grade, limit, userID, olympiadID)
 
 		if err != nil {
 			log.Printf("Error updating olympiad for olympiadID %d: %v", olympiadID, err)
@@ -474,7 +1010,6 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 			return
 		}
 
-		// Step 10: Fetch updated olympiad data
 		var updatedOlympiad models.SubjectOlympiad
 		err = db.QueryRow(`
 			SELECT 
@@ -485,6 +1020,7 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 				so.description, 
 				so.school_id, 
 				so.level, 
+				so.grade,
 				so.limit_participants,
 				COALESCE(so.creator_id, 0) as creator_id,
 				COALESCE(u.first_name, '') as creator_first_name,
@@ -506,6 +1042,7 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 			&updatedOlympiad.Description,
 			&updatedOlympiad.SchoolID,
 			&updatedOlympiad.Level,
+			&updatedOlympiad.Grade,
 			&updatedOlympiad.Limit,
 			&updatedOlympiad.CreatorID,
 			&updatedOlympiad.CreatorFirstName,
@@ -522,6 +1059,7 @@ func (c *SubjectOlympiadController) EditOlympiadsCreated(db *sql.DB) http.Handle
 		utils.ResponseJSON(w, updatedOlympiad)
 	}
 }
+
 func (c *SubjectOlympiadController) DeleteSubjectOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Шаг 1: Проверка токена
@@ -575,16 +1113,460 @@ func (c *SubjectOlympiadController) DeleteSubjectOlympiad(db *sql.DB) http.Handl
 		utils.ResponseJSON(w, map[string]string{"message": "Olympiad successfully deleted"})
 	}
 }
+
+// func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		// Step 1: Verify token
+// 		userID, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token."})
+// 			return
+// 		}
+
+// 		// Step 2: Get user role
+// 		var userRole string
+// 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+// 		if err != nil {
+// 			log.Println("Error fetching user role:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+// 			return
+// 		}
+
+// 		// Step 3: Check permissions
+// 		if userRole != "superadmin" && userRole != "schooladmin" && userRole != "teacher" && userRole != "student" {
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view olympiads"})
+// 			return
+// 		}
+
+// 		// Step 4: Build base query with photo_url
+// 		query := `
+// 			SELECT
+// 				so.subject_olympiad_id,
+// 				so.subject_name,
+// 				so.date AS start_date,
+// 				so.end_date,
+// 				so.description,
+// 				so.school_id,
+// 				so.level,
+// 				so.limit_participants,
+// 				COALESCE(u.id, 0) AS creator_id,
+// 				COALESCE(u.first_name, '') AS creator_first_name,
+// 				COALESCE(u.last_name, '') AS creator_last_name,
+// 				COALESCE(s.school_name, '') AS school_name,
+// 				so.photo_url
+// 			FROM subject_olympiads so
+// 			LEFT JOIN users u ON so.creator_id = u.id
+// 			LEFT JOIN Schools s ON so.school_id = s.school_id
+// 		`
+
+// 		var rows *sql.Rows
+
+// 		// Step 5: Restrict query for non-superadmin
+// 		if userRole == "superadmin" {
+// 			rows, err = db.Query(query)
+// 		} else {
+// 			var schoolID int
+// 			err = db.QueryRow("SELECT school_id FROM users WHERE id = ?", userID).Scan(&schoolID)
+// 			if err != nil {
+// 				log.Println("Error fetching user school_id:", err)
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user school details"})
+// 				return
+// 			}
+// 			query += " WHERE so.school_id = ?"
+// 			rows, err = db.Query(query, schoolID)
+// 		}
+
+// 		if err != nil {
+// 			log.Println("Error querying olympiads:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch olympiads"})
+// 			return
+// 		}
+// 		defer rows.Close()
+
+// 		// Step 6: Read and map rows
+// 		var olympiads []map[string]interface{}
+// 		for rows.Next() {
+// 			var (
+// 				id                int
+// 				subjectName       string
+// 				startDate         string
+// 				endDate           sql.NullString
+// 				description       sql.NullString
+// 				schoolID          sql.NullInt64
+// 				level             sql.NullString
+// 				limitParticipants sql.NullInt64
+// 				creatorID         int
+// 				creatorFirstName  string
+// 				creatorLastName   string
+// 				schoolName        string
+// 				photo             sql.NullString
+// 			)
+
+// 			err := rows.Scan(
+// 				&id,
+// 				&subjectName,
+// 				&startDate,
+// 				&endDate,
+// 				&description,
+// 				&schoolID,
+// 				&level,
+// 				&limitParticipants,
+// 				&creatorID,
+// 				&creatorFirstName,
+// 				&creatorLastName,
+// 				&schoolName,
+// 				&photo,
+// 			)
+// 			if err != nil {
+// 				log.Println("Error scanning olympiad row:", err)
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing olympiad data"})
+// 				return
+// 			}
+
+// 			// Check if olympiad expired
+// 			isExpired := false
+// 			if endDate.Valid && endDate.String != "" {
+// 				endDateParsed, err := time.Parse("2006-01-02", endDate.String)
+// 				if err == nil && time.Now().After(endDateParsed) {
+// 					isExpired = true
+// 				}
+// 			}
+
+// 			// Convert photo_url
+// 			var photoURL interface{}
+// 			if photo.Valid && photo.String != "" {
+// 				photoURL = photo.String
+// 			} else {
+// 				photoURL = nil
+// 			}
+
+// 			// Convert end_date to proper format
+// 			var endDateValue interface{}
+// 			if endDate.Valid {
+// 				endDateValue = endDate.String
+// 			} else {
+// 				endDateValue = nil
+// 			}
+
+// 			// Convert school_id to proper format
+// 			var schoolIDValue interface{}
+// 			if schoolID.Valid {
+// 				schoolIDValue = int(schoolID.Int64)
+// 			} else {
+// 				schoolIDValue = nil
+// 			}
+
+// 			// Convert level to proper format
+// 			var levelValue interface{}
+// 			if level.Valid {
+// 				levelValue = level.String
+// 			} else {
+// 				levelValue = nil
+// 			}
+
+// 			// Convert limit_participants to proper format
+// 			var limitParticipantsValue interface{}
+// 			if limitParticipants.Valid {
+// 				limitParticipantsValue = int(limitParticipants.Int64)
+// 			} else {
+// 				limitParticipantsValue = nil
+// 			}
+
+// 			// Build result object
+// 			olympiad := map[string]interface{}{
+// 				"subject_olympiad_id": id,
+// 				"id":                  id,
+// 				"subject_name":        subjectName,
+// 				"start_date":          startDate,
+// 				"end_date":            endDateValue,
+// 				"description":         description.String,
+// 				"school_id":           schoolIDValue,
+// 				"level":               levelValue,
+// 				"limit_participants":  limitParticipantsValue,
+// 				"photo_url":           photoURL,
+// 				"creator_id":          creatorID,
+// 				"creator_first_name":  creatorFirstName,
+// 				"creator_last_name":   creatorLastName,
+// 				"school_name":         schoolName,
+// 				"expired":             isExpired,
+// 			}
+
+// 			olympiads = append(olympiads, olympiad)
+// 		}
+
+// 		// Step 7: Return response
+// 		utils.ResponseJSON(w, olympiads)
+// 	}
+// }
+
+// func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		userID, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token."})
+// 			return
+// 		}
+
+// 		var userRole string
+// 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+// 		if err != nil {
+// 			log.Println("Error fetching user role:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+// 			return
+// 		}
+
+// 		if userRole != "superadmin" && userRole != "schooladmin" && userRole != "teacher" && userRole != "student" {
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view olympiads"})
+// 			return
+// 		}
+
+// 		query := `
+// 			SELECT
+// 				so.subject_olympiad_id,
+// 				so.subject_name,
+// 				so.date AS start_date,
+// 				so.end_date,
+// 				so.description,
+// 				so.school_id,
+// 				so.level,
+// 				so.limit_participants,
+// 				so.current_participants,
+// 				COALESCE(u.id, 0) AS creator_id,
+// 				COALESCE(u.first_name, '') AS creator_first_name,
+// 				COALESCE(u.last_name, '') AS creator_last_name,
+// 				COALESCE(s.school_name, '') AS school_name,
+// 				so.photo_url
+// 			FROM subject_olympiads so
+// 			LEFT JOIN users u ON so.creator_id = u.id
+// 			LEFT JOIN Schools s ON so.school_id = s.school_id
+// 		`
+
+// 		var rows *sql.Rows
+// 		if userRole == "superadmin" {
+// 			rows, err = db.Query(query)
+// 		} else {
+// 			var schoolID int
+// 			err = db.QueryRow("SELECT school_id FROM users WHERE id = ?", userID).Scan(&schoolID)
+// 			if err != nil {
+// 				log.Println("Error fetching user school_id:", err)
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user school details"})
+// 				return
+// 			}
+// 			query += " WHERE so.school_id = ?"
+// 			rows, err = db.Query(query, schoolID)
+// 		}
+
+// 		if err != nil {
+// 			log.Println("Error querying olympiads:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch olympiads"})
+// 			return
+// 		}
+// 		defer rows.Close()
+
+// 		var olympiads []map[string]interface{}
+// 		for rows.Next() {
+// 			var (
+// 				id, creatorID, currentParticipants                                    int
+// 				subjectName, startDate, creatorFirstName, creatorLastName, schoolName string
+// 				endDate, description, level, photo                                    sql.NullString
+// 				schoolID                                                              sql.NullInt64
+// 				limitParticipants                                                     sql.NullInt64
+// 			)
+
+// 			err := rows.Scan(
+// 				&id,
+// 				&subjectName,
+// 				&startDate,
+// 				&endDate,
+// 				&description,
+// 				&schoolID,
+// 				&level,
+// 				&limitParticipants,
+// 				&currentParticipants,
+// 				&creatorID,
+// 				&creatorFirstName,
+// 				&creatorLastName,
+// 				&schoolName,
+// 				&photo,
+// 			)
+// 			if err != nil {
+// 				log.Println("Error scanning olympiad row:", err)
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing olympiad data"})
+// 				return
+// 			}
+
+// 			isExpired := false
+// 			if endDate.Valid && endDate.String != "" {
+// 				endDateParsed, err := time.Parse("2006-01-02", endDate.String)
+// 				if err == nil && time.Now().After(endDateParsed) {
+// 					isExpired = true
+// 				}
+// 			}
+
+// 			olympiad := map[string]interface{}{
+// 				"subject_olympiad_id":  id,
+// 				"id":                   id,
+// 				"subject_name":         subjectName,
+// 				"start_date":           startDate,
+// 				"end_date":             nullToInterface(endDate),
+// 				"description":          nullToString(description),
+// 				"school_id":            nullToInterfaceInt(schoolID),
+// 				"level":                nullToString(level),
+// 				"limit_participants":   nullToInterfaceInt(limitParticipants),
+// 				"current_participants": currentParticipants,
+// 				"photo_url":            nullToInterface(photo),
+// 				"creator_id":           creatorID,
+// 				"creator_first_name":   creatorFirstName,
+// 				"creator_last_name":    creatorLastName,
+// 				"school_name":          schoolName,
+// 				"expired":              isExpired,
+// 			}
+
+// 			olympiads = append(olympiads, olympiad)
+// 		}
+
+// 		utils.ResponseJSON(w, olympiads)
+// 	}
+// }
+
+// func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		userID, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token."})
+// 			return
+// 		}
+
+// 		var userRole string
+// 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+// 		if err != nil {
+// 			log.Println("Error fetching user role:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+// 			return
+// 		}
+
+// 		if userRole != "superadmin" && userRole != "schooladmin" && userRole != "teacher" && userRole != "student" {
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view olympiads"})
+// 			return
+// 		}
+
+// 		query := `
+// 			SELECT
+// 				so.subject_olympiad_id,
+// 				so.subject_name,
+// 				so.date AS start_date,
+// 				so.end_date,
+// 				so.description,
+// 				so.school_id,
+// 				so.level,
+// 				so.limit_participants,
+// 				(SELECT COUNT(*) FROM olympiad_registrations r WHERE r.subject_olympiad_id = so.subject_olympiad_id AND r.status = 'registered') AS current_participants,
+// 				COALESCE(u.id, 0) AS creator_id,
+// 				COALESCE(u.first_name, '') AS creator_first_name,
+// 				COALESCE(u.last_name, '') AS creator_last_name,
+// 				COALESCE(s.school_name, '') AS school_name,
+// 				so.photo_url
+// 			FROM subject_olympiads so
+// 			LEFT JOIN users u ON so.creator_id = u.id
+// 			LEFT JOIN Schools s ON so.school_id = s.school_id
+// 		`
+
+// 		var rows *sql.Rows
+// 		if userRole == "superadmin" {
+// 			rows, err = db.Query(query)
+// 		} else {
+// 			var schoolID int
+// 			err = db.QueryRow("SELECT school_id FROM users WHERE id = ?", userID).Scan(&schoolID)
+// 			if err != nil {
+// 				log.Println("Error fetching user school_id:", err)
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user school details"})
+// 				return
+// 			}
+// 			query += " WHERE so.school_id = ?"
+// 			rows, err = db.Query(query, schoolID)
+// 		}
+
+// 		if err != nil {
+// 			log.Println("Error querying olympiads:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch olympiads"})
+// 			return
+// 		}
+// 		defer rows.Close()
+
+// 		var olympiads []map[string]interface{}
+// 		for rows.Next() {
+// 			var (
+// 				id, creatorID, currentParticipants                                    int
+// 				subjectName, startDate, creatorFirstName, creatorLastName, schoolName string
+// 				endDate, description, level, photo                                    sql.NullString
+// 				schoolID                                                              sql.NullInt64
+// 				limitParticipants                                                     sql.NullInt64
+// 			)
+
+// 			err := rows.Scan(
+// 				&id,
+// 				&subjectName,
+// 				&startDate,
+// 				&endDate,
+// 				&description,
+// 				&schoolID,
+// 				&level,
+// 				&limitParticipants,
+// 				&currentParticipants,
+// 				&creatorID,
+// 				&creatorFirstName,
+// 				&creatorLastName,
+// 				&schoolName,
+// 				&photo,
+// 			)
+// 			if err != nil {
+// 				log.Println("Error scanning olympiad row:", err)
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing olympiad data"})
+// 				return
+// 			}
+
+// 			isExpired := false
+// 			if endDate.Valid && endDate.String != "" {
+// 				endDateParsed, err := time.Parse("2006-01-02", endDate.String)
+// 				if err == nil && time.Now().After(endDateParsed) {
+// 					isExpired = true
+// 				}
+// 			}
+
+// 			olympiad := map[string]interface{}{
+// 				"subject_olympiad_id":  id,
+// 				"id":                   id,
+// 				"subject_name":         subjectName,
+// 				"start_date":           startDate,
+// 				"end_date":             nullToInterface(endDate),
+// 				"description":          nullToString(description),
+// 				"school_id":            nullToInterfaceInt(schoolID),
+// 				"level":                nullToString(level),
+// 				"limit_participants":   nullToInterfaceInt(limitParticipants),
+// 				"current_participants": currentParticipants,
+// 				"photo_url":            nullToInterface(photo),
+// 				"creator_id":           creatorID,
+// 				"creator_first_name":   creatorFirstName,
+// 				"creator_last_name":    creatorLastName,
+// 				"school_name":          schoolName,
+// 				"expired":              isExpired,
+// 			}
+
+// 			olympiads = append(olympiads, olympiad)
+// 		}
+
+// 		utils.ResponseJSON(w, olympiads)
+// 	}
+// }
+
 func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Step 1: Verify token
 		userID, err := utils.VerifyToken(r)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token."})
 			return
 		}
 
-		// Step 2: Get user role
 		var userRole string
 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
 		if err != nil {
@@ -593,13 +1575,11 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 			return
 		}
 
-		// Step 3: Check permissions
 		if userRole != "superadmin" && userRole != "schooladmin" && userRole != "teacher" && userRole != "student" {
 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to view olympiads"})
 			return
 		}
 
-		// Step 4: Build base query with photo_url
 		query := `
 			SELECT 
 				so.subject_olympiad_id,
@@ -609,7 +1589,9 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 				so.description,
 				so.school_id,
 				so.level,
+				so.grade,
 				so.limit_participants,
+				(SELECT COUNT(*) FROM olympiad_registrations r WHERE r.subject_olympiad_id = so.subject_olympiad_id) AS current_participants,
 				COALESCE(u.id, 0) AS creator_id,
 				COALESCE(u.first_name, '') AS creator_first_name,
 				COALESCE(u.last_name, '') AS creator_last_name,
@@ -621,8 +1603,6 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 		`
 
 		var rows *sql.Rows
-
-		// Step 5: Restrict query for non-superadmin
 		if userRole == "superadmin" {
 			rows, err = db.Query(query)
 		} else {
@@ -644,23 +1624,14 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 		}
 		defer rows.Close()
 
-		// Step 6: Read and map rows
 		var olympiads []map[string]interface{}
 		for rows.Next() {
 			var (
-				id                int
-				subjectName       string
-				startDate         string
-				endDate           sql.NullString
-				description       sql.NullString
-				schoolID          sql.NullInt64
-				level             sql.NullString
-				limitParticipants sql.NullInt64
-				creatorID         int
-				creatorFirstName  string
-				creatorLastName   string
-				schoolName        string
-				photo             sql.NullString
+				id, creatorID, currentParticipants                                    int
+				subjectName, startDate, creatorFirstName, creatorLastName, schoolName string
+				endDate, description, level, grade, photo                             sql.NullString
+				schoolID                                                              sql.NullInt64
+				limitParticipants                                                     sql.NullInt64
 			)
 
 			err := rows.Scan(
@@ -671,7 +1642,9 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 				&description,
 				&schoolID,
 				&level,
+				&grade,
 				&limitParticipants,
+				&currentParticipants,
 				&creatorID,
 				&creatorFirstName,
 				&creatorLastName,
@@ -684,7 +1657,6 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 				return
 			}
 
-			// Check if olympiad expired
 			isExpired := false
 			if endDate.Valid && endDate.String != "" {
 				endDateParsed, err := time.Parse("2006-01-02", endDate.String)
@@ -693,72 +1665,54 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiads(db *sql.DB) http.Hand
 				}
 			}
 
-			// Convert photo_url
-			var photoURL interface{}
-			if photo.Valid && photo.String != "" {
-				photoURL = photo.String
-			} else {
-				photoURL = nil
-			}
-
-			// Convert end_date to proper format
-			var endDateValue interface{}
-			if endDate.Valid {
-				endDateValue = endDate.String
-			} else {
-				endDateValue = nil
-			}
-
-			// Convert school_id to proper format
-			var schoolIDValue interface{}
-			if schoolID.Valid {
-				schoolIDValue = int(schoolID.Int64)
-			} else {
-				schoolIDValue = nil
-			}
-
-			// Convert level to proper format
-			var levelValue interface{}
-			if level.Valid {
-				levelValue = level.String
-			} else {
-				levelValue = nil
-			}
-
-			// Convert limit_participants to proper format
-			var limitParticipantsValue interface{}
-			if limitParticipants.Valid {
-				limitParticipantsValue = int(limitParticipants.Int64)
-			} else {
-				limitParticipantsValue = nil
-			}
-
-			// Build result object
 			olympiad := map[string]interface{}{
-				"subject_olympiad_id": id,
-				"id":                  id,
-				"subject_name":        subjectName,
-				"start_date":          startDate,
-				"end_date":            endDateValue,
-				"description":         description.String,
-				"school_id":           schoolIDValue,
-				"level":               levelValue,
-				"limit_participants":  limitParticipantsValue,
-				"photo_url":           photoURL,
-				"creator_id":          creatorID,
-				"creator_first_name":  creatorFirstName,
-				"creator_last_name":   creatorLastName,
-				"school_name":         schoolName,
-				"expired":             isExpired,
+				"subject_olympiad_id":  id,
+				"id":                   id,
+				"subject_name":         subjectName,
+				"start_date":           startDate,
+				"end_date":             nullToInterface(endDate),
+				"description":          nullToString(description),
+				"school_id":            nullToInterfaceInt(schoolID),
+				"level":                nullToString(level),
+				"grade":                nullToString(grade),
+				"limit_participants":   nullToInterfaceInt(limitParticipants),
+				"current_participants": currentParticipants,
+				"photo_url":            nullToInterface(photo),
+				"creator_id":           creatorID,
+				"creator_first_name":   creatorFirstName,
+				"creator_last_name":    creatorLastName,
+				"school_name":          schoolName,
+				"expired":              isExpired,
 			}
 
 			olympiads = append(olympiads, olympiad)
 		}
 
-		// Step 7: Return response
 		utils.ResponseJSON(w, olympiads)
 	}
 }
+
+func nullToInterface(ns sql.NullString) interface{} {
+	if ns.Valid {
+		return ns.String
+	}
+	return nil
+}
+
+func nullToString(ns sql.NullString) string {
+	if ns.Valid {
+		return ns.String
+	}
+	return ""
+}
+
+func nullToInterfaceInt(ni sql.NullInt64) interface{} {
+	if ni.Valid {
+		return int(ni.Int64)
+	}
+	return nil
+}
+
 func (c *SubjectOlympiadController) GetOlympiadsBySubjectID(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract subject_olympiad_id from URL parameters
@@ -1019,6 +1973,219 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 		utils.ResponseJSON(w, response)
 	}
 }
+
+// func (c *SubjectOlympiadController) GetAllSubjectOlympiadsSchool(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		_, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+// 			return
+// 		}
+
+// 		// Extract schoolID from URL path parameter
+// 		vars := mux.Vars(r)
+// 		schoolID := vars["school_id"]
+
+// 		subject := r.URL.Query().Get("subject")
+
+// 		// Updated query to include all the necessary fields
+// 		query := `
+// 			SELECT
+// 				so.subject_olympiad_id,
+// 				so.subject_name,
+// 				so.date,
+// 				so.end_date,
+// 				so.description,
+// 				so.school_id,
+// 				so.level,
+// 				so.limit_participants,
+// 				COALESCE(so.creator_id, 0) as creator_id,
+// 				COALESCE(u.first_name, '') as creator_first_name,
+// 				COALESCE(u.last_name, '') as creator_last_name,
+// 				COALESCE(s.school_name, '') as school_name
+// 			FROM
+// 				subject_olympiads so
+// 			LEFT JOIN
+// 				users u ON so.creator_id = u.id
+// 			LEFT JOIN
+// 				Schools s ON so.school_id = s.school_id
+// 		`
+
+// 		var rows *sql.Rows
+// 		var params []interface{}
+// 		var conditions []string
+
+// 		if subject != "" {
+// 			conditions = append(conditions, "so.subject_name = ?")
+// 			params = append(params, subject)
+// 		}
+
+// 		if schoolID != "" {
+// 			conditions = append(conditions, "so.school_id = ?")
+// 			params = append(params, schoolID)
+// 		}
+
+// 		if len(conditions) > 0 {
+// 			query += " WHERE " + strings.Join(conditions, " AND ")
+// 			rows, err = db.Query(query, params...)
+// 		} else {
+// 			rows, err = db.Query(query)
+// 		}
+
+// 		if err != nil {
+// 			log.Println("Query error:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Query failed"})
+// 			return
+// 		}
+// 		defer rows.Close()
+
+// 		var olympiads []models.SubjectOlympiad
+// 		for rows.Next() {
+// 			var o models.SubjectOlympiad
+// 			if err := rows.Scan(
+// 				&o.ID,
+// 				&o.SubjectName,
+// 				&o.StartDate,
+// 				&o.EndDate,
+// 				&o.Description,
+// 				&o.SchoolID,
+// 				&o.Level,
+// 				&o.Limit,
+// 				&o.CreatorID,
+// 				&o.CreatorFirstName,
+// 				&o.CreatorLastName,
+// 				&o.SchoolName,
+// 			); err != nil {
+// 				log.Println("Scan error:", err)
+// 				continue
+// 			}
+
+// 			// Check if olympiad is expired
+// 			currentTime := time.Now()
+// 			endDate, err := time.Parse("2006-01-02", o.EndDate)
+// 			if err != nil {
+// 				log.Printf("Error parsing end date '%s': %v", o.EndDate, err)
+// 				o.Expired = false
+// 			} else {
+// 				o.Expired = currentTime.After(endDate)
+// 			}
+
+// 			olympiads = append(olympiads, o)
+// 		}
+
+// 		utils.ResponseJSON(w, olympiads)
+// 	}
+// }
+
+// func (c *SubjectOlympiadController) GetAllSubjectOlympiadsSchool(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		_, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+// 			return
+// 		}
+
+// 		vars := mux.Vars(r)
+// 		schoolID := vars["school_id"]
+// 		subject := r.URL.Query().Get("subject")
+
+// 		query := `
+// 			SELECT
+// 				so.subject_olympiad_id,
+// 				so.subject_name,
+// 				so.date,
+// 				so.end_date,
+// 				so.description,
+// 				so.school_id,
+// 				so.level,
+// 				so.limit_participants,
+// 				COALESCE(so.creator_id, 0) as creator_id,
+// 				COALESCE(u.first_name, '') as creator_first_name,
+// 				COALESCE(u.last_name, '') as creator_last_name,
+// 				COALESCE(s.school_name, '') as school_name
+// 			FROM
+// 				subject_olympiads so
+// 			LEFT JOIN
+// 				users u ON so.creator_id = u.id
+// 			LEFT JOIN
+// 				Schools s ON so.school_id = s.school_id
+// 		`
+
+// 		var rows *sql.Rows
+// 		var params []interface{}
+// 		var conditions []string
+
+// 		if subject != "" {
+// 			conditions = append(conditions, "so.subject_name = ?")
+// 			params = append(params, subject)
+// 		}
+// 		if schoolID != "" {
+// 			conditions = append(conditions, "so.school_id = ?")
+// 			params = append(params, schoolID)
+// 		}
+// 		if len(conditions) > 0 {
+// 			query += " WHERE " + strings.Join(conditions, " AND ")
+// 			rows, err = db.Query(query, params...)
+// 		} else {
+// 			rows, err = db.Query(query)
+// 		}
+
+// 		if err != nil {
+// 			log.Println("Query error:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Query failed"})
+// 			return
+// 		}
+// 		defer rows.Close()
+
+// 		var olympiads []models.SubjectOlympiad
+// 		for rows.Next() {
+// 			var o models.SubjectOlympiad
+// 			if err := rows.Scan(
+// 				&o.ID,
+// 				&o.SubjectName,
+// 				&o.StartDate,
+// 				&o.EndDate,
+// 				&o.Description,
+// 				&o.SchoolID,
+// 				&o.Level,
+// 				&o.Limit,
+// 				&o.CreatorID,
+// 				&o.CreatorFirstName,
+// 				&o.CreatorLastName,
+// 				&o.SchoolName,
+// 			); err != nil {
+// 				log.Println("Scan error:", err)
+// 				continue
+// 			}
+
+// 			// Получить количество зарегистрированных участников
+// 			err = db.QueryRow(`
+// 				SELECT COUNT(*)
+// 				FROM olympiad_registrations
+// 				WHERE subject_olympiad_id = ? AND status = 'registered'`,
+// 				o.ID).Scan(&o.CurrentParticipants)
+// 			if err != nil {
+// 				log.Printf("Failed to count participants for olympiad %d: %v", o.ID, err)
+// 				o.CurrentParticipants = 0
+// 			}
+
+// 			// Проверка на истекший срок
+// 			currentTime := time.Now()
+// 			endDate, err := time.Parse("2006-01-02", o.EndDate)
+// 			if err != nil {
+// 				log.Printf("Error parsing end date '%s': %v", o.EndDate, err)
+// 				o.Expired = false
+// 			} else {
+// 				o.Expired = currentTime.After(endDate)
+// 			}
+
+// 			olympiads = append(olympiads, o)
+// 		}
+
+// 		utils.ResponseJSON(w, olympiads)
+// 	}
+// }
+
 func (c *SubjectOlympiadController) GetAllSubjectOlympiadsSchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		_, err := utils.VerifyToken(r)
@@ -1027,13 +2194,10 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiadsSchool(db *sql.DB) htt
 			return
 		}
 
-		// Extract schoolID from URL path parameter
 		vars := mux.Vars(r)
 		schoolID := vars["school_id"]
-
 		subject := r.URL.Query().Get("subject")
 
-		// Updated query to include all the necessary fields
 		query := `
 			SELECT 
 				so.subject_olympiad_id, 
@@ -1043,6 +2207,7 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiadsSchool(db *sql.DB) htt
 				so.description,
 				so.school_id,
 				so.level,
+				so.grade,
 				so.limit_participants,
 				COALESCE(so.creator_id, 0) as creator_id,
 				COALESCE(u.first_name, '') as creator_first_name,
@@ -1064,12 +2229,10 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiadsSchool(db *sql.DB) htt
 			conditions = append(conditions, "so.subject_name = ?")
 			params = append(params, subject)
 		}
-
 		if schoolID != "" {
 			conditions = append(conditions, "so.school_id = ?")
 			params = append(params, schoolID)
 		}
-
 		if len(conditions) > 0 {
 			query += " WHERE " + strings.Join(conditions, " AND ")
 			rows, err = db.Query(query, params...)
@@ -1095,6 +2258,7 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiadsSchool(db *sql.DB) htt
 				&o.Description,
 				&o.SchoolID,
 				&o.Level,
+				&o.Grade, // ⬅️ добавлено
 				&o.Limit,
 				&o.CreatorID,
 				&o.CreatorFirstName,
@@ -1105,7 +2269,16 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiadsSchool(db *sql.DB) htt
 				continue
 			}
 
-			// Check if olympiad is expired
+			err = db.QueryRow(`
+				SELECT COUNT(*) 
+				FROM olympiad_registrations 
+				WHERE subject_olympiad_id = ? AND status = 'registered'`,
+				o.ID).Scan(&o.CurrentParticipants)
+			if err != nil {
+				log.Printf("Failed to count participants for olympiad %d: %v", o.ID, err)
+				o.CurrentParticipants = 0
+			}
+
 			currentTime := time.Now()
 			endDate, err := time.Parse("2006-01-02", o.EndDate)
 			if err != nil {
@@ -1121,6 +2294,7 @@ func (c *SubjectOlympiadController) GetAllSubjectOlympiadsSchool(db *sql.DB) htt
 		utils.ResponseJSON(w, olympiads)
 	}
 }
+
 func (c *SubjectOlympiadController) GetRegisteredStudentsByMonth(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Step 1: Verify token
