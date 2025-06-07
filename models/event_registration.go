@@ -11,7 +11,6 @@ type EventRegistration struct {
 	SchoolID            int       `json:"school_id"`
 	Message             string    `json:"message"`
 
-
 	StudentName       string `json:"student_name"`
 	StudentFirstName  string `json:"student_first_name"`
 	StudentLastName   string `json:"student_last_name"`
@@ -19,8 +18,7 @@ type EventRegistration struct {
 	StudentGrade      string `json:"student_grade"`
 	StudentLetter     string `json:"student_letter"`
 	StudentRole       string `json:"student_role"`
-	SchoolName string `json:"school_name"`
-
+	SchoolName        string `json:"school_name"`
 
 	EventName      string `json:"event_name,omitempty"`
 	EventLocation  string `json:"event_location,omitempty"`
