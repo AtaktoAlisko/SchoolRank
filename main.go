@@ -92,7 +92,10 @@ func main() {
 	router.HandleFunc("/api/auth/code/resend", controller.ResendCode(db)).Methods("POST")
 	router.HandleFunc("/api/auth/password/update", controller.TokenVerifyMiddleware(controller.UpdatePassword(db))).Methods("PUT")
 	router.HandleFunc("/api/auth/email/verify", controller.VerifyEmail(db)).Methods("POST")
+
+	// mobile
 	router.HandleFunc("/api/my-history", historyController.GetMyHistory(db)).Methods("GET")
+	router.HandleFunc("/api/my-achievements", historyController.GetMyAchievements(db)).Methods("GET")
 
 	// =======================
 	// Профиль пользователя и аватар
