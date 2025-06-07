@@ -163,7 +163,7 @@ func (c *EventsParticipantController) AddEventsParticipant(db *sql.DB) http.Hand
 		query = `SELECT ep.id, ep.school_id, ep.grade, ep.letter, ep.student_id, ep.events_name, 
                 ep.document, ep.category, ep.role, ep.date, 
                 s.student_id, s.first_name as student_name, s.last_name as student_lastname,
-                sch.name as school_name,
+                sch.school_name as school_name,
                 c.id as creator_id, c.first_name as creator_first_name, c.last_name as creator_last_name
             FROM events_participants ep
             JOIN student s ON ep.student_id = s.student_id
@@ -213,16 +213,75 @@ func (c *EventsParticipantController) AddEventsParticipant(db *sql.DB) http.Hand
 		utils.ResponseJSON(w, participant)
 	}
 }
+
+// func (c *EventsParticipantController) DeleteEventsParticipant(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		// Step 1: Verify the token
+// 		userID, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token."})
+// 			return
+// 		}
+
+// 		// Step 2: Get user role
+// 		var userRole string
+// 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+// 		if err != nil {
+// 			log.Println("Error fetching user role:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+// 			return
+// 		}
+
+// 		// Step 3: Check access permissions
+// 		if userRole != "superadmin" && userRole != "schooladmin" {
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to delete event participants"})
+// 			return
+// 		}
+
+// 		// Step 4: Get the events_id from the URL
+// 		vars := mux.Vars(r)
+// 		eventsID, ok := vars["events_id"]
+// 		if !ok {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Missing events_id parameter"})
+// 			return
+// 		}
+
+// 		// Step 5: Delete the event participant
+// 		result, err := db.Exec("DELETE FROM events_participants WHERE id = ?", eventsID)
+// 		if err != nil {
+// 			log.Println("Error deleting event participant:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete event participant"})
+// 			return
+// 		}
+
+// 		// Check if any row was affected
+// 		rowsAffected, err := result.RowsAffected()
+// 		if err != nil {
+// 			log.Println("Error getting rows affected:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to confirm deletion"})
+// 			return
+// 		}
+
+// 		if rowsAffected == 0 {
+// 			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Event participant not found"})
+// 			return
+// 		}
+
+// 		// Return success response
+// 		utils.ResponseJSON(w, map[string]string{"message": "Event participant deleted successfully"})
+// 	}
+// }
+
 func (c *EventsParticipantController) DeleteEventsParticipant(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Step 1: Verify the token
+		// Шаг 1: Проверка токена
 		userID, err := utils.VerifyToken(r)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token."})
 			return
 		}
 
-		// Step 2: Get user role
+		// Шаг 2: Получение роли
 		var userRole string
 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
 		if err != nil {
@@ -231,13 +290,12 @@ func (c *EventsParticipantController) DeleteEventsParticipant(db *sql.DB) http.H
 			return
 		}
 
-		// Step 3: Check access permissions
 		if userRole != "superadmin" && userRole != "schooladmin" {
 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to delete event participants"})
 			return
 		}
 
-		// Step 4: Get the events_id from the URL
+		// Шаг 3: Получение events_id
 		vars := mux.Vars(r)
 		eventsID, ok := vars["events_id"]
 		if !ok {
@@ -245,7 +303,25 @@ func (c *EventsParticipantController) DeleteEventsParticipant(db *sql.DB) http.H
 			return
 		}
 
-		// Step 5: Delete the event participant
+		// Шаг 4: Получение student_id и event_name ДО удаления
+		var studentID int
+		var eventName string
+		err = db.QueryRow(`
+			SELECT ep.student_id, e.event_name
+			FROM events_participants ep
+			JOIN Events e ON ep.id = e.id
+			WHERE ep.id = ?`, eventsID).Scan(&studentID, &eventName)
+		if err == sql.ErrNoRows {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Event participant not found"})
+			return
+		}
+		if err != nil {
+			log.Println("Error fetching participant data:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch participant info"})
+			return
+		}
+
+		// Шаг 5: Удаление участника
 		result, err := db.Exec("DELETE FROM events_participants WHERE id = ?", eventsID)
 		if err != nil {
 			log.Println("Error deleting event participant:", err)
@@ -253,23 +329,34 @@ func (c *EventsParticipantController) DeleteEventsParticipant(db *sql.DB) http.H
 			return
 		}
 
-		// Check if any row was affected
 		rowsAffected, err := result.RowsAffected()
 		if err != nil {
-			log.Println("Error getting rows affected:", err)
+			log.Println("Error checking delete result:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to confirm deletion"})
 			return
 		}
-
 		if rowsAffected == 0 {
 			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Event participant not found"})
 			return
 		}
 
-		// Return success response
-		utils.ResponseJSON(w, map[string]string{"message": "Event participant deleted successfully"})
+		// Шаг 6: Обновление статуса на "registered" в EventRegistrations
+		_, err = db.Exec(`
+			UPDATE EventRegistrations r
+			JOIN Events e ON r.event_id = e.id
+			SET r.status = 'registered'
+			WHERE r.student_id = ? AND e.event_name = ?`, studentID, eventName)
+		if err != nil {
+			log.Println("Error updating registration status:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update registration status"})
+			return
+		}
+
+		// Шаг 7: Успешный ответ
+		utils.ResponseJSON(w, map[string]string{"message": "Participant deleted and status set to 'registered'"})
 	}
 }
+
 func (c *EventsParticipantController) UpdateEventsParticipant(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Step 1: Verify the token
@@ -1206,5 +1293,67 @@ func (c *EventsParticipantController) CountOlympiadParticipantsBySchool(db *sql.
 		// Step 10: Return the statistics
 		log.Printf("Successfully counted %d events and %d participants for school ID %d, user ID %d", stats.TotalEvents, stats.TotalParticipants, schoolID, userID)
 		utils.ResponseJSON(w, stats)
+	}
+}
+
+func (c *EventsParticipantController) GetParticipantByEventNameAndStudentID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+			return
+		}
+
+		vars := mux.Vars(r)
+		eventsName := vars["events_name"]
+		studentID, err2 := strconv.Atoi(vars["student_id"])
+		if err2 != nil || eventsName == "" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid parameters"})
+			return
+		}
+
+		query := `
+			SELECT ep.id, ep.school_id, ep.grade, ep.letter, ep.student_id, ep.events_name,
+			       ep.document, ep.category, ep.role, ep.date,
+			       s.first_name as student_name, s.last_name as student_lastname,
+			       sch.school_name,
+			       c.id as creator_id, c.first_name as creator_first_name, c.last_name as creator_last_name
+			FROM events_participants ep
+			JOIN student s ON ep.student_id = s.student_id
+			JOIN Schools sch ON ep.school_id = sch.school_id
+			JOIN users c ON ep.creator_id = c.id
+			WHERE ep.events_name = ? AND ep.student_id = ?
+		`
+
+		var participant models.EventsParticipant
+		err = db.QueryRow(query, eventsName, studentID).Scan(
+			&participant.ID,
+			&participant.SchoolID,
+			&participant.Grade,
+			&participant.Letter,
+			&participant.StudentID,
+			&participant.EventsName,
+			&participant.Document,
+			&participant.Category,
+			&participant.Role,
+			&participant.Date,
+			&participant.StudentName,
+			&participant.StudentLastName,
+			&participant.SchoolName,
+			&participant.CreatorID,
+			&participant.CreatorFirstName,
+			&participant.CreatorLastName,
+		)
+
+		if err != nil {
+			if err == sql.ErrNoRows {
+				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Participant not found"})
+			} else {
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+			}
+			return
+		}
+
+		utils.ResponseJSON(w, participant)
 	}
 }
