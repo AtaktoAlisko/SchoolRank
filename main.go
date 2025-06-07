@@ -154,7 +154,8 @@ func main() {
 	router.HandleFunc("/api/schools/{school_id}/reviews/average-rating", reviewController.GetAverageRating(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/reviews/average-rating/rank", reviewController.GetAverageRatingRank(db)).Methods("GET")
 	router.HandleFunc("/api/ratings/average-all", reviewController.GetAverageRatingsForAllSchools(db)).Methods("GET")
-
+	router.HandleFunc("/api/reviews/like", reviewController.CreateLike(db)).Methods("POST")
+	router.HandleFunc("/api/reviews/{review_id}/unlike", reviewController.DeleteLike(db)).Methods("DELETE")
 	// router.HandleFunc("/api/reviews/user", reviewController.GetReviews(db)).Methods("GET") //GetAllReviews сиякты бырак атымен
 
 	// =======================
