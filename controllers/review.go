@@ -225,6 +225,56 @@ func (rc *ReviewController) GetAverageRating(db *sql.DB) http.HandlerFunc {
 		})
 	}
 }
+
+func (rc *ReviewController) GetAverageRatingsForAllSchools(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// SQL-запрос на получение средней оценки по каждой школе
+		query := `
+			SELECT s.school_id, s.school_name, COALESCE(AVG(r.rating), 0) AS average_rating
+			FROM Schools s
+			LEFT JOIN Reviews r ON s.school_id = r.school_id
+			GROUP BY s.school_id, s.school_name
+		`
+
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println("SQL Error (average ratings):", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch average ratings"})
+			return
+		}
+		defer rows.Close()
+
+		// Формируем срез для хранения результатов
+		var results []map[string]interface{}
+
+		for rows.Next() {
+			var schoolID int
+			var schoolName string
+			var avgRating float64
+
+			if err := rows.Scan(&schoolID, &schoolName, &avgRating); err != nil {
+				log.Println("Scan Error (average ratings):", err)
+				continue
+			}
+
+			results = append(results, map[string]interface{}{
+				"school_id":      schoolID,
+				"school_name":    schoolName,
+				"average_rating": avgRating,
+			})
+		}
+
+		if err := rows.Err(); err != nil {
+			log.Println("Rows Error (average ratings):", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing data"})
+			return
+		}
+
+		// Отправляем результат
+		utils.ResponseJSON(w, results)
+	}
+}
+
 func (rc *ReviewController) GetAllReviews(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check if a school_id parameter was provided
@@ -583,19 +633,19 @@ func (rc *ReviewController) GetReviewBySchoolID(db *sql.DB) http.HandlerFunc {
 }
 func (rc *ReviewController) GetMyReviews(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Verify the user's token and get user ID
 		tokenUserID, err := utils.VerifyToken(r)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
 			return
 		}
 
-		// Query to get all reviews by the current user with school information
 		query := `
 			SELECT 
 				r.id,
 				r.school_id,
 				s.school_name,
+				s.school_address,
+				s.photo_url,
 				r.rating,
 				r.comment,
 				r.likes,
@@ -618,53 +668,37 @@ func (rc *ReviewController) GetMyReviews(db *sql.DB) http.HandlerFunc {
 
 		for rows.Next() {
 			var reviewID, schoolID, rating, likes int
-			var schoolName, comment, createdAt sql.NullString
+			var schoolName, comment, createdAt, schoolAddress, photoURL sql.NullString
 
-			err := rows.Scan(&reviewID, &schoolID, &schoolName, &rating, &comment, &likes, &createdAt)
+			err := rows.Scan(&reviewID, &schoolID, &schoolName, &schoolAddress, &photoURL, &rating, &comment, &likes, &createdAt)
 			if err != nil {
 				log.Println("Error scanning review row:", err)
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing reviews"})
 				return
 			}
 
-			// Handle null values
-			schoolNameStr := ""
-			if schoolName.Valid {
-				schoolNameStr = schoolName.String
-			}
-
-			commentStr := ""
-			if comment.Valid {
-				commentStr = comment.String
-			}
-
-			createdAtStr := ""
-			if createdAt.Valid {
-				createdAtStr = createdAt.String
-			}
-
 			review := map[string]interface{}{
-				"id":          reviewID,
-				"review_id":   reviewID, // добавил review_id
-				"school_id":   schoolID,
-				"school_name": schoolNameStr,
-				"rating":      rating,
-				"comment":     commentStr,
-				"likes":       likes,
-				"created_at":  createdAtStr,
+				"id":             reviewID,
+				"review_id":      reviewID,
+				"school_id":      schoolID,
+				"school_name":    nullToString(schoolName),
+				"school_address": nullToString(schoolAddress),
+				"photo_url":      nullToString(photoURL),
+				"rating":         rating,
+				"comment":        nullToString(comment),
+				"likes":          likes,
+				"created_at":     nullToString(createdAt),
 			}
 
 			reviews = append(reviews, review)
 		}
 
-		// Check for errors during iteration
 		if err = rows.Err(); err != nil {
 			log.Println("Error during rows iteration:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing reviews"})
 			return
 		}
 
-		// Return reviews directly without wrapper
 		utils.ResponseJSON(w, reviews)
 	}
 }
