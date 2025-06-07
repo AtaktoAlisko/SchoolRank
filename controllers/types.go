@@ -1360,10 +1360,8 @@ func (c *UNTScoreController) GetTop10UNTStudents(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Return the response
-		utils.ResponseJSON(w, map[string]interface{}{
-			"message": "Топ 3 студента по ЕНТ",
-			"data":    topStudents,
-		})
+		utils.ResponseJSON(w, topStudents)
+
 	}
 }
 func (c *UNTScoreController) GetTop3UNTStudentsBySchoolID(db *sql.DB) http.HandlerFunc {
