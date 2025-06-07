@@ -639,10 +639,21 @@ func (sc SchoolController) DeleteSchool(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// // 4. Удаление зависимых данных
+		// relatedTables := []string{
+		// 	"events_participants",
+		// 	"subject_olympiads",
+		// 	"UNT_Exams",
+		// 	"student",
+		// 	"Events",
+		// }
+
 		// 4. Удаление зависимых данных
 		relatedTables := []string{
 			"events_participants",
 			"subject_olympiads",
+			"UNT_Exams",
+			"Second_Type",
 			"student",
 			"Events",
 		}
@@ -887,6 +898,156 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 				AverageRatingRank: averageRatingRank,
 				OlympiadRank:      olympiadRank,
 				TotalRating:       totalRating,
+			})
+		}
+
+		if err = rows.Err(); err != nil {
+			log.Println("Error during iteration:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error during iteration"})
+			return
+		}
+
+		utils.ResponseJSON(w, schools)
+	}
+}
+
+func (sc SchoolController) GetAllSchoolsForAdmin(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		query := `SELECT school_id, user_id, school_name, school_address, city, about_school, photo_url, 
+                         school_email, school_phone, school_admin_login, specializations, 
+                         created_at, updated_at FROM Schools`
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Println("Error fetching schools:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to retrieve schools"})
+			return
+		}
+		defer rows.Close()
+
+		var schools []struct {
+			SchoolID          int      `json:"school_id"`
+			UserID            int      `json:"user_id"`
+			SchoolName        string   `json:"school_name"`
+			SchoolAddress     *string  `json:"school_address"`
+			City              string   `json:"city"`
+			AboutSchool       *string  `json:"about_school"`
+			PhotoURL          *string  `json:"photo_url"`
+			SchoolPhone       *string  `json:"school_phone"`
+			SchoolAdminLogin  *string  `json:"school_admin_login"`
+			Specializations   []string `json:"specializations"`
+			CreatedAt         *string  `json:"created_at"`
+			UpdatedAt         *string  `json:"updated_at"`
+			Rating            *float64 `json:"rating"`
+			UntRank           float64  `json:"unt_rank"`
+			EventScore        float64  `json:"event_score"`
+			ParticipantPoints float64  `json:"participant_points"`
+			AverageRatingRank float64  `json:"average_rating_rank"`
+			OlympiadRank      float64  `json:"olympiad_rank"`
+			TotalRating       float64  `json:"total_rating"`
+		}
+
+		for rows.Next() {
+			var school models.School
+			var specializationsJSON sql.NullString
+
+			err := rows.Scan(
+				&school.SchoolID,
+				&school.UserID,
+				&school.SchoolName,
+				&school.SchoolAddress,
+				&school.City,
+				&school.AboutSchool,
+				&school.PhotoURL,
+				&school.SchoolEmail,
+				&school.SchoolPhone,
+				&school.SchoolAdminLogin,
+				&specializationsJSON,
+				&school.CreatedAt,
+				&school.UpdatedAt,
+			)
+			if err != nil {
+				log.Println("Error scanning school data:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error scanning school data"})
+				return
+			}
+
+			var specializations []string
+			if specializationsJSON.Valid {
+				err = json.Unmarshal([]byte(specializationsJSON.String), &specializations)
+				if err != nil {
+					specializations = []string{}
+				}
+			}
+
+			var schoolPhone *string
+			if school.SchoolPhone.Valid {
+				schoolPhone = &school.SchoolPhone.String
+			}
+
+			var adminLogin *string
+			if school.SchoolAdminLogin.Valid {
+				adminLogin = &school.SchoolAdminLogin.String
+			}
+
+			var schoolAddress *string
+			if school.SchoolAddress.Valid {
+				schoolAddress = &school.SchoolAddress.String
+			}
+
+			var aboutSchool *string
+			if school.AboutSchool.Valid {
+				aboutSchool = &school.AboutSchool.String
+			}
+
+			var photoURL *string
+			if school.PhotoURL.Valid && school.PhotoURL.String != "" {
+				photoURL = &school.PhotoURL.String
+			}
+
+			var createdAt *string
+			if school.CreatedAt.Valid {
+				createdAt = &school.CreatedAt.String
+			}
+			var updatedAt *string
+			if school.UpdatedAt.Valid {
+				updatedAt = &school.UpdatedAt.String
+			}
+
+			// Total Rating
+
+			schools = append(schools, struct {
+				SchoolID          int      `json:"school_id"`
+				UserID            int      `json:"user_id"`
+				SchoolName        string   `json:"school_name"`
+				SchoolAddress     *string  `json:"school_address"`
+				City              string   `json:"city"`
+				AboutSchool       *string  `json:"about_school"`
+				PhotoURL          *string  `json:"photo_url"`
+				SchoolPhone       *string  `json:"school_phone"`
+				SchoolAdminLogin  *string  `json:"school_admin_login"`
+				Specializations   []string `json:"specializations"`
+				CreatedAt         *string  `json:"created_at"`
+				UpdatedAt         *string  `json:"updated_at"`
+				Rating            *float64 `json:"rating"`
+				UntRank           float64  `json:"unt_rank"`
+				EventScore        float64  `json:"event_score"`
+				ParticipantPoints float64  `json:"participant_points"`
+				AverageRatingRank float64  `json:"average_rating_rank"`
+				OlympiadRank      float64  `json:"olympiad_rank"`
+				TotalRating       float64  `json:"total_rating"`
+			}{
+				SchoolID:         school.SchoolID,
+				UserID:           school.UserID,
+				SchoolName:       school.SchoolName,
+				SchoolAddress:    schoolAddress,
+				City:             school.City,
+				AboutSchool:      aboutSchool,
+				PhotoURL:         photoURL,
+				SchoolPhone:      schoolPhone,
+				SchoolAdminLogin: adminLogin,
+				Specializations:  specializations,
+				CreatedAt:        createdAt,
+				UpdatedAt:        updatedAt,
 			})
 		}
 
