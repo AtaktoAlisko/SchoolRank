@@ -320,6 +320,245 @@ func (ec *EventController) AddEvent(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
+
+// func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		// Check that GET method is used
+// 		if r.Method != http.MethodGet {
+// 			utils.RespondWithError(w, http.StatusMethodNotAllowed, models.Error{Message: "Method not allowed"})
+// 			return
+// 		}
+
+// 		// Get query parameters
+// 		query := r.URL.Query()
+
+// 		// Create map to store all parameters
+// 		params := make(map[string]string)
+
+// 		// Collect main parameters
+// 		params["id"] = query.Get("id")
+// 		params["school_id"] = query.Get("school_id")
+// 		params["grade"] = query.Get("grade")
+// 		params["date_from"] = query.Get("date_from")
+// 		params["date_to"] = query.Get("date_to")
+// 		params["limit"] = query.Get("limit")
+// 		params["offset"] = query.Get("offset")
+// 		params["category"] = query.Get("category")
+// 		params["location"] = query.Get("location")
+
+// 		// Add all other parameters
+// 		for key, values := range query {
+// 			if _, exists := params[key]; !exists && len(values) > 0 {
+// 				params[key] = values[0]
+// 			}
+// 		}
+
+// 		// Log all parameters
+// 		log.Println("GetEvents called with parameters:", params)
+
+// 		// If debug mode is requested, return all parameters
+// 		if query.Get("debug") == "true" {
+// 			utils.ResponseJSON(w, map[string]interface{}{
+// 				"message":    "Debug mode: showing all parameters",
+// 				"parameters": params,
+// 			})
+// 			return
+// 		}
+
+// 		// Variables for main parameters
+// 		eventID := params["id"]
+// 		schoolID := params["school_id"]
+// 		grade := params["grade"]
+// 		dateFrom := params["date_from"]
+// 		dateTo := params["date_to"]
+// 		limit := params["limit"]
+// 		offset := params["offset"]
+// 		eventCategory := params["category"]
+// 		location := params["location"]
+
+// 		// If a specific event ID is provided, fetch only that event
+// 		if eventID != "" {
+// 			id, err := strconv.Atoi(eventID)
+// 			if err != nil {
+// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid event ID format"})
+// 				return
+// 			}
+// 			event, err := getEventByID(db, id)
+// 			if err != nil {
+// 				if err == sql.ErrNoRows {
+// 					utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Event not found"})
+// 				} else {
+// 					log.Println("Error fetching event by ID:", err)
+// 					utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching event"})
+// 				}
+// 				return
+// 			}
+
+// 			// Form response without parameters_used
+// 			response := map[string]interface{}{
+// 				"event": event,
+// 			}
+// 			utils.ResponseJSON(w, response)
+// 			return
+// 		}
+
+// 		// Build query for fetching list of events
+// 		queryBuilder := strings.Builder{}
+// 		queryBuilder.WriteString(`
+//             SELECT e.id, e.school_id, e.user_id, e.event_name, e.description,
+//             e.photo, e.start_date, e.end_date, e.location,
+//             e.grade, e.limit_count as ` + "`limit`" + `, e.participants, e.limit_participants, e.created_at, e.updated_at,
+//             u.email AS created_by, e.category, s.school_name
+//             FROM Events e
+//             LEFT JOIN users u ON e.user_id = u.id
+//             LEFT JOIN Schools s ON e.school_id = s.school_id
+//             WHERE 1=1
+//         `)
+
+// 		var args []interface{}
+
+// 		// Add filters if provided
+// 		if schoolID != "" {
+// 			schoolIDInt, err := strconv.Atoi(schoolID)
+// 			if err != nil {
+// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID format"})
+// 				return
+// 			}
+// 			queryBuilder.WriteString(" AND e.school_id = ?")
+// 			args = append(args, schoolIDInt)
+// 		}
+
+// 		if grade != "" {
+// 			gradeInt, err := strconv.Atoi(grade)
+// 			if err != nil {
+// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade format"})
+// 				return
+// 			}
+// 			queryBuilder.WriteString(" AND e.grade = ?")
+// 			args = append(args, gradeInt)
+// 		}
+
+// 		// Filter by category
+// 		if eventCategory != "" {
+// 			allowedCategories := []string{"Science", "Humanities", "Sport", "Creative"}
+// 			validCategory := false
+// 			for _, c := range allowedCategories {
+// 				if eventCategory == c {
+// 					validCategory = true
+// 					break
+// 				}
+// 			}
+// 			if !validCategory {
+// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{
+// 					Message: "Invalid category. Allowed values are: Science, Humanities, Sport, Creative",
+// 				})
+// 				return
+// 			}
+// 			queryBuilder.WriteString(" AND e.category = ?")
+// 			args = append(args, eventCategory)
+// 		}
+
+// 		// Filter by location (case-insensitive partial match)
+// 		if location != "" {
+// 			queryBuilder.WriteString(" AND LOWER(e.location) LIKE ?")
+// 			args = append(args, "%"+strings.ToLower(location)+"%")
+// 		}
+
+// 		// Filter by dates (start_date)
+// 		if dateFrom != "" {
+// 			_, err := time.Parse("2006-01-02", dateFrom)
+// 			if err != nil {
+// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid date_from format. Use YYYY-MM-DD"})
+// 				return
+// 			}
+// 			queryBuilder.WriteString(" AND e.start_date >= ?")
+// 			args = append(args, dateFrom)
+// 		}
+
+// 		if dateTo != "" {
+// 			_, err := time.Parse("2006-01-02", dateTo)
+// 			if err != nil {
+// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid date_to format. Use YYYY-MM-DD"})
+// 				return
+// 			}
+// 			queryBuilder.WriteString(" AND e.end_date <= ?")
+// 			args = append(args, dateTo)
+// 		}
+
+// 		// Add sorting by start_date
+// 		queryBuilder.WriteString(" ORDER BY e.start_date ASC")
+
+// 		// Add pagination
+// 		if limit != "" {
+// 			limitInt, err := strconv.Atoi(limit)
+// 			if err != nil || limitInt <= 0 {
+// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid limit parameter"})
+// 				return
+// 			}
+// 			queryBuilder.WriteString(" LIMIT ?")
+// 			args = append(args, limitInt)
+
+// 			if offset != "" {
+// 				offsetInt, err := strconv.Atoi(offset)
+// 				if err != nil || offsetInt < 0 {
+// 					utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid offset parameter"})
+// 					return
+// 				}
+// 				queryBuilder.WriteString(" OFFSET ?")
+// 				args = append(args, offsetInt)
+// 			}
+// 		}
+
+// 		// Log final SQL query
+// 		finalQuery := queryBuilder.String()
+// 		log.Printf("Executing SQL query: %s with args: %v", finalQuery, args)
+
+// 		// Execute query
+// 		rows, err := db.Query(finalQuery, args...)
+// 		if err != nil {
+// 			log.Println("Error executing events query:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch events"})
+// 			return
+// 		}
+// 		defer rows.Close()
+
+// 		// Collect results
+// 		var events []models.Event
+// 		for rows.Next() {
+// 			var event models.Event
+// 			err := rows.Scan(
+// 				&event.ID, &event.SchoolID, &event.UserID, &event.EventName, &event.Description,
+// 				&event.Photo, &event.StartDate, &event.EndDate, &event.Location,
+// 				&event.Grade, &event.Limit, &event.Participants, &event.LimitParticipants,
+// 				&event.CreatedAt, &event.UpdatedAt, &event.CreatedBy, &event.Category, &event.SchoolName,
+// 			)
+// 			if err != nil {
+// 				log.Println("Error scanning event row:", err)
+// 				continue
+// 			}
+// 			events = append(events, event)
+// 		}
+
+// 		if err = rows.Err(); err != nil {
+// 			log.Println("Error iterating event rows:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing events data"})
+// 			return
+// 		}
+
+// 		// Prepare response
+// 		response := map[string]interface{}{
+// 			"events":      events,
+// 			"total_count": len(events),
+// 		}
+
+// 		if len(events) == 0 {
+// 			response["message"] = "No events found for the specified criteria"
+// 		}
+
+// 		utils.ResponseJSON(w, response)
+// 	}
+// }
+
 func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check that GET method is used
@@ -393,9 +632,19 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 				return
 			}
 
-			// Form response without parameters_used
+			// Fetch participants count directly from EventRegistrations table
+			var participantsCount int
+			err = db.QueryRow("SELECT COUNT(*) FROM EventRegistrations WHERE event_id = ?", event.ID).Scan(&participantsCount)
+			if err != nil {
+				log.Println("Error counting participants:", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error counting participants"})
+				return
+			}
+
+			// Form response with participants count
 			response := map[string]interface{}{
-				"event": event,
+				"event":        event,
+				"participants": participantsCount, // Return the participants count
 			}
 			utils.ResponseJSON(w, response)
 			return
@@ -557,6 +806,7 @@ func (ec *EventController) GetEvents(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, response)
 	}
 }
+
 func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Проверяем аутентификацию
@@ -1038,7 +1288,7 @@ func (ec *EventController) GetEventsBySchoolID(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Log the query for debugging
-		log.Printf("Executing query: %s\nWith args: %v\n", queryBuilder.String(), args)
+		// log.Printf("Executing query: %s\nWith args: %v\n", queryBuilder.String(), args)
 
 		// Execute query
 		rows, err := db.Query(queryBuilder.String(), args...)
@@ -1524,7 +1774,7 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 
 		// Log final SQL query
 		finalQuery := queryBuilder.String()
-		log.Printf("Executing SQL query: %s with args: %v", finalQuery, args)
+		// log.Printf("Executing SQL query: %s with args: %v", finalQuery, args)
 
 		// Execute query
 		rows, err := db.Query(finalQuery, args...)
