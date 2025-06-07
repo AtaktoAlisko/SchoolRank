@@ -75,6 +75,7 @@ func main() {
 	EventsParticipantController := controllers.EventsParticipantController{}
 	EventsRegistrationController := controllers.EventsRegistrationController{}
 	olympiadController := &controllers.OlympiadController{}
+	historyController := &controllers.HistoryController{}
 
 	router := mux.NewRouter()
 
@@ -91,6 +92,7 @@ func main() {
 	router.HandleFunc("/api/auth/code/resend", controller.ResendCode(db)).Methods("POST")
 	router.HandleFunc("/api/auth/password/update", controller.TokenVerifyMiddleware(controller.UpdatePassword(db))).Methods("PUT")
 	router.HandleFunc("/api/auth/email/verify", controller.VerifyEmail(db)).Methods("POST")
+	router.HandleFunc("/api/my-history", historyController.GetMyHistory(db)).Methods("GET")
 
 	// =======================
 	// Профиль пользователя и аватар
