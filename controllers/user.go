@@ -1030,6 +1030,7 @@ func (c *Controller) GetAllUsers(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, users)
 	}
 }
+
 func (c *Controller) CreateUser(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var requestData struct {
@@ -1621,7 +1622,7 @@ func (c *Controller) EditProfile(db *sql.DB) http.HandlerFunc {
 		// Build and execute query
 		query := fmt.Sprintf("UPDATE users SET %s WHERE id = ?", strings.Join(setClause, ", "))
 		args = append(args, targetUserID)
-		log.Printf("Executing query: %s with args: %v", query, args)
+		// log.Printf("Executing query: %s with args: %v", query, args)
 
 		result, err := tx.Exec(query, args...)
 		if err != nil {
@@ -1961,6 +1962,7 @@ func sendVerificationEmail(email, verificationLink string) {
 	fmt.Println("Verification email sent to", email)
 	fmt.Println("Verification Link:", verificationLink)
 }
+
 func (c Controller) ResetPassword(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var requestData struct {
@@ -2046,6 +2048,64 @@ func (c Controller) ResetPassword(db *sql.DB) http.HandlerFunc {
 		json.NewEncoder(w).Encode(map[string]string{"message": "Password reset and email verified successfully"})
 	}
 }
+func (c Controller) ResetPasswordPassword(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var requestData struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+		var error models.Error
+
+		err := json.NewDecoder(r.Body).Decode(&requestData)
+		if err != nil || requestData.Email == "" || requestData.Password == "" {
+			error.Message = "Invalid request body."
+			utils.RespondWithError(w, http.StatusBadRequest, error)
+			return
+		}
+
+		var currentHashedPassword string
+		err = db.QueryRow("SELECT password FROM users WHERE email = ?", requestData.Email).Scan(&currentHashedPassword)
+		if err != nil {
+			log.Printf("Password fetch error: %v", err)
+			error.Message = "Failed to retrieve current password."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
+			return
+		}
+
+		// Сравниваем новый пароль с текущим
+		err = bcrypt.CompareHashAndPassword([]byte(currentHashedPassword), []byte(requestData.Password))
+		if err == nil {
+			error.Message = "New password cannot be the same as the current password."
+			utils.RespondWithError(w, http.StatusBadRequest, error)
+			return
+		}
+
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(requestData.Password), bcrypt.DefaultCost)
+		if err != nil {
+			log.Printf("Password hashing error: %v", err)
+			error.Message = "Failed to hash password."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
+			return
+		}
+
+		_, err = db.Exec("UPDATE users SET password = ?, is_verified = true WHERE email = ?", string(hashedPassword), requestData.Email)
+		if err != nil {
+			log.Printf("Password update error: %v", err)
+			error.Message = "Failed to update password."
+			utils.RespondWithError(w, http.StatusInternalServerError, error)
+			return
+		}
+
+		_, err = db.Exec("DELETE FROM password_resets WHERE email = ?", requestData.Email)
+		if err != nil {
+			log.Printf("Failed to delete OTP: %v", err) // Не критично
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Password reset successfully."})
+	}
+}
+
 func (c *Controller) ResendCode(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var requestData struct {
@@ -2580,6 +2640,7 @@ func (c Controller) DeleteAvatar(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, map[string]string{"message": "Avatar deleted successfully"})
 	}
 }
+
 func (c Controller) ResetPasswordConfirm(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var requestData struct {
@@ -2628,6 +2689,42 @@ func (c Controller) ResetPasswordConfirm(db *sql.DB) http.HandlerFunc {
 		json.NewEncoder(w).Encode(map[string]string{"message": "Password reset successfully"})
 	}
 }
+
+func (c Controller) VerifyOTP(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var requestData struct {
+			Email   string `json:"email"`
+			OTPCode string `json:"otp_code"`
+		}
+		var error models.Error
+
+		err := json.NewDecoder(r.Body).Decode(&requestData)
+		if err != nil || requestData.Email == "" || requestData.OTPCode == "" {
+			error.Message = "Invalid request body."
+			utils.RespondWithError(w, http.StatusBadRequest, error)
+			return
+		}
+
+		var storedOTP string
+		err = db.QueryRow("SELECT otp_code FROM password_resets WHERE email = ? ORDER BY created_at DESC LIMIT 1", requestData.Email).Scan(&storedOTP)
+		if err != nil {
+			log.Printf("OTP query error: %v", err)
+			error.Message = "Invalid email or OTP expired."
+			utils.RespondWithError(w, http.StatusUnauthorized, error)
+			return
+		}
+
+		if storedOTP != requestData.OTPCode {
+			error.Message = "Invalid OTP code."
+			utils.RespondWithError(w, http.StatusUnauthorized, error)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"message": "OTP verified successfully."})
+	}
+}
+
 func (c *Controller) VerifyResetCode(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var requestData struct {
@@ -3177,5 +3274,59 @@ func (c *Controller) CountUsersByRole(db *sql.DB) http.HandlerFunc {
 
 		// Send response
 		utils.ResponseJSON(w, response)
+	}
+}
+
+func (c *Controller) GetUserByID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Получаем user_id из URL-параметров
+		vars := mux.Vars(r)
+		userIDStr, ok := vars["id"]
+		if !ok {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Missing user ID parameter"})
+			return
+		}
+
+		userID, err := strconv.Atoi(userIDStr)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid user ID"})
+			return
+		}
+
+		// Выполняем запрос
+		var user models.User
+		var dateOfBirth sql.NullString
+		err = db.QueryRow(`
+			SELECT id, email, first_name, last_name, date_of_birth, role
+			FROM users
+			WHERE id = ?`, userID).
+			Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &dateOfBirth, &user.Role)
+
+		if err == sql.ErrNoRows {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "User not found"})
+			return
+		}
+		if err != nil {
+			log.Printf("Error fetching user: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Server error"})
+			return
+		}
+
+		var dateOfBirthStr string
+		if dateOfBirth.Valid {
+			dateOfBirthStr = dateOfBirth.String
+		}
+
+		// Формируем JSON-ответ
+		userMap := map[string]interface{}{
+			"id":            user.ID,
+			"email":         user.Email,
+			"first_name":    user.FirstName,
+			"last_name":     user.LastName,
+			"date_of_birth": dateOfBirthStr,
+			"role":          user.Role,
+		}
+
+		utils.ResponseJSON(w, userMap)
 	}
 }
