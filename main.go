@@ -83,7 +83,11 @@ func main() {
 	router.HandleFunc("/api/auth/login", controller.Login(db)).Methods("POST")
 	router.HandleFunc("/api/auth/logout", controller.Logout).Methods("POST")
 	router.HandleFunc("/api/auth/password/forgot", controller.ForgotPassword(db)).Methods("POST")
+
 	router.HandleFunc("/api/auth/password/reset", controller.ResetPassword(db)).Methods("POST")
+	router.HandleFunc("/api/auth/password/resetpsw", controller.ResetPasswordPassword(db)).Methods("POST")
+	router.HandleFunc("/api/auth/password/verify-otp", controller.VerifyOTP(db)).Methods("POST")
+
 	router.HandleFunc("/api/auth/code/resend", controller.ResendCode(db)).Methods("POST")
 	router.HandleFunc("/api/auth/password/update", controller.TokenVerifyMiddleware(controller.UpdatePassword(db))).Methods("PUT")
 	router.HandleFunc("/api/auth/email/verify", controller.VerifyEmail(db)).Methods("POST")
@@ -126,6 +130,8 @@ func main() {
 	router.HandleFunc("/api/schools/{id}", schoolController.UpdateSchool(db)).Methods("PATCH")
 	router.HandleFunc("/api/schools/{id}", schoolController.DeleteSchool(db)).Methods("DELETE")
 	router.HandleFunc("/api/schools", schoolController.GetAllSchools(db)).Methods("GET")
+	router.HandleFunc("/api/schools_admin", schoolController.GetAllSchoolsForAdmin(db)).Methods("GET")
+
 	router.HandleFunc("/api/schools/student", schoolController.GetAllStudents(db)).Methods("GET")
 	router.HandleFunc("/api/schools/total", schoolController.GetTotalSchools(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{id}", schoolController.GetSchoolByID(db)).Methods("GET")
@@ -147,6 +153,7 @@ func main() {
 	router.HandleFunc("/api/schools/{school_id}/reviews", reviewController.GetReviewsBySchool(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/reviews/average-rating", reviewController.GetAverageRating(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{school_id}/reviews/average-rating/rank", reviewController.GetAverageRatingRank(db)).Methods("GET")
+	router.HandleFunc("/api/ratings/average-all", reviewController.GetAverageRatingsForAllSchools(db)).Methods("GET")
 
 	// router.HandleFunc("/api/reviews/user", reviewController.GetReviews(db)).Methods("GET") //GetAllReviews сиякты бырак атымен
 
@@ -209,6 +216,7 @@ func main() {
 	router.HandleFunc("/events/participants/{events_id}", EventsParticipantController.DeleteEventsParticipant(db)).Methods("DELETE")
 	router.HandleFunc("/events/participants", EventsParticipantController.GetEventsParticipant(db)).Methods("GET")
 	router.HandleFunc("/events/participants/school/{school_id}", EventsParticipantController.GetEventsParticipantBySchool(db)).Methods("GET")
+	router.HandleFunc("/api/events-participant/by-name/{events_name}/{student_id}", EventsParticipantController.GetParticipantByEventNameAndStudentID(db)).Methods("GET")
 
 	// =======================
 	// Работа с Second Types
@@ -302,6 +310,7 @@ func main() {
 	router.HandleFunc("/api/get-top-3-students-by-unt", untScoreController.GetTop3UNTStudents(db)).Methods("GET")
 	router.HandleFunc("/api/count-users-by-role", controller.CountUsersByRole(db)).Methods("GET")
 	router.HandleFunc("/api/countAllOlympiads", EventsParticipantController.CountOlympiadParticipants(db)).Methods("GET")
+	router.HandleFunc("/api/users/{id}", controller.GetUserByID(db)).Methods("GET")
 
 	// =======================
 	// Dashboard (schooladmin)
@@ -318,6 +327,7 @@ func main() {
 	router.HandleFunc("/api/olympiads/{school_id}", olympiadController.GetOlympiadById(db)).Methods("GET")
 	router.HandleFunc("/api/olympiads/{olympiad_id}", olympiadController.DeleteOlympiad(db)).Methods("DELETE")
 	router.HandleFunc("/api/olympiads/{olympiad_id}", olympiadController.UpdateOlympiad(db)).Methods("PUT")
+	router.HandleFunc("/api/olympiads-participant/by-name/{olympiad_name}/{student_id}", olympiadController.GetParticipantByOlympNameAndStudentID(db)).Methods("GET")
 
 	// Включаем CORS
 	handler := corsMiddleware(router)

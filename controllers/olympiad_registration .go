@@ -21,6 +21,389 @@ type OlympiadRegistrationController struct {
 	DB *sql.DB
 }
 
+// func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		if r.Method != http.MethodPost {
+// 			utils.RespondWithError(w, http.StatusMethodNotAllowed, models.Error{Message: "Method not allowed"})
+// 			return
+// 		}
+
+// 		userID, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+// 			return
+// 		}
+
+// 		var student models.Student
+// 		err = db.QueryRow("SELECT student_id, role, school_id FROM student WHERE student_id = ?", userID).Scan(
+// 			&student.ID, &student.Role, &student.SchoolID)
+// 		if err != nil || student.Role != "student" {
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only students can register for olympiads"})
+// 			return
+// 		}
+
+// 		if student.SchoolID == 0 {
+// 			student.SchoolID = 1
+// 			_, err = db.Exec("UPDATE student SET school_id = ? WHERE student_id = ?", student.SchoolID, student.ID)
+// 			if err != nil {
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to assign default school"})
+// 				return
+// 			}
+// 		}
+
+// 		var request struct {
+// 			SubjectOlympiadID int `json:"subject_olympiad_id"`
+// 		}
+// 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request format"})
+// 			return
+// 		}
+// 		defer r.Body.Close()
+
+// 		if request.SubjectOlympiadID <= 0 {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid subject olympiad ID"})
+// 			return
+// 		}
+
+// 		var olympiad models.SubjectOlympiad
+// 		var endDateStr sql.NullString
+// 		var limit sql.NullInt64
+// 		var creatorSchoolID int
+// 		var participants int
+// 		err = db.QueryRow(`
+// 		SELECT so.id, so.subject_name, so.date, so.end_date, so.limit_participants, so.school_id, so.participants
+// 		FROM subject_olympiads so
+// 		WHERE so.id = ?`, request.SubjectOlympiadID).Scan(
+// 			&olympiad.ID, &olympiad.SubjectName, &olympiad.StartDate, &endDateStr, &limit, &creatorSchoolID, &participants)
+
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Subject olympiad not found"})
+// 			return
+// 		}
+
+// 		if endDateStr.Valid {
+// 			olympiad.EndDate = endDateStr.String
+// 		} else {
+// 			start, _ := time.Parse("2006-01-02", olympiad.StartDate)
+// 			olympiad.EndDate = start.AddDate(0, 0, 1).Format("2006-01-02")
+// 		}
+
+// 		if limit.Valid {
+// 			olympiad.Limit = int(limit.Int64)
+// 		} else {
+// 			olympiad.Limit = 100
+// 		}
+
+// 		parsedEndDate, _ := time.Parse("2006-01-02", olympiad.EndDate)
+// 		if time.Now().After(parsedEndDate) {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Registration period has ended"})
+// 			return
+// 		}
+
+// 		var exists int
+// 		err = db.QueryRow(`
+// 			SELECT COUNT(*) FROM olympiad_registrations
+// 			WHERE student_id = ? AND subject_olympiad_id = ? AND status = 'registered'`,
+// 			student.ID, request.SubjectOlympiadID).Scan(&exists)
+// 		if err != nil || exists > 0 {
+// 			utils.RespondWithError(w, http.StatusConflict, models.Error{Message: "Already registered"})
+// 			return
+// 		}
+
+// 		const maxStudentsFromCreatorSchool = 2
+// 		if student.SchoolID == creatorSchoolID {
+// 			var schoolStudentsCount int
+// 			err = db.QueryRow(`
+// 				SELECT COUNT(*) FROM olympiad_registrations r
+// 				JOIN student s ON r.student_id = s.student_id
+// 				WHERE r.subject_olympiad_id = ?
+// 				AND s.school_id = ?
+// 				AND r.status = 'registered'`,
+// 				request.SubjectOlympiadID, creatorSchoolID).Scan(&schoolStudentsCount)
+// 			if err != nil {
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+// 				return
+// 			}
+
+// 			if schoolStudentsCount >= maxStudentsFromCreatorSchool {
+// 				utils.RespondWithError(w, http.StatusConflict,
+// 					models.Error{Message: "Maximum limit for your school has been reached"})
+// 				return
+// 			}
+// 		}
+
+// 		now := time.Now()
+// 		result, err := db.Exec(`
+// 			INSERT INTO olympiad_registrations
+// 			(student_id, subject_olympiad_id, registration_date, status, school_id)
+// 			VALUES (?, ?, ?, 'registered', ?)`,
+// 			student.ID, request.SubjectOlympiadID, now.Format("2006-01-02 15:04:05"), student.SchoolID)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Registration failed"})
+// 			return
+// 		}
+
+// 		regID, _ := result.LastInsertId()
+
+// 		// Увеличиваем participants на 1
+// 		_, err = db.Exec("UPDATE subject_olympiads SET current_participants = current_participants + 1 WHERE id = ?", request.SubjectOlympiadID)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update participants count"})
+// 			return
+// 		}
+
+// 		// Проверяем не превышен ли лимит после инкремента
+// 		var updatedParticipants int
+// 		err = db.QueryRow("SELECT current_participants FROM subject_olympiads WHERE id = ?", request.SubjectOlympiadID).Scan(&updatedParticipants)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to re-check participants count"})
+// 			return
+// 		}
+// 		if olympiad.Limit > 0 && updatedParticipants > olympiad.Limit {
+// 			// откатываем регистрацию
+// 			_, _ = db.Exec("DELETE FROM olympiad_registrations WHERE olympiads_registrations_id = ?", regID)
+// 			_, _ = db.Exec("UPDATE subject_olympiads SET participants = participants - 1 WHERE id = ?", request.SubjectOlympiadID)
+
+// 			utils.RespondWithError(w, http.StatusConflict, models.Error{Message: "Registration limit exceeded, your slot was revoked"})
+// 			return
+// 		}
+
+// 		var registration models.OlympiadRegistration
+// 		var regDateStr string
+// 		var olympiadEnd sql.NullString
+// 		var olympiadLevel sql.NullString
+
+// 		err = db.QueryRow(`
+// 			SELECT r.olympiads_registrations_id, r.student_id, r.subject_olympiad_id, r.registration_date, r.status,
+// 				   r.school_id,
+// 				   CONCAT(s.first_name, ' ', s.last_name) AS student_name,
+// 				   s.grade, s.letter,
+// 				   o.subject_name, o.date, o.end_date, o.level
+// 			FROM olympiad_registrations r
+// 			JOIN student s ON r.student_id = s.student_id
+// JOIN subject_olympiads o ON r.subject_olympiad_id = o.id
+// 			WHERE r.olympiads_registrations_id = ?`, regID).Scan(
+// 			&registration.OlympiadsRegistrationsID,
+// 			&registration.StudentID,
+// 			&registration.SubjectOlympiadID,
+// 			&regDateStr,
+// 			&registration.Status,
+// 			&registration.SchoolID,
+// 			&registration.StudentName,
+// 			&registration.StudentGrade,
+// 			&registration.StudentLetter,
+// 			&registration.OlympiadName,
+// 			&registration.OlympiadStartDate,
+// 			&olympiadEnd,
+// 			&olympiadLevel,
+// 		)
+
+// 		if err == nil {
+// 			registration.RegistrationDate, _ = time.Parse("2006-01-02 15:04:05", regDateStr)
+// 			if olympiadEnd.Valid {
+// 				registration.OlympiadEndDate = olympiadEnd.String
+// 			}
+// 			if olympiadLevel.Valid {
+// 				registration.Level = olympiadLevel.String
+// 			}
+// 		} else {
+// 			registration = models.OlympiadRegistration{
+// 				OlympiadsRegistrationsID: int(regID),
+// 				StudentID:                student.ID,
+// 				SubjectOlympiadID:        request.SubjectOlympiadID,
+// 				Status:                   "registered",
+// 				SchoolID:                 student.SchoolID,
+// 			}
+// 		}
+
+// 		utils.ResponseJSON(w, registration)
+// 	}
+// }
+
+// func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		if r.Method != http.MethodPost {
+// 			utils.RespondWithError(w, http.StatusMethodNotAllowed, models.Error{Message: "Method not allowed"})
+// 			return
+// 		}
+
+// 		userID, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Invalid token"})
+// 			return
+// 		}
+
+// 		var student models.Student
+// 		err = db.QueryRow("SELECT student_id, role, school_id FROM student WHERE student_id = ?", userID).Scan(
+// 			&student.ID, &student.Role, &student.SchoolID)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only students can register for olympiads"})
+// 			return
+// 		}
+
+// 		if student.SchoolID == 0 {
+// 			student.SchoolID = 1
+// 			_, err = db.Exec("UPDATE student SET school_id = ? WHERE student_id = ?", student.SchoolID, student.ID)
+// 			if err != nil {
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to assign default school"})
+// 				return
+// 			}
+// 		}
+
+// 		var request struct {
+// 			SubjectOlympiadID int `json:"subject_olympiad_id"`
+// 		}
+// 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request format"})
+// 			return
+// 		}
+// 		defer r.Body.Close()
+
+// 		if request.SubjectOlympiadID <= 0 {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid subject olympiad ID"})
+// 			return
+// 		}
+
+// 		var olympiad models.SubjectOlympiad
+// 		var endDateStr sql.NullString
+// 		var limit sql.NullInt64
+// 		var creatorSchoolID int
+// 		var currentParticipants int
+
+// 		err = db.QueryRow(`
+// 			SELECT so.subject_olympiad_id, so.subject_name, so.date, so.end_date,
+// 			so.limit_participants, so.school_id, so.current_participants
+// 			FROM subject_olympiads so
+// 			WHERE so.subject_olympiad_id = ?`, request.SubjectOlympiadID).Scan(
+// 			&olympiad.ID, &olympiad.SubjectName, &olympiad.StartDate, &endDateStr, &limit, &creatorSchoolID, &currentParticipants)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Subject olympiad not found"})
+// 			return
+// 		}
+
+// 		if endDateStr.Valid {
+// 			olympiad.EndDate = endDateStr.String
+// 		} else {
+// 			start, _ := time.Parse("2006-01-02", olympiad.StartDate)
+// 			olympiad.EndDate = start.AddDate(0, 0, 1).Format("2006-01-02")
+// 		}
+
+// 		if limit.Valid {
+// 			olympiad.Limit = int(limit.Int64)
+// 		} else {
+// 			olympiad.Limit = 100
+// 		}
+
+// 		parsedEndDate, _ := time.Parse("2006-01-02", olympiad.EndDate)
+// 		if time.Now().After(parsedEndDate) {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Registration period has ended"})
+// 			return
+// 		}
+
+// 		var exists int
+// 		err = db.QueryRow(`
+// 			SELECT COUNT(*) FROM olympiad_registrations
+// 			WHERE student_id = ? AND subject_olympiad_id = ? AND status = 'registered'`,
+// 			student.ID, request.SubjectOlympiadID).Scan(&exists)
+// 		if err != nil || exists > 0 {
+// 			utils.RespondWithError(w, http.StatusConflict, models.Error{Message: "Already registered"})
+// 			return
+// 		}
+
+// 		if olympiad.Limit > 0 && currentParticipants >= olympiad.Limit {
+// 			utils.RespondWithError(w, http.StatusConflict, models.Error{Message: "Registration limit reached"})
+// 			return
+// 		}
+
+// 		const maxStudentsFromCreatorSchool = 2
+// 		if student.SchoolID == creatorSchoolID {
+// 			var schoolStudentsCount int
+// 			err = db.QueryRow(`
+// 				SELECT COUNT(*) FROM olympiad_registrations r
+// 				JOIN student s ON r.student_id = s.student_id
+// 				WHERE r.subject_olympiad_id = ? AND s.school_id = ? AND r.status = 'registered'`,
+// 				request.SubjectOlympiadID, creatorSchoolID).Scan(&schoolStudentsCount)
+// 			if err != nil {
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+// 				return
+// 			}
+
+// 			if schoolStudentsCount >= maxStudentsFromCreatorSchool {
+// 				utils.RespondWithError(w, http.StatusConflict,
+// 					models.Error{Message: "Maximum limit for your school has been reached"})
+// 				return
+// 			}
+// 		}
+
+// 		now := time.Now()
+// 		result, err := db.Exec(`
+// 			INSERT INTO olympiad_registrations
+// 			(student_id, subject_olympiad_id, registration_date, status, school_id)
+// 			VALUES (?, ?, ?, 'registered', ?)`,
+// 			student.ID, request.SubjectOlympiadID, now.Format("2006-01-02 15:04:05"), student.SchoolID)
+// 		if err != nil {
+// 			log.Printf("Failed to insert registration: %v", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Registration failed"})
+// 			return
+// 		}
+
+// 		regID, _ := result.LastInsertId()
+
+// 		var registration models.OlympiadRegistration
+// 		var regDateStr string
+// 		var olympiadEnd sql.NullString
+// 		var olympiadLevel sql.NullString
+
+// 		err = db.QueryRow(`
+// 			SELECT r.olympiads_registrations_id, r.student_id, r.subject_olympiad_id, r.registration_date, r.status,
+// 					   r.school_id,
+// 					   CONCAT(s.first_name, ' ', s.last_name) AS student_name,
+// 					   s.grade, s.letter,
+// 					   o.subject_name, o.date, o.end_date, o.level
+// 			FROM olympiad_registrations r
+// 			JOIN student s ON r.student_id = s.student_id
+// 			JOIN subject_olympiads o ON r.subject_olympiad_id = o.subject_olympiad_id
+// 			WHERE r.olympiads_registrations_id = ?`, regID).Scan(
+// 			&registration.OlympiadsRegistrationsID,
+// 			&registration.StudentID,
+// 			&registration.SubjectOlympiadID,
+// 			&regDateStr,
+// 			&registration.Status,
+// 			&registration.SchoolID,
+// 			&registration.StudentName,
+// 			&registration.StudentGrade,
+// 			&registration.StudentLetter,
+// 			&registration.OlympiadName,
+// 			&registration.OlympiadStartDate,
+// 			&olympiadEnd,
+// 			&olympiadLevel,
+// 		)
+// 		if err != nil {
+// 			utils.ResponseJSON(w, models.OlympiadRegistration{
+// 				OlympiadsRegistrationsID: int(regID),
+// 				StudentID:                student.ID,
+// 				SubjectOlympiadID:        request.SubjectOlympiadID,
+// 				Status:                   "registered",
+// 				SchoolID:                 student.SchoolID,
+// 			})
+// 			return
+// 		}
+
+// 		registration.RegistrationDate, _ = time.Parse("2006-01-02 15:04:05", regDateStr)
+// 		registration.OlympiadEndDate = ""
+// 		if olympiadEnd.Valid {
+// 			registration.OlympiadEndDate = olympiadEnd.String
+// 		}
+// 		if olympiadLevel.Valid {
+// 			registration.Level = olympiadLevel.String
+// 		} else {
+// 			registration.Level = ""
+// 		}
+
+// 		utils.ResponseJSON(w, registration)
+// 	}
+// }
+
 func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -35,8 +418,8 @@ func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.Handle
 		}
 
 		var student models.Student
-		err = db.QueryRow("SELECT student_id, role, school_id FROM student WHERE student_id = ?", userID).Scan(
-			&student.ID, &student.Role, &student.SchoolID)
+		err = db.QueryRow("SELECT student_id, role, school_id, grade FROM student WHERE student_id = ?", userID).Scan(
+			&student.ID, &student.Role, &student.SchoolID, &student.Grade)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only students can register for olympiads"})
 			return
@@ -69,13 +452,16 @@ func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.Handle
 		var endDateStr sql.NullString
 		var limit sql.NullInt64
 		var creatorSchoolID int
+		var currentParticipants int
+		var olympiadGrade int
 
-		// Get olympiad details including the creator's school ID
 		err = db.QueryRow(`
-			SELECT so.subject_olympiad_id, so.subject_name, so.date, so.end_date, so.limit_participants, so.school_id
+			SELECT so.subject_olympiad_id, so.subject_name, so.date, so.end_date,
+			so.limit_participants, so.school_id, so.current_participants, so.grade
 			FROM subject_olympiads so
 			WHERE so.subject_olympiad_id = ?`, request.SubjectOlympiadID).Scan(
-			&olympiad.ID, &olympiad.SubjectName, &olympiad.StartDate, &endDateStr, &limit, &creatorSchoolID)
+			&olympiad.ID, &olympiad.SubjectName, &olympiad.StartDate, &endDateStr,
+			&limit, &creatorSchoolID, &currentParticipants, &olympiadGrade)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Subject olympiad not found"})
 			return
@@ -94,14 +480,18 @@ func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.Handle
 			olympiad.Limit = 100
 		}
 
-		// Check if registration period has ended
 		parsedEndDate, _ := time.Parse("2006-01-02", olympiad.EndDate)
 		if time.Now().After(parsedEndDate) {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Registration period has ended"})
 			return
 		}
 
-		// Check if student is already registered
+		// Проверка на соответствие класса ученика классу олимпиады
+		if student.Grade != olympiadGrade {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "You do not meet the required grade for this olympiad"})
+			return
+		}
+
 		var exists int
 		err = db.QueryRow(`
 			SELECT COUNT(*) FROM olympiad_registrations
@@ -112,33 +502,18 @@ func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.Handle
 			return
 		}
 
-		// Check overall registration limit
-		var currentCount int
-		err = db.QueryRow(`
-			SELECT COUNT(*) FROM olympiad_registrations
-			WHERE subject_olympiad_id = ? AND status = 'registered'`, request.SubjectOlympiadID).Scan(&currentCount)
-		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
-			return
-		}
-
-		if olympiad.Limit > 0 && currentCount >= olympiad.Limit {
+		if olympiad.Limit > 0 && currentParticipants >= olympiad.Limit {
 			utils.RespondWithError(w, http.StatusConflict, models.Error{Message: "Registration limit reached"})
 			return
 		}
 
-		// Check school-specific limits
-		const maxStudentsFromCreatorSchool = 2 // Maximum students allowed from the creator school
-
+		const maxStudentsFromCreatorSchool = 2
 		if student.SchoolID == creatorSchoolID {
-			// This student is from the creator school, check if limit is reached
 			var schoolStudentsCount int
 			err = db.QueryRow(`
 				SELECT COUNT(*) FROM olympiad_registrations r
 				JOIN student s ON r.student_id = s.student_id
-				WHERE r.subject_olympiad_id = ? 
-				AND s.school_id = ? 
-				AND r.status = 'registered'`,
+				WHERE r.subject_olympiad_id = ? AND s.school_id = ? AND r.status = 'registered'`,
 				request.SubjectOlympiadID, creatorSchoolID).Scan(&schoolStudentsCount)
 			if err != nil {
 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
@@ -152,15 +527,14 @@ func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.Handle
 			}
 		}
 
-		// All checks passed, proceed with registration
 		now := time.Now()
 		result, err := db.Exec(`
-			INSERT INTO olympiad_registrations 
+			INSERT INTO olympiad_registrations
 			(student_id, subject_olympiad_id, registration_date, status, school_id)
 			VALUES (?, ?, ?, 'registered', ?)`,
 			student.ID, request.SubjectOlympiadID, now.Format("2006-01-02 15:04:05"), student.SchoolID)
 		if err != nil {
-			log.Printf("Failed to insert registration: %v", err) // Added for debugging
+			log.Printf("Failed to insert registration: %v", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Registration failed"})
 			return
 		}
@@ -174,10 +548,10 @@ func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.Handle
 
 		err = db.QueryRow(`
 			SELECT r.olympiads_registrations_id, r.student_id, r.subject_olympiad_id, r.registration_date, r.status,
-				   r.school_id,
-				   CONCAT(s.first_name, ' ', s.last_name) AS student_name,
-				   s.grade, s.letter,
-				   o.subject_name, o.date, o.end_date, o.level
+					   r.school_id,
+					   CONCAT(s.first_name, ' ', s.last_name) AS student_name,
+					   s.grade, s.letter,
+					   o.subject_name, o.date, o.end_date, o.level
 			FROM olympiad_registrations r
 			JOIN student s ON r.student_id = s.student_id
 			JOIN subject_olympiads o ON r.subject_olympiad_id = o.subject_olympiad_id
@@ -197,7 +571,6 @@ func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.Handle
 			&olympiadLevel,
 		)
 		if err != nil {
-			// Fallback response if query fails
 			utils.ResponseJSON(w, models.OlympiadRegistration{
 				OlympiadsRegistrationsID: int(regID),
 				StudentID:                student.ID,
@@ -222,6 +595,7 @@ func (c *OlympiadRegistrationController) RegisterStudent(db *sql.DB) http.Handle
 		utils.ResponseJSON(w, registration)
 	}
 }
+
 func (c *OlympiadRegistrationController) GetOlympiadRegistrations(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, err := utils.VerifyToken(r)
