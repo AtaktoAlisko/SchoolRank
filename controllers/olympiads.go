@@ -388,24 +388,167 @@ func (oc *OlympiadController) GetOlympiad(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, olympiads)
 	}
 }
+
+func (oc *OlympiadController) GetParticipantByOlympNameAndStudentID(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Проверка токена пользователя
+		_, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+			return
+		}
+
+		// Получение параметров из URL-пути
+		vars := mux.Vars(r)
+		olympiadName := vars["olympiad_name"]
+		studentID := vars["student_id"]
+
+		if olympiadName == "" || studentID == "" {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Missing olympiad_name or student_id"})
+			return
+		}
+
+		query := `
+			SELECT 
+				Olympiads.olympiad_id, Olympiads.student_id, Olympiads.olympiad_place, Olympiads.document_url,
+				Olympiads.olympiad_name, Olympiads.level, Olympiads.grade, Olympiads.letter,
+				Schools.school_name
+			FROM Olympiads
+			LEFT JOIN Schools ON Olympiads.school_id = Schools.school_id
+			WHERE Olympiads.olympiad_name = ? AND Olympiads.student_id = ?
+		`
+
+		row := db.QueryRow(query, olympiadName, studentID)
+
+		var participant struct {
+			models.Olympiads
+			SchoolName string `json:"school_name"`
+		}
+
+		var documentURL, olympName sql.NullString
+		var letter, schoolName sql.NullString
+		var grade sql.NullInt64
+
+		err = row.Scan(
+			&participant.OlympiadID,
+			&participant.StudentID,
+			&participant.OlympiadPlace,
+			&documentURL,
+			&olympName,
+			&participant.Level,
+			&grade,
+			&letter,
+			&schoolName,
+		)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Participant not found"})
+			return
+		}
+
+		if documentURL.Valid {
+			participant.DocumentURL = documentURL.String
+		}
+		if olympName.Valid {
+			participant.OlympiadName = olympName.String
+		}
+		if grade.Valid {
+			participant.Grade = int(grade.Int64)
+		}
+		if letter.Valid {
+			participant.Letter = letter.String
+		}
+		if schoolName.Valid {
+			participant.SchoolName = schoolName.String
+		}
+
+		utils.ResponseJSON(w, participant)
+	}
+}
+
+// func (oc *OlympiadController) DeleteOlympiad(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		// 1. Извлекаем параметры запроса
+// 		olympiadID := mux.Vars(r)["olympiad_id"] // Пример: ?olympiad_id=5
+
+// 		if olympiadID == "" {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Olympiad ID is required"})
+// 			return
+// 		}
+
+// 		// 2. Получаем userID из токена
+// 		userID, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+// 			return
+// 		}
+
+// 		// 3. Получаем роль пользователя
+// 		var userRole string
+// 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch user role"})
+// 			return
+// 		}
+
+// 		// 4. Проверка, если пользователь имеет роль "schooladmin" или "superadmin"
+// 		if userRole != "schooladmin" && userRole != "superadmin" {
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Insufficient permissions to delete Olympiad"})
+// 			return
+// 		}
+
+// 		// 5. Если роль "schooladmin", получаем school_id из данных пользователя
+// 		var directorSchoolID int
+// 		if userRole == "schooladmin" {
+// 			err = db.QueryRow("SELECT school_id FROM users WHERE id = ?", userID).Scan(&directorSchoolID)
+// 			if err != nil {
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch user school"})
+// 				return
+// 			}
+// 		}
+
+// 		// 6. Проверяем существование олимпиады с таким olympiad_id
+// 		var olympiadSchoolID int
+// 		err = db.QueryRow("SELECT school_id FROM Olympiads WHERE olympiad_id = ?", olympiadID).Scan(&olympiadSchoolID)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking Olympiad existence"})
+// 			return
+// 		}
+
+// 		// 7. Если роль "schooladmin", проверяем, что олимпиада принадлежит той же школе
+// 		if userRole == "schooladmin" && olympiadSchoolID != directorSchoolID {
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Olympiad does not belong to your school"})
+// 			return
+// 		}
+
+// 		// 8. Удаляем олимпиаду
+// 		query := `DELETE FROM Olympiads WHERE olympiad_id = ?`
+// 		_, err = db.Exec(query, olympiadID)
+// 		if err != nil {
+// 			log.Printf("Error deleting Olympiad: %v", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete Olympiad record"})
+// 			return
+// 		}
+
+// 		// 9. Отправляем успешный ответ
+// 		utils.ResponseJSON(w, map[string]string{"message": "Olympiad deleted successfully"})
+// 	}
+// }
+
 func (oc *OlympiadController) DeleteOlympiad(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// 1. Извлекаем параметры запроса
-		olympiadID := mux.Vars(r)["olympiad_id"] // Пример: ?olympiad_id=5
-
+		olympiadID := mux.Vars(r)["olympiad_id"]
 		if olympiadID == "" {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Olympiad ID is required"})
 			return
 		}
 
-		// 2. Получаем userID из токена
+		// Шаг 1: Получаем userID и роль
 		userID, err := utils.VerifyToken(r)
 		if err != nil {
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
 			return
 		}
 
-		// 3. Получаем роль пользователя
 		var userRole string
 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
 		if err != nil {
@@ -413,13 +556,6 @@ func (oc *OlympiadController) DeleteOlympiad(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// 4. Проверка, если пользователь имеет роль "schooladmin" или "superadmin"
-		if userRole != "schooladmin" && userRole != "superadmin" {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Insufficient permissions to delete Olympiad"})
-			return
-		}
-
-		// 5. Если роль "schooladmin", получаем school_id из данных пользователя
 		var directorSchoolID int
 		if userRole == "schooladmin" {
 			err = db.QueryRow("SELECT school_id FROM users WHERE id = ?", userID).Scan(&directorSchoolID)
@@ -429,33 +565,57 @@ func (oc *OlympiadController) DeleteOlympiad(db *sql.DB) http.HandlerFunc {
 			}
 		}
 
-		// 6. Проверяем существование олимпиады с таким olympiad_id
-		var olympiadSchoolID int
-		err = db.QueryRow("SELECT school_id FROM Olympiads WHERE olympiad_id = ?", olympiadID).Scan(&olympiadSchoolID)
+		// Шаг 4: Получаем данные участника ДО удаления
+		var studentID, olympiadSchoolID int
+		var olympiadName string
+		err = db.QueryRow(`
+			SELECT student_id, olympiad_name, school_id 
+			FROM Olympiads 
+			WHERE olympiad_id = ?`, olympiadID).Scan(&studentID, &olympiadName, &olympiadSchoolID)
+
+		if err == sql.ErrNoRows {
+			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Participant not found"})
+			return
+		}
 		if err != nil {
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking Olympiad existence"})
+			log.Println("Error fetching participant data:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch participant info"})
 			return
 		}
 
-		// 7. Если роль "schooladmin", проверяем, что олимпиада принадлежит той же школе
+		// Проверка прав доступа
 		if userRole == "schooladmin" && olympiadSchoolID != directorSchoolID {
-			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Olympiad does not belong to your school"})
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to delete this participant"})
 			return
 		}
 
-		// 8. Удаляем олимпиаду
-		query := `DELETE FROM Olympiads WHERE olympiad_id = ?`
-		_, err = db.Exec(query, olympiadID)
+		// Шаг 5: Удаление участника из таблицы Olympiads
+		_, err = db.Exec("DELETE FROM Olympiads WHERE olympiad_id = ?", olympiadID)
 		if err != nil {
-			log.Printf("Error deleting Olympiad: %v", err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete Olympiad record"})
+			log.Println("Error deleting olympiad participant:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to delete participant"})
 			return
 		}
 
-		// 9. Отправляем успешный ответ
-		utils.ResponseJSON(w, map[string]string{"message": "Olympiad deleted successfully"})
+		// Шаг 6: Обновление статуса регистрации
+		_, err = db.Exec(`
+			UPDATE olympiad_registrations r
+			JOIN subject_olympiads s ON r.subject_olympiad_id = s.subject_olympiad_id
+			SET r.status = 'registered'
+			WHERE r.student_id = ? AND s.subject_name = ?`, studentID, olympiadName)
+
+		if err != nil {
+			log.Println("Error updating registration status:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update registration status"})
+			return
+		}
+
+		utils.ResponseJSON(w, map[string]string{
+			"message": "Participant deleted and status set to 'registered'",
+		})
 	}
 }
+
 func (oc *OlympiadController) UpdateOlympiad(db *sql.DB) http.HandlerFunc {
 
 	return func(w http.ResponseWriter, r *http.Request) {
