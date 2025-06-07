@@ -20,54 +20,455 @@ import (
 
 type EventsRegistrationController struct{}
 
+// func (ec *EventsRegistrationController) RegisterForEvent(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		// Verify token
+// 		userID, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			log.Printf("Token verification failed for user %d: %v", userID, err)
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+// 			return
+// 		}
+
+// 		// Debug: Log userID
+// 		log.Printf("DEBUG: Verified userID = %d", userID)
+
+// 		// Check if user is a student (only students can register for events)
+// 		var role string
+// 		var studentSchoolID sql.NullInt64
+// 		err = db.QueryRow("SELECT role, school_id FROM student WHERE student_id = ?", userID).Scan(&role, &studentSchoolID)
+
+// 		// Debug: Log query results
+// 		log.Printf("DEBUG: SQL query error = %v", err)
+// 		log.Printf("DEBUG: Retrieved role = '%s'", role)
+// 		log.Printf("DEBUG: StudentSchoolID valid = %v, value = %d", studentSchoolID.Valid, studentSchoolID.Int64)
+
+// 		if err != nil {
+// 			if err == sql.ErrNoRows {
+// 				log.Printf("Student not found: userID = %d", userID)
+// 				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only students can register for events"})
+// 			} else {
+// 				log.Printf("SQL error when checking student for user %d: %v", userID, err)
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+// 			}
+// 			return
+// 		}
+
+// 		if role != "student" {
+// 			log.Printf("Access denied for user %d: role is '%s', expected 'student'", userID, role)
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only students can register for events"})
+// 			return
+// 		}
+
+// 		log.Printf("DEBUG: User %d has valid student role", userID)
+
+// 		// Parse request body
+// 		var body struct {
+// 			EventID int `json:"event_id"`
+// 		}
+// 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+// 			log.Printf("Invalid request body for user %d: %v", userID, err)
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid body"})
+// 			return
+// 		}
+// 		defer r.Body.Close()
+
+// 		eventID := body.EventID
+// 		if eventID <= 0 {
+// 			log.Printf("Invalid event ID %d for user %d", eventID, userID)
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid event ID"})
+// 			return
+// 		}
+
+// 		log.Printf("DEBUG: Processing registration for eventID = %d, userID = %d", eventID, userID)
+
+// 		// Start transaction
+// 		tx, err := db.Begin()
+// 		if err != nil {
+// 			log.Printf("Error starting transaction for user %d: %v", userID, err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+// 			return
+// 		}
+// 		defer tx.Rollback()
+
+// 		// Check if user is already registered for this event
+// 		var existingRegistration int
+// 		err = tx.QueryRow("SELECT COUNT(*) FROM EventRegistrations WHERE student_id = ? AND event_id = ? AND status = 'registered'", userID, eventID).Scan(&existingRegistration)
+// 		if err != nil {
+// 			log.Printf("Error checking existing registration for user %d, event %d: %v", userID, eventID, err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+// 			return
+// 		}
+// 		if existingRegistration > 0 {
+// 			log.Printf("User %d already registered for event %d", userID, eventID)
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Already registered for this event"})
+// 			return
+// 		}
+
+// 		// Fetch event details
+// 		var eventSchoolID int
+// 		var limitCount int
+// 		var eventName string
+// 		err = tx.QueryRow("SELECT school_id, limit_count, event_name FROM Events WHERE id = ?", eventID).Scan(&eventSchoolID, &limitCount, &eventName)
+// 		if err == sql.ErrNoRows {
+// 			log.Printf("Event %d not found for user %d", eventID, userID)
+// 			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Event not found"})
+// 			return
+// 		}
+// 		if err != nil {
+// 			log.Printf("Error fetching event %d: %v", eventID, err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking event"})
+// 			return
+// 		}
+
+// 		log.Printf("DEBUG: Event %d (%s) - school_id: %d, limit: %d", eventID, eventName, eventSchoolID, limitCount)
+
+// 		// Calculate limits
+// 		halfLimit := limitCount / 2
+// 		otherHalfLimit := limitCount - halfLimit
+
+// 		log.Printf("DEBUG: Limits - same school: %d, other schools: %d", halfLimit, otherHalfLimit)
+
+// 		// Count current registrations
+// 		var sameSchoolCount, otherSchoolCount int
+// 		err = tx.QueryRow(`
+// 			SELECT
+// 				COALESCE(SUM(CASE WHEN r.school_id = ? THEN 1 ELSE 0 END), 0) AS same_school,
+// 				COALESCE(SUM(CASE WHEN r.school_id != ? OR r.school_id IS NULL THEN 1 ELSE 0 END), 0) AS other_school
+// 			FROM EventRegistrations r
+// 			WHERE r.event_id = ? AND r.status = 'registered'`,
+// 			eventSchoolID, eventSchoolID, eventID).Scan(&sameSchoolCount, &otherSchoolCount)
+// 		if err != nil {
+// 			log.Printf("Error counting registrations for event %d: %v", eventID, err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking registration limits"})
+// 			return
+// 		}
+
+// 		log.Printf("DEBUG: Current registrations - same school: %d/%d, other schools: %d/%d",
+// 			sameSchoolCount, halfLimit, otherSchoolCount, otherHalfLimit)
+
+// 		// Check registration limits based on student's school
+// 		if studentSchoolID.Valid && int(studentSchoolID.Int64) == eventSchoolID {
+// 			log.Printf("DEBUG: Student from same school as event (school_id: %d)", eventSchoolID)
+// 			if sameSchoolCount >= halfLimit {
+// 				log.Printf("Registration limit reached for event %d's school (%d/%d)", eventID, sameSchoolCount, halfLimit)
+// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Registration limit reached for this school's students"})
+// 				return
+// 			}
+// 		} else {
+// 			studentSchool := "unknown"
+// 			if studentSchoolID.Valid {
+// 				studentSchool = string(rune(studentSchoolID.Int64))
+// 			}
+// 			log.Printf("DEBUG: Student from different school (student school: %s, event school: %d)", studentSchool, eventSchoolID)
+// 			if otherSchoolCount >= otherHalfLimit {
+// 				log.Printf("Registration limit reached for other schools for event %d (%d/%d)", eventID, otherSchoolCount, otherHalfLimit)
+// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Registration limit reached for students from other schools"})
+// 				return
+// 			}
+// 		}
+
+// 		// Insert new registration
+// 		currentTime := time.Now().Format("2006-01-02 15:04:05")
+// 		var schoolIDForInsert interface{}
+// 		if studentSchoolID.Valid {
+// 			schoolIDForInsert = studentSchoolID.Int64
+// 		} else {
+// 			schoolIDForInsert = nil
+// 		}
+
+// 		result, err := tx.Exec(`
+// 			INSERT INTO EventRegistrations (student_id, event_id, registration_date, status, school_id)
+// 			VALUES (?, ?, ?, 'registered', ?)`,
+// 			userID, eventID, currentTime, schoolIDForInsert)
+// 		if err != nil {
+// 			log.Printf("Error inserting registration for user %d, event %d: %v", userID, eventID, err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to register for event"})
+// 			return
+// 		}
+
+// 		// Get the inserted registration ID
+// 		registrationID, err := result.LastInsertId()
+// 		if err != nil {
+// 			log.Printf("Error getting last insert ID for user %d, event %d: %v", userID, eventID, err)
+// 		}
+
+// 		log.Printf("DEBUG: Successfully inserted registration with ID: %d", registrationID)
+
+// 		// Fetch the newly created registration with all details
+// 		var registration models.EventRegistration
+// 		var regDateStr string
+// 		var eventEnd sql.NullString
+// 		var schoolName sql.NullString
+// 		var status sql.NullString
+
+// 		err = tx.QueryRow(`
+// 			SELECT r.event_registration_id, r.student_id, r.event_id, r.registration_date, r.status,
+// 				   COALESCE(r.school_id, 0) as school_id,
+// 				   COALESCE(s.first_name, '') as first_name,
+// 				   COALESCE(s.last_name, '') as last_name,
+// 				   COALESCE(s.patronymic, '') as patronymic,
+// 				   COALESCE(s.grade, 0) as grade,
+// 				   COALESCE(s.letter, '') as letter,
+// 				   COALESCE(sc.school_name, '') as school_name,
+// 				   COALESCE(e.event_name, '') as event_name,
+// 				   COALESCE(e.start_date, '') as start_date,
+// 				   e.end_date
+// 			FROM EventRegistrations r
+// 			LEFT JOIN student s ON r.student_id = s.student_id
+// 			LEFT JOIN Schools sc ON r.school_id = sc.school_id
+// 			LEFT JOIN Events e ON r.event_id = e.id
+// 			WHERE r.student_id = ? AND r.event_id = ? AND r.registration_date = ?`,
+// 			userID, eventID, currentTime).Scan(
+// 			&registration.EventRegistrationID,
+// 			&registration.StudentID,
+// 			&registration.EventID,
+// 			&regDateStr,
+// 			&status,
+// 			&registration.SchoolID,
+// 			&registration.StudentFirstName,
+// 			&registration.StudentLastName,
+// 			&registration.StudentPatronymic,
+// 			&registration.StudentGrade,
+// 			&registration.StudentLetter,
+// 			&schoolName,
+// 			&registration.EventName,
+// 			&registration.EventStartDate,
+// 			&eventEnd,
+// 		)
+// 		if err != nil {
+// 			log.Printf("Error fetching new registration for user %d, event %d: %v", userID, eventID, err)
+// 			// Don't return error here, registration was successful
+// 			// Just log the error and return basic response
+// 			registration = models.EventRegistration{
+// 				EventRegistrationID: int(registrationID),
+// 				StudentID:           userID,
+// 				EventID:             eventID,
+// 				Status:              "registered",
+// 				Message:             "Successfully registered for event",
+// 			}
+// 		} else {
+// 			// Parse and set fields
+// 			registration.RegistrationDate, _ = time.Parse("2006-01-02 15:04:05", regDateStr)
+// 			if status.Valid {
+// 				registration.Status = status.String
+// 			}
+// 			if schoolName.Valid {
+// 				registration.SchoolName = schoolName.String
+// 			}
+// 			if eventEnd.Valid {
+// 				registration.EventEndDate = eventEnd.String
+// 			}
+// 			registration.Message = "Successfully registered for event"
+// 		}
+
+// 		_, err = tx.Exec("UPDATE Events SET limit_participants = limit_participants + 1 WHERE id = ?", eventID)
+// 		if err != nil {
+// 			log.Printf("Error updating limit_participants for event %d: %v", eventID, err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update participant limit"})
+// 			return
+// 		}
+
+// 		log.Printf("DEBUG: limit_participants incremented for event %d", eventID)
+
+// 		// Commit transaction
+// 		if err := tx.Commit(); err != nil {
+// 			log.Printf("Error committing transaction for user %d, event %d: %v", userID, eventID, err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to complete registration"})
+// 			return
+// 		}
+
+// 		log.Printf("DEBUG: Successfully completed registration for user %d, event %d", userID, eventID)
+// 		utils.ResponseJSON(w, registration)
+// 	}
+// }
+
+// func (ec *EventsRegistrationController) RegisterForEvent(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		userID, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
+// 			return
+// 		}
+
+// 		var role string
+// 		var studentSchoolID sql.NullInt64
+// 		err = db.QueryRow("SELECT role, school_id FROM student WHERE student_id = ?", userID).Scan(&role, &studentSchoolID)
+// 		if err != nil || role != "student" {
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only students can register for events"})
+// 			return
+// 		}
+
+// 		var body struct {
+// 			EventID int `json:"event_id"`
+// 		}
+// 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid body"})
+// 			return
+// 		}
+// 		defer r.Body.Close()
+
+// 		eventID := body.EventID
+// 		if eventID <= 0 {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid event ID"})
+// 			return
+// 		}
+
+// 		tx, err := db.Begin()
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+// 			return
+// 		}
+// 		defer tx.Rollback()
+
+// 		var existingRegistration int
+// 		err = tx.QueryRow("SELECT COUNT(*) FROM EventRegistrations WHERE student_id = ? AND event_id = ? AND status = 'registered'", userID, eventID).Scan(&existingRegistration)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
+// 			return
+// 		}
+// 		if existingRegistration > 0 {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Already registered for this event"})
+// 			return
+// 		}
+
+// 		var eventSchoolID int
+// 		var limitCount int
+// 		var eventName string
+// 		var participants int
+// 		err = tx.QueryRow("SELECT school_id, limit_count, event_name, participants FROM Events WHERE id = ?", eventID).Scan(&eventSchoolID, &limitCount, &eventName, &participants)
+// 		if err == sql.ErrNoRows {
+// 			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Event not found"})
+// 			return
+// 		}
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking event"})
+// 			return
+// 		}
+
+// 		if limitCount > 0 && participants >= limitCount {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Registration limit for this event has been reached"})
+// 			return
+// 		}
+
+// 		currentTime := time.Now().Format("2006-01-02 15:04:05")
+// 		var schoolIDForInsert interface{}
+// 		if studentSchoolID.Valid {
+// 			schoolIDForInsert = studentSchoolID.Int64
+// 		} else {
+// 			schoolIDForInsert = nil
+// 		}
+
+// 		result, err := tx.Exec(`
+// 			INSERT INTO EventRegistrations (student_id, event_id, registration_date, status, school_id)
+// 			VALUES (?, ?, ?, 'registered', ?)`,
+// 			userID, eventID, currentTime, schoolIDForInsert)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to register for event"})
+// 			return
+// 		}
+
+// 		_, err = tx.Exec("UPDATE Events SET participants = participants + 1 WHERE id = ?", eventID)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update participants count"})
+// 			return
+// 		}
+
+// 		registrationID, _ := result.LastInsertId()
+
+// 		var registration models.EventRegistration
+// 		var regDateStr string
+// 		var eventEnd sql.NullString
+// 		var schoolName sql.NullString
+// 		var status sql.NullString
+
+// 		err = tx.QueryRow(`
+// 			SELECT r.event_registration_id, r.student_id, r.event_id, r.registration_date, r.status,
+// 				   COALESCE(r.school_id, 0) as school_id,
+// 				   COALESCE(s.first_name, '') as first_name,
+// 				   COALESCE(s.last_name, '') as last_name,
+// 				   COALESCE(s.patronymic, '') as patronymic,
+// 				   COALESCE(s.grade, 0) as grade,
+// 				   COALESCE(s.letter, '') as letter,
+// 				   COALESCE(sc.school_name, '') as school_name,
+// 				   COALESCE(e.event_name, '') as event_name,
+// 				   COALESCE(e.start_date, '') as start_date,
+// 				   e.end_date
+// 			FROM EventRegistrations r
+// 			LEFT JOIN student s ON r.student_id = s.student_id
+// 			LEFT JOIN Schools sc ON r.school_id = sc.school_id
+// 			LEFT JOIN Events e ON r.event_id = e.id
+// 			WHERE r.student_id = ? AND r.event_id = ? AND r.registration_date = ?`,
+// 			userID, eventID, currentTime).Scan(
+// 			&registration.EventRegistrationID,
+// 			&registration.StudentID,
+// 			&registration.EventID,
+// 			&regDateStr,
+// 			&status,
+// 			&registration.SchoolID,
+// 			&registration.StudentFirstName,
+// 			&registration.StudentLastName,
+// 			&registration.StudentPatronymic,
+// 			&registration.StudentGrade,
+// 			&registration.StudentLetter,
+// 			&schoolName,
+// 			&registration.EventName,
+// 			&registration.EventStartDate,
+// 			&eventEnd,
+// 		)
+
+// 		if err != nil {
+// 			registration = models.EventRegistration{
+// 				EventRegistrationID: int(registrationID),
+// 				StudentID:           userID,
+// 				EventID:             eventID,
+// 				Status:              "registered",
+// 				Message:             "Successfully registered for event",
+// 			}
+// 		} else {
+// 			registration.RegistrationDate, _ = time.Parse("2006-01-02 15:04:05", regDateStr)
+// 			if status.Valid {
+// 				registration.Status = status.String
+// 			}
+// 			if schoolName.Valid {
+// 				registration.SchoolName = schoolName.String
+// 			}
+// 			if eventEnd.Valid {
+// 				registration.EventEndDate = eventEnd.String
+// 			}
+// 			registration.Message = "Successfully registered for event"
+// 		}
+
+// 		if err := tx.Commit(); err != nil {
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to complete registration"})
+// 			return
+// 		}
+
+// 		utils.ResponseJSON(w, registration)
+// 	}
+// }
+
 func (ec *EventsRegistrationController) RegisterForEvent(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Verify token
 		userID, err := utils.VerifyToken(r)
 		if err != nil {
-			log.Printf("Token verification failed for user %d: %v", userID, err)
 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: "Unauthorized"})
 			return
 		}
 
-		// Debug: Log userID
-		log.Printf("DEBUG: Verified userID = %d", userID)
-
-		// Check if user is a student (only students can register for events)
 		var role string
 		var studentSchoolID sql.NullInt64
-		err = db.QueryRow("SELECT role, school_id FROM student WHERE student_id = ?", userID).Scan(&role, &studentSchoolID)
-
-		// Debug: Log query results
-		log.Printf("DEBUG: SQL query error = %v", err)
-		log.Printf("DEBUG: Retrieved role = '%s'", role)
-		log.Printf("DEBUG: StudentSchoolID valid = %v, value = %d", studentSchoolID.Valid, studentSchoolID.Int64)
-
-		if err != nil {
-			if err == sql.ErrNoRows {
-				log.Printf("Student not found: userID = %d", userID)
-				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only students can register for events"})
-			} else {
-				log.Printf("SQL error when checking student for user %d: %v", userID, err)
-				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
-			}
-			return
-		}
-
-		if role != "student" {
-			log.Printf("Access denied for user %d: role is '%s', expected 'student'", userID, role)
+		var studentGrade int
+		err = db.QueryRow("SELECT role, school_id, grade FROM student WHERE student_id = ?", userID).Scan(&role, &studentSchoolID, &studentGrade)
+		if err != nil || role != "student" {
 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Only students can register for events"})
 			return
 		}
 
-		log.Printf("DEBUG: User %d has valid student role", userID)
-
-		// Parse request body
 		var body struct {
 			EventID int `json:"event_id"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			log.Printf("Invalid request body for user %d: %v", userID, err)
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid body"})
 			return
 		}
@@ -75,100 +476,66 @@ func (ec *EventsRegistrationController) RegisterForEvent(db *sql.DB) http.Handle
 
 		eventID := body.EventID
 		if eventID <= 0 {
-			log.Printf("Invalid event ID %d for user %d", eventID, userID)
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid event ID"})
 			return
 		}
 
-		log.Printf("DEBUG: Processing registration for eventID = %d, userID = %d", eventID, userID)
-
-		// Start transaction
 		tx, err := db.Begin()
 		if err != nil {
-			log.Printf("Error starting transaction for user %d: %v", userID, err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
 			return
 		}
 		defer tx.Rollback()
 
-		// Check if user is already registered for this event
 		var existingRegistration int
 		err = tx.QueryRow("SELECT COUNT(*) FROM EventRegistrations WHERE student_id = ? AND event_id = ? AND status = 'registered'", userID, eventID).Scan(&existingRegistration)
 		if err != nil {
-			log.Printf("Error checking existing registration for user %d, event %d: %v", userID, eventID, err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Database error"})
 			return
 		}
 		if existingRegistration > 0 {
-			log.Printf("User %d already registered for event %d", userID, eventID)
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Already registered for this event"})
 			return
 		}
 
-		// Fetch event details
+		var eventGrade, limitCount, participants int
 		var eventSchoolID int
-		var limitCount int
 		var eventName string
-		err = tx.QueryRow("SELECT school_id, limit_count, event_name FROM Events WHERE id = ?", eventID).Scan(&eventSchoolID, &limitCount, &eventName)
+
+		err = tx.QueryRow("SELECT school_id, grade, limit_count, event_name, participants FROM Events WHERE id = ?", eventID).
+			Scan(&eventSchoolID, &eventGrade, &limitCount, &eventName, &participants)
 		if err == sql.ErrNoRows {
-			log.Printf("Event %d not found for user %d", eventID, userID)
 			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Event not found"})
 			return
 		}
 		if err != nil {
-			log.Printf("Error fetching event %d: %v", eventID, err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking event"})
 			return
 		}
 
-		log.Printf("DEBUG: Event %d (%s) - school_id: %d, limit: %d", eventID, eventName, eventSchoolID, limitCount)
-
-		// Calculate limits
-		halfLimit := limitCount / 2
-		otherHalfLimit := limitCount - halfLimit
-
-		log.Printf("DEBUG: Limits - same school: %d, other schools: %d", halfLimit, otherHalfLimit)
-
-		// Count current registrations
-		var sameSchoolCount, otherSchoolCount int
-		err = tx.QueryRow(`
-			SELECT 
-				COALESCE(SUM(CASE WHEN r.school_id = ? THEN 1 ELSE 0 END), 0) AS same_school,
-				COALESCE(SUM(CASE WHEN r.school_id != ? OR r.school_id IS NULL THEN 1 ELSE 0 END), 0) AS other_school
-			FROM EventRegistrations r
-			WHERE r.event_id = ? AND r.status = 'registered'`,
-			eventSchoolID, eventSchoolID, eventID).Scan(&sameSchoolCount, &otherSchoolCount)
-		if err != nil {
-			log.Printf("Error counting registrations for event %d: %v", eventID, err)
-			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking registration limits"})
+		// 🎯 Проверка соответствия классов
+		if studentGrade != eventGrade {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Your grade does not match the required grade for this event"})
 			return
 		}
 
-		log.Printf("DEBUG: Current registrations - same school: %d/%d, other schools: %d/%d",
-			sameSchoolCount, halfLimit, otherSchoolCount, otherHalfLimit)
-
-		// Check registration limits based on student's school
-		if studentSchoolID.Valid && int(studentSchoolID.Int64) == eventSchoolID {
-			log.Printf("DEBUG: Student from same school as event (school_id: %d)", eventSchoolID)
-			if sameSchoolCount >= halfLimit {
-				log.Printf("Registration limit reached for event %d's school (%d/%d)", eventID, sameSchoolCount, halfLimit)
-				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Registration limit reached for this school's students"})
-				return
-			}
-		} else {
-			studentSchool := "unknown"
-			if studentSchoolID.Valid {
-				studentSchool = string(rune(studentSchoolID.Int64))
-			}
-			log.Printf("DEBUG: Student from different school (student school: %s, event school: %d)", studentSchool, eventSchoolID)
-			if otherSchoolCount >= otherHalfLimit {
-				log.Printf("Registration limit reached for other schools for event %d (%d/%d)", eventID, otherSchoolCount, otherHalfLimit)
-				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Registration limit reached for students from other schools"})
-				return
-			}
+		// 📛 Ограничение 2 участника от школы
+		var countFromSchool int
+		err = tx.QueryRow("SELECT COUNT(*) FROM EventRegistrations WHERE event_id = ? AND school_id = ?", eventID, studentSchoolID).Scan(&countFromSchool)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking school participant count"})
+			return
+		}
+		if countFromSchool >= 2 {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Only 2 participants allowed from each school"})
+			return
 		}
 
-		// Insert new registration
+		if limitCount > 0 && participants >= limitCount {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Registration limit for this event has been reached"})
+			return
+		}
+
 		currentTime := time.Now().Format("2006-01-02 15:04:05")
 		var schoolIDForInsert interface{}
 		if studentSchoolID.Valid {
@@ -182,20 +549,18 @@ func (ec *EventsRegistrationController) RegisterForEvent(db *sql.DB) http.Handle
 			VALUES (?, ?, ?, 'registered', ?)`,
 			userID, eventID, currentTime, schoolIDForInsert)
 		if err != nil {
-			log.Printf("Error inserting registration for user %d, event %d: %v", userID, eventID, err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to register for event"})
 			return
 		}
 
-		// Get the inserted registration ID
-		registrationID, err := result.LastInsertId()
+		_, err = tx.Exec("UPDATE Events SET participants = participants + 1 WHERE id = ?", eventID)
 		if err != nil {
-			log.Printf("Error getting last insert ID for user %d, event %d: %v", userID, eventID, err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update participants count"})
+			return
 		}
 
-		log.Printf("DEBUG: Successfully inserted registration with ID: %d", registrationID)
+		registrationID, _ := result.LastInsertId()
 
-		// Fetch the newly created registration with all details
 		var registration models.EventRegistration
 		var regDateStr string
 		var eventEnd sql.NullString
@@ -236,10 +601,8 @@ func (ec *EventsRegistrationController) RegisterForEvent(db *sql.DB) http.Handle
 			&registration.EventStartDate,
 			&eventEnd,
 		)
+
 		if err != nil {
-			log.Printf("Error fetching new registration for user %d, event %d: %v", userID, eventID, err)
-			// Don't return error here, registration was successful
-			// Just log the error and return basic response
 			registration = models.EventRegistration{
 				EventRegistrationID: int(registrationID),
 				StudentID:           userID,
@@ -248,7 +611,6 @@ func (ec *EventsRegistrationController) RegisterForEvent(db *sql.DB) http.Handle
 				Message:             "Successfully registered for event",
 			}
 		} else {
-			// Parse and set fields
 			registration.RegistrationDate, _ = time.Parse("2006-01-02 15:04:05", regDateStr)
 			if status.Valid {
 				registration.Status = status.String
@@ -262,17 +624,15 @@ func (ec *EventsRegistrationController) RegisterForEvent(db *sql.DB) http.Handle
 			registration.Message = "Successfully registered for event"
 		}
 
-		// Commit transaction
 		if err := tx.Commit(); err != nil {
-			log.Printf("Error committing transaction for user %d, event %d: %v", userID, eventID, err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to complete registration"})
 			return
 		}
 
-		log.Printf("DEBUG: Successfully completed registration for user %d, event %d", userID, eventID)
 		utils.ResponseJSON(w, registration)
 	}
 }
+
 func (ec *EventsRegistrationController) UpdateEventRegistrationStatus(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, err := utils.VerifyToken(r)
