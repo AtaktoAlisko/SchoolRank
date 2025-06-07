@@ -1298,6 +1298,74 @@ func (c *UNTScoreController) GetTop3UNTStudents(db *sql.DB) http.HandlerFunc {
 		})
 	}
 }
+
+func (c *UNTScoreController) GetTop10UNTStudents(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Query to get top 3 students by UNT score
+		query := `
+			SELECT 
+				CONCAT(s.first_name, ' ', s.last_name, ' ', COALESCE(s.patronymic, '')) AS full_name,
+				s.iin,
+				s.grade,
+				s.letter,
+				ue.total_score
+			FROM student s
+			JOIN UNT_Exams ue ON s.student_id = ue.student_id
+			ORDER BY ue.total_score DESC
+			LIMIT 10
+		`
+
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Printf("Ошибка при выполнении запроса: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Не удалось получить данные о студентах"})
+			return
+		}
+		defer rows.Close()
+
+		// Structure to hold the response data
+		type TopStudent struct {
+			FullName string `json:"full_name"`
+			IIN      string `json:"iin"`
+			Grade    int    `json:"grade"`
+			Letter   string `json:"letter"`
+			UNTScore int    `json:"unt_score"`
+		}
+
+		var topStudents []TopStudent
+
+		// Iterate over the query results
+		for rows.Next() {
+			var student TopStudent
+			err := rows.Scan(
+				&student.FullName,
+				&student.IIN,
+				&student.Grade,
+				&student.Letter,
+				&student.UNTScore,
+			)
+			if err != nil {
+				log.Printf("Ошибка при сканировании строки: %v", err)
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Ошибка при обработке данных студентов"})
+				return
+			}
+			topStudents = append(topStudents, student)
+		}
+
+		// Check for errors from iterating over rows
+		if err = rows.Err(); err != nil {
+			log.Printf("Ошибка при обработке результатов: %v", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Ошибка при обработке данных"})
+			return
+		}
+
+		// Return the response
+		utils.ResponseJSON(w, map[string]interface{}{
+			"message": "Топ 3 студента по ЕНТ",
+			"data":    topStudents,
+		})
+	}
+}
 func (c *UNTScoreController) GetTop3UNTStudentsBySchoolID(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Step 1: Verify the token

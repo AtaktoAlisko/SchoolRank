@@ -309,6 +309,7 @@ func main() {
 	router.HandleFunc("/api/school-count", schoolController.GetSchoolCount(db)).Methods("GET")
 	router.HandleFunc("/api/events/count", eventController.CountEvents(db)).Methods("GET")
 	router.HandleFunc("/api/get-top-3-students-by-unt", untScoreController.GetTop3UNTStudents(db)).Methods("GET")
+	router.HandleFunc("/api/get-top-10-students-by-unt", untScoreController.GetTop10UNTStudents(db)).Methods("GET")
 	router.HandleFunc("/api/count-users-by-role", controller.CountUsersByRole(db)).Methods("GET")
 	router.HandleFunc("/api/countAllOlympiads", EventsParticipantController.CountOlympiadParticipants(db)).Methods("GET")
 	router.HandleFunc("/api/users/{id}", controller.GetUserByID(db)).Methods("GET")
