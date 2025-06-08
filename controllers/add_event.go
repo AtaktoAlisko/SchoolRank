@@ -1717,7 +1717,7 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
             SELECT e.id, e.school_id, s.school_name, e.event_name, e.photo as photo_url, 
                    (SELECT COUNT(*) FROM EventRegistrations r WHERE r.event_id = e.id AND r.status = 'registered') as participants,
                    e.limit_count as ` + "`limit`" + `,
-                   e.start_date, e.end_date, e.location
+                   e.start_date, e.end_date, e.location,     e.grade
             FROM Events e
             LEFT JOIN Schools s ON e.school_id = s.school_id
             WHERE e.category = ?
@@ -1795,6 +1795,7 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 			StartDate    string `json:"start_date"`
 			EndDate      string `json:"end_date"`
 			Location     string `json:"location"`
+			Grade        string `json:"grade"`
 		}
 
 		type School struct {
@@ -1813,7 +1814,7 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 			err := rows.Scan(
 				&eventID, &schoolID, &schoolName, &event.EventName, &event.PhotoURL,
 				&event.Participants, &event.Limit,
-				&event.StartDate, &event.EndDate, &event.Location,
+				&event.StartDate, &event.EndDate, &event.Location, &event.Grade,
 			)
 			if err != nil {
 				log.Println("Error scanning event row:", err)
