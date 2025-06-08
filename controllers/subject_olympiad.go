@@ -1858,7 +1858,8 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
                 COALESCE(so.description, '') as location,
                 so.level,
                 so.limit_participants,
-                s.school_id,
+                so.grade,
+                s.school_id,  
                 COALESCE(s.school_name, '') as school_name,
                 COUNT(reg.olympiads_registrations_id) as current_participants
             FROM 
@@ -1870,12 +1871,11 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
             WHERE 
                 so.subject_name = ?
             GROUP BY 
-                so.subject_olympiad_id, so.date, so.end_date, so.description, so.level, so.limit_participants, s.school_id, s.school_name
+                so.subject_olympiad_id, so.date, so.end_date, so.description, so.level, so.limit_participants, so.grade, s.school_id, s.school_name
             ORDER BY 
                 s.school_name, so.subject_olympiad_id
         `
 
-		// log.Printf("Executing query: %s with subject_name: %s", query, subjectName)
 		rows, err := db.Query(query, subjectName)
 		if err != nil {
 			log.Println("Error querying olympiads:", err)
@@ -1893,6 +1893,7 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 			LimitParticipants int    `json:"limit_participants"`
 			Expired           bool   `json:"expired"`
 			Participants      int    `json:"participants"`
+			Grade             string `json:"grade"`
 		}
 
 		type SchoolWithOlympiads struct {
@@ -1918,6 +1919,7 @@ func (c *SubjectOlympiadController) GetOlympiadsBySubjectName(db *sql.DB) http.H
 				&olympiad.Location,
 				&olympiad.Level,
 				&olympiad.LimitParticipants,
+				&olympiad.Grade,
 				&schoolID,
 				&schoolName,
 				&currentParticipants,
