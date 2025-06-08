@@ -210,6 +210,7 @@ func main() {
 	router.HandleFunc("/api/grades", studentController.GetAvailableGrades(db)).Methods("GET")
 	router.HandleFunc("/api/letters", studentController.GetAvailableLetters(db)).Methods("GET")
 	router.HandleFunc("/api/schools/{schoolId}/grades/{grade}/letters/{letter}/students", studentController.GetFilteredStudents(db)).Methods("GET")
+	router.HandleFunc("/api/schools/{schoolId}/grades/{grade}/letters/{letter}/students-without-ent", studentController.GetStudentsWithoutENT(db)).Methods("GET")
 
 	router.HandleFunc("/schools/{school_id}/rating", schoolRatingController.GetSchoolCompleteRating(db)).Methods("GET")
 

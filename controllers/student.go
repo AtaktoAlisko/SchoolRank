@@ -1857,6 +1857,102 @@ func (sfc *StudentController) GetFilteredStudents(db *sql.DB) http.HandlerFunc {
 		utils.ResponseJSON(w, students)
 	}
 }
+
+func (sfc *StudentController) GetStudentsWithoutENT(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, err := utils.VerifyToken(r)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+			return
+		}
+
+		var userRole string
+		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+		if err != nil {
+			log.Println("Error fetching user role:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user role"})
+			return
+		}
+
+		vars := mux.Vars(r)
+		var schoolID int
+
+		if userRole == "superadmin" {
+			schoolIDParam := vars["schoolId"]
+			schoolID, err = strconv.Atoi(schoolIDParam)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID"})
+				return
+			}
+		} else if userRole == "schooladmin" {
+			var email string
+			err = db.QueryRow("SELECT email FROM users WHERE id = ?", userID).Scan(&email)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get email"})
+				return
+			}
+			err = db.QueryRow("SELECT school_id FROM Schools WHERE school_admin_login = ?", email).Scan(&schoolID)
+			if err != nil {
+				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to get school ID"})
+				return
+			}
+
+			pathSchoolID, _ := strconv.Atoi(vars["schoolId"])
+			if pathSchoolID != schoolID {
+				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Unauthorized access"})
+				return
+			}
+		}
+
+		gradeParam := vars["grade"]
+		grade, err := strconv.Atoi(gradeParam)
+		if err != nil {
+			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid grade"})
+			return
+		}
+
+		letter := strings.ToUpper(vars["letter"])
+
+		rows, err := db.Query(`
+			SELECT s.student_id, s.first_name, s.last_name, s.patronymic, s.letter
+			FROM student s
+			LEFT JOIN UNT_Exams e ON s.student_id = e.student_id
+			WHERE s.school_id = ? AND s.grade = ? AND UPPER(TRIM(s.letter)) = ? AND e.student_id IS NULL
+		`, schoolID, grade, letter)
+
+		if err != nil {
+			log.Println("Query error:", err)
+			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch students"})
+			return
+		}
+		defer rows.Close()
+
+		var students []models.Student
+		for rows.Next() {
+			var s models.Student
+			var patronymic sql.NullString
+			if err := rows.Scan(&s.ID, &s.FirstName, &s.LastName, &patronymic, &s.Letter); err != nil {
+				log.Println("Row scan error:", err)
+				continue
+			}
+			if patronymic.Valid {
+				s.Patronymic = patronymic.String
+			}
+			students = append(students, s)
+		}
+
+		if len(students) == 0 {
+			utils.ResponseJSON(w, map[string]interface{}{
+				"message":  "No students found without ENT results",
+				"students": []models.Student{},
+			})
+			return
+		}
+
+		utils.ResponseJSON(w, students)
+	}
+}
+
 func (c *StudentController) GetStudentsCountBySchool(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract school_id from URL parameters
