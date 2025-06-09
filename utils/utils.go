@@ -534,4 +534,3 @@ func NullStringToString(ns sql.NullString) string {
 	}
 	return ""
 }
-
