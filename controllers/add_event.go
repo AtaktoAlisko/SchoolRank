@@ -2091,15 +2091,173 @@ func (ec *EventController) GetEventCountsAndScoresBySchool(db *sql.DB) http.Hand
 		utils.ResponseJSON(w, response)
 	}
 }
+
+// func (ec *EventController) GetEventCountAndScoreBySchoolID(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		// Check that GET method is used
+// 		if r.Method != http.MethodGet {
+// 			utils.RespondWithError(w, http.StatusMethodNotAllowed, models.Error{Message: "Method not allowed"})
+// 			return
+// 		}
+
+// 		// Extract school_id from URL parameters
+// 		vars := mux.Vars(r)
+// 		schoolIDStr := vars["school_id"]
+// 		schoolID, err := strconv.Atoi(schoolIDStr)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid school ID format"})
+// 			return
+// 		}
+
+// 		// Check if school exists
+// 		var schoolExists bool
+// 		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM Schools WHERE school_id = ?)", schoolID).Scan(&schoolExists)
+// 		if err != nil {
+// 			log.Println("Error checking if school exists:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error checking school existence"})
+// 			return
+// 		}
+// 		if !schoolExists {
+// 			utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "School not found"})
+// 			return
+// 		}
+
+// 		// Get the event count for the specific school
+// 		var schoolName string
+// 		var eventCount int
+// 		err = db.QueryRow(`
+// 			SELECT s.school_name, COUNT(e.id) as event_count
+// 			FROM Schools s
+// 			LEFT JOIN Events e ON s.school_id = e.school_id
+// 			WHERE s.school_id = ?
+// 			GROUP BY s.school_id, s.school_name
+// 		`, schoolID).Scan(&schoolName, &eventCount)
+// 		if err != nil {
+// 			log.Println("Error fetching event count for school:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch event count"})
+// 			return
+// 		}
+
+// 		// Get the maximum event count across all schools
+// 		var maxEventCount int
+// 		err = db.QueryRow(`
+// 			SELECT COALESCE(MAX(event_count), 0)
+// 			FROM (
+// 				SELECT COUNT(id) as event_count
+// 				FROM Events
+// 				GROUP BY school_id
+// 			) as counts
+// 		`).Scan(&maxEventCount)
+// 		if err != nil {
+// 			log.Println("Error fetching maximum event count:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to calculate score"})
+// 			return
+// 		}
+
+// 		// Calculate score
+// 		var score float64
+// 		if maxEventCount == 0 {
+// 			score = 0
+// 		} else {
+// 			score = (float64(eventCount) / float64(maxEventCount)) * 10
+// 		}
+
+// 		// Get monthly event counts based on end_date
+// 		monthlyQuery := `
+// 			SELECT
+// 				CASE
+// 					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 1 THEN 'january'
+// 					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 2 THEN 'february'
+// 					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 3 THEN 'march'
+// 					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 4 THEN 'april'
+// 					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 5 THEN 'may'
+// 					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 6 THEN 'june'
+// 					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 7 THEN 'july'
+// 					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 8 THEN 'august'
+// 					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 9 THEN 'september'
+// 					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 10 THEN 'october'
+// 					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 11 THEN 'november'
+// 					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 12 THEN 'december'
+// 				END as month_name,
+// 				COUNT(*) as count
+// 			FROM Events
+// 			WHERE school_id = ? AND end_date IS NOT NULL AND end_date != ''
+// 			GROUP BY MONTH(STR_TO_DATE(end_date, '%Y-%m-%d'))
+// 		`
+
+// 		rows, err := db.Query(monthlyQuery, schoolID)
+// 		if err != nil {
+// 			log.Println("Error fetching monthly event counts:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch monthly event counts"})
+// 			return
+// 		}
+// 		defer rows.Close()
+
+// 		// Initialize all months with 0
+// 		monthlyEvents := map[string]int{
+// 			"january":   0,
+// 			"february":  0,
+// 			"march":     0,
+// 			"april":     0,
+// 			"may":       0,
+// 			"june":      0,
+// 			"july":      0,
+// 			"august":    0,
+// 			"september": 0,
+// 			"october":   0,
+// 			"november":  0,
+// 			"december":  0,
+// 		}
+
+// 		// Fill in actual counts
+// 		for rows.Next() {
+// 			var monthName string
+// 			var count int
+// 			err := rows.Scan(&monthName, &count)
+// 			if err != nil {
+// 				log.Println("Error scanning monthly event row:", err)
+// 				continue
+// 			}
+// 			monthlyEvents[monthName] = count
+// 		}
+
+// 		if err = rows.Err(); err != nil {
+// 			log.Println("Error iterating monthly event rows:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error processing monthly event data"})
+// 			return
+// 		}
+
+// 		// Define struct for response
+// 		type SchoolEventScore struct {
+// 			SchoolID      int            `json:"school_id"`
+// 			SchoolName    string         `json:"school_name"`
+// 			EventCount    int            `json:"event_count"`
+// 			Score         float64        `json:"score"`
+// 			MonthlyEvents map[string]int `json:"monthly_events"`
+// 		}
+
+// 		// Prepare response
+// 		response := map[string]interface{}{
+// 			"school": SchoolEventScore{
+// 				SchoolID:      schoolID,
+// 				SchoolName:    schoolName,
+// 				EventCount:    eventCount,
+// 				Score:         score,
+// 				MonthlyEvents: monthlyEvents,
+// 			},
+// 		}
+
+// 		utils.ResponseJSON(w, response)
+// 	}
+// }
+
 func (ec *EventController) GetEventCountAndScoreBySchoolID(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Check that GET method is used
 		if r.Method != http.MethodGet {
 			utils.RespondWithError(w, http.StatusMethodNotAllowed, models.Error{Message: "Method not allowed"})
 			return
 		}
 
-		// Extract school_id from URL parameters
 		vars := mux.Vars(r)
 		schoolIDStr := vars["school_id"]
 		schoolID, err := strconv.Atoi(schoolIDStr)
@@ -2108,7 +2266,6 @@ func (ec *EventController) GetEventCountAndScoreBySchoolID(db *sql.DB) http.Hand
 			return
 		}
 
-		// Check if school exists
 		var schoolExists bool
 		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM Schools WHERE school_id = ?)", schoolID).Scan(&schoolExists)
 		if err != nil {
@@ -2121,39 +2278,53 @@ func (ec *EventController) GetEventCountAndScoreBySchoolID(db *sql.DB) http.Hand
 			return
 		}
 
-		// Get the event count for the specific school
+		yearStr := r.URL.Query().Get("year")
+		year := time.Now().Year()
+		if yearStr != "" {
+			parsedYear, err := strconv.Atoi(yearStr)
+			if err == nil {
+				year = parsedYear
+			}
+		}
+
+		today := time.Now()
+		cutoffDate := time.Date(today.Year(), today.Month(), 5, 0, 0, 0, 0, today.Location())
+		if today.Before(cutoffDate) {
+			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "Data for the current month is not yet available"})
+			return
+		}
+
 		var schoolName string
 		var eventCount int
 		err = db.QueryRow(`
 			SELECT s.school_name, COUNT(e.id) as event_count
 			FROM Schools s
-			LEFT JOIN Events e ON s.school_id = e.school_id
+			LEFT JOIN Events e ON s.school_id = e.school_id AND YEAR(e.end_date) = ?
 			WHERE s.school_id = ?
 			GROUP BY s.school_id, s.school_name
-		`, schoolID).Scan(&schoolName, &eventCount)
+		`, year, schoolID).Scan(&schoolName, &eventCount)
 		if err != nil {
 			log.Println("Error fetching event count for school:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch event count"})
 			return
 		}
 
-		// Get the maximum event count across all schools
 		var maxEventCount int
 		err = db.QueryRow(`
 			SELECT COALESCE(MAX(event_count), 0)
 			FROM (
 				SELECT COUNT(id) as event_count
 				FROM Events
+				WHERE YEAR(end_date) = ?
 				GROUP BY school_id
 			) as counts
-		`).Scan(&maxEventCount)
+		`, year).Scan(&maxEventCount)
 		if err != nil {
 			log.Println("Error fetching maximum event count:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to calculate score"})
 			return
 		}
 
-		// Calculate score
 		var score float64
 		if maxEventCount == 0 {
 			score = 0
@@ -2161,30 +2332,29 @@ func (ec *EventController) GetEventCountAndScoreBySchoolID(db *sql.DB) http.Hand
 			score = (float64(eventCount) / float64(maxEventCount)) * 10
 		}
 
-		// Get monthly event counts based on end_date
 		monthlyQuery := `
 			SELECT 
 				CASE 
-					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 1 THEN 'january'
-					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 2 THEN 'february'
-					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 3 THEN 'march'
-					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 4 THEN 'april'
-					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 5 THEN 'may'
-					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 6 THEN 'june'
-					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 7 THEN 'july'
-					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 8 THEN 'august'
-					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 9 THEN 'september'
-					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 10 THEN 'october'
-					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 11 THEN 'november'
-					WHEN MONTH(STR_TO_DATE(end_date, '%Y-%m-%d')) = 12 THEN 'december'
+					WHEN MONTH(end_date) = 1 THEN 'january'
+					WHEN MONTH(end_date) = 2 THEN 'february'
+					WHEN MONTH(end_date) = 3 THEN 'march'
+					WHEN MONTH(end_date) = 4 THEN 'april'
+					WHEN MONTH(end_date) = 5 THEN 'may'
+					WHEN MONTH(end_date) = 6 THEN 'june'
+					WHEN MONTH(end_date) = 7 THEN 'july'
+					WHEN MONTH(end_date) = 8 THEN 'august'
+					WHEN MONTH(end_date) = 9 THEN 'september'
+					WHEN MONTH(end_date) = 10 THEN 'october'
+					WHEN MONTH(end_date) = 11 THEN 'november'
+					WHEN MONTH(end_date) = 12 THEN 'december'
 				END as month_name,
 				COUNT(*) as count
 			FROM Events 
-			WHERE school_id = ? AND end_date IS NOT NULL AND end_date != ''
-			GROUP BY MONTH(STR_TO_DATE(end_date, '%Y-%m-%d'))
+			WHERE school_id = ? AND end_date IS NOT NULL AND end_date != '' AND YEAR(end_date) = ?
+			GROUP BY MONTH(end_date)
 		`
 
-		rows, err := db.Query(monthlyQuery, schoolID)
+		rows, err := db.Query(monthlyQuery, schoolID, year)
 		if err != nil {
 			log.Println("Error fetching monthly event counts:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch monthly event counts"})
@@ -2192,28 +2362,15 @@ func (ec *EventController) GetEventCountAndScoreBySchoolID(db *sql.DB) http.Hand
 		}
 		defer rows.Close()
 
-		// Initialize all months with 0
 		monthlyEvents := map[string]int{
-			"january":   0,
-			"february":  0,
-			"march":     0,
-			"april":     0,
-			"may":       0,
-			"june":      0,
-			"july":      0,
-			"august":    0,
-			"september": 0,
-			"october":   0,
-			"november":  0,
-			"december":  0,
+			"january": 0, "february": 0, "march": 0, "april": 0, "may": 0, "june": 0,
+			"july": 0, "august": 0, "september": 0, "october": 0, "november": 0, "december": 0,
 		}
 
-		// Fill in actual counts
 		for rows.Next() {
 			var monthName string
 			var count int
-			err := rows.Scan(&monthName, &count)
-			if err != nil {
+			if err := rows.Scan(&monthName, &count); err != nil {
 				log.Println("Error scanning monthly event row:", err)
 				continue
 			}
@@ -2226,24 +2383,22 @@ func (ec *EventController) GetEventCountAndScoreBySchoolID(db *sql.DB) http.Hand
 			return
 		}
 
-		// Define struct for response
 		type SchoolEventScore struct {
 			SchoolID      int            `json:"school_id"`
 			SchoolName    string         `json:"school_name"`
 			EventCount    int            `json:"event_count"`
 			Score         float64        `json:"score"`
 			MonthlyEvents map[string]int `json:"monthly_events"`
+			Year          int            `json:"year"`
 		}
 
-		// Prepare response
-		response := map[string]interface{}{
-			"school": SchoolEventScore{
-				SchoolID:      schoolID,
-				SchoolName:    schoolName,
-				EventCount:    eventCount,
-				Score:         score,
-				MonthlyEvents: monthlyEvents,
-			},
+		response := SchoolEventScore{
+			SchoolID:      schoolID,
+			SchoolName:    schoolName,
+			EventCount:    eventCount,
+			Score:         score,
+			MonthlyEvents: monthlyEvents,
+			Year:          year,
 		}
 
 		utils.ResponseJSON(w, response)
