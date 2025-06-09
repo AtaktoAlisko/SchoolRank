@@ -120,8 +120,8 @@ func (src *SchoolRatingController) GetSchoolCompleteRating(db *sql.DB) http.Hand
 			"event_rank":            math.Round(eventScore*100) / 100,
 			"event_participants":    math.Round(participantPoints*100) / 100,
 			"average_rating_rank":   math.Round(averageRatingRank*100) / 100,
-			"olympiad_rank":         math.Round(olympiadRank*100) / 100,
-			"olympiad_participants": math.Round(olympiadActivityScore*100) / 100,
+			"olympiad_rank":         math.Round(olympiadActivityScore*100) / 100,
+			"olympiad_participants": math.Round(olympiadRank*100) / 100,
 			"total_rating":          math.Round(totalRating*100) / 100,
 		}
 
@@ -363,7 +363,7 @@ func (src *SchoolRatingController) getOlympiadActivityScore(db *sql.DB, schoolID
 	}
 
 	// ✅ 2. Считаем максимальное количество валидных олимпиад среди всех школ
-	var maxValidOlympCount int
+	var maxValidOlympCount sql.NullInt64
 	queryMax := `
 		SELECT MAX(valid_count) FROM (
 			SELECT o.school_id, COUNT(o.subject_olympiad_id) AS valid_count
@@ -389,8 +389,8 @@ func (src *SchoolRatingController) getOlympiadActivityScore(db *sql.DB, schoolID
 
 	// ✅ 3. Вычисляем итоговый балл по формуле
 	var score float64
-	if maxValidOlympCount > 0 {
-		score = (float64(schoolValidOlympCount) / float64(maxValidOlympCount)) * 20
+	if maxValidOlympCount.Valid && maxValidOlympCount.Int64 > 0 {
+		score = (float64(schoolValidOlympCount) / float64(maxValidOlympCount.Int64)) * 20
 	}
 
 	return score, nil

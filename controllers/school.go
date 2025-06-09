@@ -708,25 +708,27 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 		defer rows.Close()
 
 		var schools []struct {
-			SchoolID          int      `json:"school_id"`
-			UserID            int      `json:"user_id"`
-			SchoolName        string   `json:"school_name"`
-			SchoolAddress     *string  `json:"school_address"`
-			City              string   `json:"city"`
-			AboutSchool       *string  `json:"about_school"`
-			PhotoURL          *string  `json:"photo_url"`
-			SchoolPhone       *string  `json:"school_phone"`
-			SchoolAdminLogin  *string  `json:"school_admin_login"`
-			Specializations   []string `json:"specializations"`
-			CreatedAt         *string  `json:"created_at"`
-			UpdatedAt         *string  `json:"updated_at"`
-			Rating            *float64 `json:"rating"`
-			UntRank           float64  `json:"unt_rank"`
-			EventScore        float64  `json:"event_score"`
-			ParticipantPoints float64  `json:"participant_points"`
-			AverageRatingRank float64  `json:"average_rating_rank"`
-			OlympiadRank      float64  `json:"olympiad_rank"`
-			TotalRating       float64  `json:"total_rating"`
+			SchoolID              int      `json:"school_id"`
+			UserID                int      `json:"user_id"`
+			SchoolName            string   `json:"school_name"`
+			SchoolAddress         *string  `json:"school_address"`
+			City                  string   `json:"city"`
+			AboutSchool           *string  `json:"about_school"`
+			PhotoURL              *string  `json:"photo_url"`
+			SchoolPhone           *string  `json:"school_phone"`
+			SchoolAdminLogin      *string  `json:"school_admin_login"`
+			Specializations       []string `json:"specializations"`
+			CreatedAt             *string  `json:"created_at"`
+			UpdatedAt             *string  `json:"updated_at"`
+			Rating                *float64 `json:"rating"`
+			UntRank               float64  `json:"unt_rank"`
+			EventScore            float64  `json:"events"`
+			ParticipantPoints     float64  `json:"event_participants"`
+			AverageRatingRank     float64  `json:"average_rating_rank"`
+			OlympiadRank          float64  `json:"olympiad_participants"`
+			OlympiadActivityScore float64  `json:"olympiads"`
+
+			TotalRating float64 `json:"total_rating"`
 		}
 
 		src := &SchoolRatingController{}
@@ -830,7 +832,7 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 			}
 			eventScore = math.Round(eventScore*100) / 100
 
-			// Participant Points
+			// Event Participants
 			participantPoints, err := src.getParticipantPoints(db, int64(school.SchoolID))
 			if err != nil {
 				log.Printf("Ошибка при получении очков участников для школы %d: %v", school.SchoolID, err)
@@ -854,50 +856,60 @@ func (sc SchoolController) GetAllSchools(db *sql.DB) http.HandlerFunc {
 			}
 			olympiadRank = math.Round(olympiadRank*100) / 100
 
+			// Olympiad participants
+			olympiadActivityScore, err := src.getOlympiadActivityScore(db, int64(school.SchoolID))
+			if err != nil {
+				log.Printf("Ошибка при получении активности олимпиад: %v", err)
+				olympiadActivityScore = 0.0
+			}
+
+			olympiadActivityScore = math.Round(olympiadActivityScore*100) / 100
 			// Total Rating
-			totalRating := eventScore + participantPoints + averageRatingRank + untRank + olympiadRank
+			totalRating := eventScore + participantPoints + averageRatingRank + untRank + olympiadRank + olympiadActivityScore
 			totalRating = math.Round(totalRating*100) / 100
 
 			schools = append(schools, struct {
-				SchoolID          int      `json:"school_id"`
-				UserID            int      `json:"user_id"`
-				SchoolName        string   `json:"school_name"`
-				SchoolAddress     *string  `json:"school_address"`
-				City              string   `json:"city"`
-				AboutSchool       *string  `json:"about_school"`
-				PhotoURL          *string  `json:"photo_url"`
-				SchoolPhone       *string  `json:"school_phone"`
-				SchoolAdminLogin  *string  `json:"school_admin_login"`
-				Specializations   []string `json:"specializations"`
-				CreatedAt         *string  `json:"created_at"`
-				UpdatedAt         *string  `json:"updated_at"`
-				Rating            *float64 `json:"rating"`
-				UntRank           float64  `json:"unt_rank"`
-				EventScore        float64  `json:"event_score"`
-				ParticipantPoints float64  `json:"participant_points"`
-				AverageRatingRank float64  `json:"average_rating_rank"`
-				OlympiadRank      float64  `json:"olympiad_rank"`
-				TotalRating       float64  `json:"total_rating"`
+				SchoolID              int      `json:"school_id"`
+				UserID                int      `json:"user_id"`
+				SchoolName            string   `json:"school_name"`
+				SchoolAddress         *string  `json:"school_address"`
+				City                  string   `json:"city"`
+				AboutSchool           *string  `json:"about_school"`
+				PhotoURL              *string  `json:"photo_url"`
+				SchoolPhone           *string  `json:"school_phone"`
+				SchoolAdminLogin      *string  `json:"school_admin_login"`
+				Specializations       []string `json:"specializations"`
+				CreatedAt             *string  `json:"created_at"`
+				UpdatedAt             *string  `json:"updated_at"`
+				Rating                *float64 `json:"rating"`
+				UntRank               float64  `json:"unt_rank"`
+				EventScore            float64  `json:"events"`
+				ParticipantPoints     float64  `json:"event_participants"`
+				AverageRatingRank     float64  `json:"average_rating_rank"`
+				OlympiadRank          float64  `json:"olympiad_participants"`
+				OlympiadActivityScore float64  `json:"olympiads"`
+				TotalRating           float64  `json:"total_rating"`
 			}{
-				SchoolID:          school.SchoolID,
-				UserID:            school.UserID,
-				SchoolName:        school.SchoolName,
-				SchoolAddress:     schoolAddress,
-				City:              school.City,
-				AboutSchool:       aboutSchool,
-				PhotoURL:          photoURL,
-				SchoolPhone:       schoolPhone,
-				SchoolAdminLogin:  adminLogin,
-				Specializations:   specializations,
-				CreatedAt:         createdAt,
-				UpdatedAt:         updatedAt,
-				Rating:            rating,
-				UntRank:           untRank,
-				EventScore:        eventScore,
-				ParticipantPoints: participantPoints,
-				AverageRatingRank: averageRatingRank,
-				OlympiadRank:      olympiadRank,
-				TotalRating:       totalRating,
+				SchoolID:              school.SchoolID,
+				UserID:                school.UserID,
+				SchoolName:            school.SchoolName,
+				SchoolAddress:         schoolAddress,
+				City:                  school.City,
+				AboutSchool:           aboutSchool,
+				PhotoURL:              photoURL,
+				SchoolPhone:           schoolPhone,
+				SchoolAdminLogin:      adminLogin,
+				Specializations:       specializations,
+				CreatedAt:             createdAt,
+				UpdatedAt:             updatedAt,
+				Rating:                rating,
+				UntRank:               untRank,
+				EventScore:            eventScore,
+				ParticipantPoints:     participantPoints,
+				AverageRatingRank:     averageRatingRank,
+				OlympiadRank:          olympiadRank,
+				OlympiadActivityScore: olympiadActivityScore,
+				TotalRating:           totalRating,
 			})
 		}
 
@@ -1416,26 +1428,28 @@ func (sc *SchoolController) GetTopSchoolsByRating(db *sql.DB) http.HandlerFunc {
 		}
 
 		type SchoolWithRating struct {
-			SchoolID          int      `json:"school_id"`
-			UserID            int      `json:"user_id"`
-			SchoolName        string   `json:"school_name"`
-			SchoolAddress     *string  `json:"school_address"`
-			City              string   `json:"city"`
-			AboutSchool       *string  `json:"about_school"`
-			PhotoURL          *string  `json:"photo_url"`
-			SchoolPhone       *string  `json:"school_phone"`
-			SchoolAdminLogin  *string  `json:"school_admin_login"`
-			Specializations   []string `json:"specializations"`
-			CreatedAt         *string  `json:"created_at"`
-			UpdatedAt         *string  `json:"updated_at"`
-			Rating            *float64 `json:"rating"`
-			UntRank           float64  `json:"unt_rank"`
-			EventScore        float64  `json:"event_score"`
-			ParticipantPoints float64  `json:"participant_points"`
-			AverageRatingRank float64  `json:"average_rating_rank"`
-			OlympiadRank      float64  `json:"olympiad_rank"`
-			TotalRating       float64  `json:"total_rating"`
-			Rank              int      `json:"rank"`
+			SchoolID              int      `json:"school_id"`
+			UserID                int      `json:"user_id"`
+			SchoolName            string   `json:"school_name"`
+			SchoolAddress         *string  `json:"school_address"`
+			City                  string   `json:"city"`
+			AboutSchool           *string  `json:"about_school"`
+			PhotoURL              *string  `json:"photo_url"`
+			SchoolPhone           *string  `json:"school_phone"`
+			SchoolAdminLogin      *string  `json:"school_admin_login"`
+			Specializations       []string `json:"specializations"`
+			CreatedAt             *string  `json:"created_at"`
+			UpdatedAt             *string  `json:"updated_at"`
+			Rating                *float64 `json:"rating"`
+			UntRank               float64  `json:"unt_rank"`
+			EventScore            float64  `json:"events"`
+			ParticipantPoints     float64  `json:"event_participants"`
+			AverageRatingRank     float64  `json:"average_rating_rank"`
+			OlympiadRank          float64  `json:"olympiad_participants"`
+			OlympiadActivityScore float64  `json:"olympiads"`
+
+			TotalRating float64 `json:"total_rating"`
+			Rank        int     `json:"rank"`
 		}
 
 		var schoolsWithRating []SchoolWithRating
@@ -1542,7 +1556,15 @@ func (sc *SchoolController) GetTopSchoolsByRating(db *sql.DB) http.HandlerFunc {
 			}
 			schoolWithRating.OlympiadRank = math.Round(olympiadRank*100) / 100
 
-			totalRating := eventScore + participantPoints + averageRatingRank + untRank + olympiadRank
+			olympiadActivityScore, err := src.getOlympiadActivityScore(db, int64(school.SchoolID))
+			if err != nil {
+				log.Printf("Ошибка при получении активности олимпиад: %v", err)
+				olympiadActivityScore = 0.0
+			}
+
+			olympiadActivityScore = math.Round(olympiadActivityScore*100) / 100
+
+			totalRating := eventScore + participantPoints + averageRatingRank + untRank + olympiadRank + olympiadActivityScore
 			schoolWithRating.TotalRating = math.Round(totalRating*100) / 100
 
 			schoolsWithRating = append(schoolsWithRating, schoolWithRating)
