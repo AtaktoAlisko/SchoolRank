@@ -94,7 +94,9 @@ func (sc *StudentController) CreateStudent(db *sql.DB) http.HandlerFunc {
 		student.Email = student.Login + "@school.com"
 
 		// Step 7: Generate the student's password
-		student.Password = student.FirstName + student.LastName
+		// student.Password = student.FirstName + student.LastName
+		randomString = generateRandomString(4) // например: "Xy7z"
+		student.Password = student.FirstName + "@" + randomString
 
 		// Step 8: Set role to student
 		student.Role = "student"
@@ -1039,6 +1041,293 @@ func (sc StudentController) GetStudentsByGradeAndLetter(db *sql.DB) http.Handler
 		utils.ResponseJSON(w, students)
 	}
 }
+
+// func (sc *StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		// Extract student_id from URL parameters
+// 		vars := mux.Vars(r)
+// 		studentIDParam, ok := vars["student_id"]
+// 		if !ok {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Missing student ID"})
+// 			return
+// 		}
+
+// 		studentID, err := strconv.Atoi(studentIDParam)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid student ID format"})
+// 			return
+// 		}
+
+// 		// Step 1: Verify the user's token and get userID
+// 		userID, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+// 			return
+// 		}
+
+// 		// Step 2: Get user role
+// 		var userRole string
+// 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+// 		if err != nil {
+// 			log.Println("Error fetching user role:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+// 			return
+// 		}
+
+// 		// Step 3: Ensure the user is authorized (superadmin or schooladmin)
+// 		// Superadmin can update any student from any school
+// 		if userRole != "superadmin" && userRole != "schooladmin" {
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to update a student"})
+// 			return
+// 		}
+
+// 		// If user is a schooladmin, check that the student belongs to the same school
+// 		if userRole == "schooladmin" {
+// 			var studentSchoolID int
+// 			err = db.QueryRow("SELECT school_id FROM student WHERE student_id = ?", studentID).Scan(&studentSchoolID)
+// 			if err != nil {
+// 				log.Println("Error fetching student school ID:", err)
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch student details"})
+// 				return
+// 			}
+// 			var userSchoolID int
+// 			err = db.QueryRow("SELECT school_id FROM users WHERE id = ?", userID).Scan(&userSchoolID)
+// 			if err != nil {
+// 				log.Println("Error fetching user school ID:", err)
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+// 				return
+// 			}
+
+// 			if userSchoolID != studentSchoolID {
+// 				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only update students from your own school"})
+// 				return
+// 			}
+// 		}
+// 		// For superadmin, no additional checks needed - they can update any student
+
+// 		// Step 4: Check if the student exists
+// 		var existingStudent models.Student
+// 		err = db.QueryRow("SELECT student_id FROM student WHERE student_id = ?", studentID).Scan(&existingStudent.ID)
+// 		if err != nil {
+// 			if err == sql.ErrNoRows {
+// 				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found"})
+// 			} else {
+// 				log.Println("Error checking student existence:", err)
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching student details"})
+// 			}
+// 			return
+// 		}
+
+// 		// Step 5: Decode the updated student data from the request body
+// 		var updatedStudent models.Student
+// 		if err := json.NewDecoder(r.Body).Decode(&updatedStudent); err != nil {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request payload"})
+// 			return
+// 		}
+
+// 		// Step 6: Prepare and execute the update query
+// 		query := `UPDATE student
+//                   SET first_name = ?, last_name = ?, patronymic = ?, iin = ?, date_of_birth = ?,
+//                   grade = ?, school_id = ?, letter = ?, gender = ?, phone = ?, email = ?
+//                   WHERE student_id = ?`
+
+// 		_, err = db.Exec(query,
+// 			updatedStudent.FirstName, updatedStudent.LastName, updatedStudent.Patronymic,
+// 			updatedStudent.IIN, updatedStudent.DateOfBirth, updatedStudent.Grade,
+// 			updatedStudent.SchoolID, updatedStudent.Letter, updatedStudent.Gender,
+// 			updatedStudent.Phone, updatedStudent.Email, studentID)
+
+// 		if err != nil {
+// 			log.Println("Error updating student:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update student"})
+// 			return
+// 		}
+
+// 		// Step 7: Fetch the updated student to return in the response
+// 		query = `SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth,
+//                 grade, letter, gender, phone, email, role, login
+//                 FROM student WHERE student_id = ?`
+
+// 		err = db.QueryRow(query, studentID).Scan(
+// 			&updatedStudent.ID, &updatedStudent.FirstName, &updatedStudent.LastName,
+// 			&updatedStudent.Patronymic, &updatedStudent.IIN, &updatedStudent.SchoolID,
+// 			&updatedStudent.DateOfBirth, &updatedStudent.Grade, &updatedStudent.Letter,
+// 			&updatedStudent.Gender, &updatedStudent.Phone, &updatedStudent.Email,
+// 			&updatedStudent.Role, &updatedStudent.Login)
+
+// 		if err != nil {
+// 			log.Println("Error fetching updated student:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Student updated but failed to retrieve updated details"})
+// 			return
+// 		}
+
+// 		// Step 8: Respond with the updated student
+// 		utils.ResponseJSON(w, updatedStudent)
+// 	}
+// }
+
+// func (sc *StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		// Extract student_id from URL parameters
+// 		vars := mux.Vars(r)
+// 		studentIDParam, ok := vars["student_id"]
+// 		if !ok {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Missing student ID"})
+// 			return
+// 		}
+
+// 		studentID, err := strconv.Atoi(studentIDParam)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid student ID format"})
+// 			return
+// 		}
+
+// 		// Step 1: Verify the user's token and get userID
+// 		userID, err := utils.VerifyToken(r)
+// 		if err != nil {
+// 			utils.RespondWithError(w, http.StatusUnauthorized, models.Error{Message: err.Error()})
+// 			return
+// 		}
+
+// 		// Step 2: Get user role
+// 		var userRole string
+// 		err = db.QueryRow("SELECT role FROM users WHERE id = ?", userID).Scan(&userRole)
+// 		if err != nil {
+// 			log.Println("Error fetching user role:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+// 			return
+// 		}
+
+// 		// Step 3: Ensure the user is authorized (superadmin or schooladmin)
+// 		if userRole != "superadmin" && userRole != "schooladmin" {
+// 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to update a student"})
+// 			return
+// 		}
+
+// 		// If user is a schooladmin, check that the student belongs to the same school
+// 		if userRole == "schooladmin" {
+// 			var studentSchoolID int
+// 			err = db.QueryRow("SELECT school_id FROM student WHERE student_id = ?", studentID).Scan(&studentSchoolID)
+// 			if err != nil {
+// 				log.Println("Error fetching student school ID:", err)
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to fetch student details"})
+// 				return
+// 			}
+// 			var userSchoolID int
+// 			err = db.QueryRow("SELECT school_id FROM users WHERE id = ?", userID).Scan(&userSchoolID)
+// 			if err != nil {
+// 				log.Println("Error fetching user school ID:", err)
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching user details"})
+// 				return
+// 			}
+
+// 			if userSchoolID != studentSchoolID {
+// 				utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You can only update students from your own school"})
+// 				return
+// 			}
+// 		}
+
+// 		// Step 4: Check if the student exists
+// 		var existingStudent models.Student
+// 		err = db.QueryRow("SELECT student_id FROM student WHERE student_id = ?", studentID).Scan(&existingStudent.ID)
+// 		if err != nil {
+// 			if err == sql.ErrNoRows {
+// 				utils.RespondWithError(w, http.StatusNotFound, models.Error{Message: "Student not found"})
+// 			} else {
+// 				log.Println("Error checking student existence:", err)
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Error fetching student details"})
+// 			}
+// 			return
+// 		}
+
+// 		// Step 5: Decode the updated student data from the request body
+// 		var requestData struct {
+// 			models.Student
+// 			NewPassword string `json:"new_password,omitempty"`
+// 		}
+
+// 		if err := json.NewDecoder(r.Body).Decode(&requestData); err != nil {
+// 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request payload"})
+// 			return
+// 		}
+
+// 		updatedStudent := requestData.Student
+
+// 		// Step 6: Prepare the update query
+// 		query := `UPDATE student
+//                   SET first_name = ?, last_name = ?, patronymic = ?, iin = ?, date_of_birth = ?,
+//                   grade = ?, school_id = ?, letter = ?, gender = ?, phone = ?, email = ?`
+
+// 		args := []interface{}{
+// 			updatedStudent.FirstName, updatedStudent.LastName, updatedStudent.Patronymic,
+// 			updatedStudent.IIN, updatedStudent.DateOfBirth, updatedStudent.Grade,
+// 			updatedStudent.SchoolID, updatedStudent.Letter, updatedStudent.Gender,
+// 			updatedStudent.Phone, updatedStudent.Email,
+// 		}
+
+// 		// Step 7: If password is provided, add it to the update
+// 		if requestData.NewPassword != "" {
+// 			// Validate password
+// 			if len(requestData.NewPassword) < 6 {
+// 				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Password must be at least 6 characters long"})
+// 				return
+// 			}
+
+// 			// Hash the new password
+// 			hashedPassword, err := bcrypt.GenerateFromPassword([]byte(requestData.NewPassword), bcrypt.DefaultCost)
+// 			if err != nil {
+// 				log.Println("Error hashing password:", err)
+// 				utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to process password"})
+// 				return
+// 			}
+
+// 			query += `, password = ?`
+// 			args = append(args, string(hashedPassword))
+// 		}
+
+// 		query += ` WHERE student_id = ?`
+// 		args = append(args, studentID)
+
+// 		// Step 8: Execute the update query
+// 		_, err = db.Exec(query, args...)
+// 		if err != nil {
+// 			log.Println("Error updating student:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update student"})
+// 			return
+// 		}
+
+// 		// Step 9: Fetch the updated student to return in the response
+// 		query = `SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth,
+//                 grade, letter, gender, phone, email, role, login
+//                 FROM student WHERE student_id = ?`
+
+// 		err = db.QueryRow(query, studentID).Scan(
+// 			&updatedStudent.ID, &updatedStudent.FirstName, &updatedStudent.LastName,
+// 			&updatedStudent.Patronymic, &updatedStudent.IIN, &updatedStudent.SchoolID,
+// 			&updatedStudent.DateOfBirth, &updatedStudent.Grade, &updatedStudent.Letter,
+// 			&updatedStudent.Gender, &updatedStudent.Phone, &updatedStudent.Email,
+// 			&updatedStudent.Role, &updatedStudent.Login)
+
+// 		if err != nil {
+// 			log.Println("Error fetching updated student:", err)
+// 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Student updated but failed to retrieve updated details"})
+// 			return
+// 		}
+
+// 		// Step 10: Respond with the updated student
+// 		response := map[string]interface{}{
+// 			"student": updatedStudent,
+// 			"message": "Student updated successfully",
+// 		}
+
+// 		if requestData.NewPassword != "" {
+// 			response["password_changed"] = true
+// 		}
+
+// 		utils.ResponseJSON(w, response)
+// 	}
+// }
+
 func (sc *StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract student_id from URL parameters
@@ -1072,7 +1361,6 @@ func (sc *StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Step 3: Ensure the user is authorized (superadmin or schooladmin)
-		// Superadmin can update any student from any school
 		if userRole != "superadmin" && userRole != "schooladmin" {
 			utils.RespondWithError(w, http.StatusForbidden, models.Error{Message: "You do not have permission to update a student"})
 			return
@@ -1100,7 +1388,6 @@ func (sc *StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 				return
 			}
 		}
-		// For superadmin, no additional checks needed - they can update any student
 
 		// Step 4: Check if the student exists
 		var existingStudent models.Student
@@ -1116,31 +1403,54 @@ func (sc *StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Step 5: Decode the updated student data from the request body
-		var updatedStudent models.Student
-		if err := json.NewDecoder(r.Body).Decode(&updatedStudent); err != nil {
+		var requestData struct {
+			models.Student
+			NewPassword string `json:"new_password,omitempty"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&requestData); err != nil {
 			utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Invalid request payload"})
 			return
 		}
 
-		// Step 6: Prepare and execute the update query
+		updatedStudent := requestData.Student
+
+		// Step 6: Prepare the update query
 		query := `UPDATE student 
                   SET first_name = ?, last_name = ?, patronymic = ?, iin = ?, date_of_birth = ?, 
-                  grade = ?, school_id = ?, letter = ?, gender = ?, phone = ?, email = ? 
-                  WHERE student_id = ?`
+                  grade = ?, school_id = ?, letter = ?, gender = ?, phone = ?, email = ?`
 
-		_, err = db.Exec(query,
+		args := []interface{}{
 			updatedStudent.FirstName, updatedStudent.LastName, updatedStudent.Patronymic,
 			updatedStudent.IIN, updatedStudent.DateOfBirth, updatedStudent.Grade,
 			updatedStudent.SchoolID, updatedStudent.Letter, updatedStudent.Gender,
-			updatedStudent.Phone, updatedStudent.Email, studentID)
+			updatedStudent.Phone, updatedStudent.Email,
+		}
 
+		// Step 7: If password is provided, add it to the update
+		if requestData.NewPassword != "" {
+			// Validate password
+			if len(requestData.NewPassword) < 6 {
+				utils.RespondWithError(w, http.StatusBadRequest, models.Error{Message: "Password must be at least 6 characters long"})
+				return
+			}
+
+			query += `, password = ?`
+			args = append(args, requestData.NewPassword)
+		}
+
+		query += ` WHERE student_id = ?`
+		args = append(args, studentID)
+
+		// Step 8: Execute the update query
+		_, err = db.Exec(query, args...)
 		if err != nil {
 			log.Println("Error updating student:", err)
 			utils.RespondWithError(w, http.StatusInternalServerError, models.Error{Message: "Failed to update student"})
 			return
 		}
 
-		// Step 7: Fetch the updated student to return in the response
+		// Step 9: Fetch the updated student to return in the response
 		query = `SELECT student_id, first_name, last_name, patronymic, iin, school_id, date_of_birth, 
                 grade, letter, gender, phone, email, role, login 
                 FROM student WHERE student_id = ?`
@@ -1158,8 +1468,17 @@ func (sc *StudentController) UpdateStudent(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Step 8: Respond with the updated student
-		utils.ResponseJSON(w, updatedStudent)
+		// Step 10: Respond with the updated student
+		response := map[string]interface{}{
+			"student": updatedStudent,
+			"message": "Student updated successfully",
+		}
+
+		if requestData.NewPassword != "" {
+			response["password_changed"] = true
+		}
+
+		utils.ResponseJSON(w, response)
 	}
 }
 
