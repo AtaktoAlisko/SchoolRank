@@ -869,11 +869,9 @@ func (c *OlympiadRegistrationController) GetTotalOlympiadRankBySchoolID(db *sql.
 }
 func calculateOlympiadRatingByLevel(db *sql.DB, schoolID int, level string, weight float64) float64 {
 	query := `
-		SELECT o.olympiad_place, o.score
-		FROM olympiad_registrations o
-		JOIN subject_olympiads s ON s.subject_olympiad_id = o.subject_olympiad_id
-		WHERE o.school_id = ? AND s.level = ? AND (o.status = 'completed' OR o.status = 'accepted')
-		AND o.olympiad_place IS NOT NULL
+	SELECT olympiad_place, score
+	FROM Olympiads
+	WHERE school_id = ? AND level = ? AND olympiad_place IS NOT NULL
 	`
 
 	rows, err := db.Query(query, schoolID, level)
@@ -1230,7 +1228,7 @@ func (c *OlympiadRegistrationController) GetOlympiadPrizeStatsBySchoolID(db *sql
 				COALESCE(SUM(CASE WHEN olympiad_place = 1 THEN 1 ELSE 0 END), 0) as first_place,
 				COALESCE(SUM(CASE WHEN olympiad_place = 2 THEN 1 ELSE 0 END), 0) as second_place,
 				COALESCE(SUM(CASE WHEN olympiad_place = 3 THEN 1 ELSE 0 END), 0) as third_place
-			FROM olympiad_registrations 
+			FROM Olympiads
 			WHERE school_id = ? AND olympiad_place IS NOT NULL
 		`
 
