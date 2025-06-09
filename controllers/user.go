@@ -616,8 +616,8 @@ func (c *Controller) getStudentData(db *sql.DB, id int) (interface{}, bool) {
 		Email       string  `json:"email"`
 		Role        string  `json:"role"`
 		SchoolID    int     `json:"school_id"`
+		Grade       int     `json:"grade"`
 	}
-
 	studentData := StudentResponse{
 		Age:         ageValue,
 		AvatarURL:   nil,
@@ -631,6 +631,7 @@ func (c *Controller) getStudentData(db *sql.DB, id int) (interface{}, bool) {
 		Patronymic:  student.Patronymic,
 		Role:        "student",
 		SchoolID:    student.SchoolID,
+		Grade:       student.Grade,
 	}
 
 	if avatarURL.Valid {
