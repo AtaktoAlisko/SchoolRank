@@ -1054,7 +1054,7 @@ func (ec *EventController) UpdateEvent(db *sql.DB) http.HandlerFunc {
 		err = db.QueryRow(`
             SELECT id, school_id, user_id, event_name, description, 
             photo, start_date, end_date, location, 
-            grade, limit_count as limit, participants, limit_participants, created_at, updated_at, created_by, category
+            grade, limit_count as limit, participants, limit_participants, created_at, updated_at, created_by, category,
             FROM Events 
             WHERE id = ?
         `, eventID).Scan(
@@ -1715,7 +1715,7 @@ func (ec *EventController) GetEventsByCategory(db *sql.DB) http.HandlerFunc {
 		queryBuilder := strings.Builder{}
 		queryBuilder.WriteString(`
             SELECT e.id, e.school_id, s.school_name, e.event_name, e.photo as photo_url, 
-                   (SELECT COUNT(*) FROM EventRegistrations r WHERE r.event_id = e.id AND r.status = 'registered') as participants,
+                   (SELECT COUNT(*) FROM EventRegistrations r WHERE r.event_id = e.id) as participants,
                    e.limit_count as ` + "`limit`" + `,
                    e.start_date, e.end_date, e.location,     e.grade
             FROM Events e
