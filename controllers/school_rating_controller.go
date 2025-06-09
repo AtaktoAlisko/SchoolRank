@@ -5,10 +5,9 @@ import (
 	"log"
 	"math"
 	"net/http"
-	"strconv"
-
 	"ranking-school/models"
 	"ranking-school/utils"
+	"strconv"
 
 	"github.com/gorilla/mux"
 )
@@ -103,27 +102,27 @@ func (src *SchoolRatingController) GetSchoolCompleteRating(db *sql.DB) http.Hand
 			log.Printf("Ошибка при получении олимпиадного рейтинга: %v", err)
 			olympiadRank = 0.0
 		}
+		// Step 11.1: Получаем баллы за активность олимпиад
+		olympiadActivityScore, err := src.getOlympiadActivityScore(db, schoolID)
+		if err != nil {
+			log.Printf("Ошибка при получении активности олимпиад: %v", err)
+			olympiadActivityScore = 0.0
+		}
 
 		// Step 12: Вычисляем общий рейтинг
-		totalRating := eventScore + participantPoints + averageRatingRank + untRank + olympiadRank
+		totalRating := eventScore + participantPoints + averageRatingRank + untRank + olympiadRank + olympiadActivityScore
 
 		// Step 13: Формируем ответ
 		response := map[string]interface{}{
-			"school_id":           schoolID,
-			"school_name":         schoolName,
-			"unt_rank":            math.Round(untRank*100) / 100,
-			"event_score":         math.Round(eventScore*100) / 100,
-			"participant_points":  math.Round(participantPoints*100) / 100,
-			"average_rating_rank": math.Round(averageRatingRank*100) / 100,
-			"olympiad_rank":       math.Round(olympiadRank*100) / 100,
-			"total_rating":        math.Round(totalRating*100) / 100,
-			"rating_components": map[string]interface{}{
-				"unt_contribution":          math.Round(untRank*100) / 100,
-				"events_contribution":       math.Round(eventScore*100) / 100,
-				"participants_contribution": math.Round(participantPoints*100) / 100,
-				"reviews_contribution":      math.Round(averageRatingRank*100) / 100,
-				"olympiad_contribution":     math.Round(olympiadRank*100) / 100,
-			},
+			"school_id":             schoolID,
+			"school_name":           schoolName,
+			"unt_rank":              math.Round(untRank*100) / 100,
+			"event_rank":            math.Round(eventScore*100) / 100,
+			"event_participants":    math.Round(participantPoints*100) / 100,
+			"average_rating_rank":   math.Round(averageRatingRank*100) / 100,
+			"olympiad_rank":         math.Round(olympiadRank*100) / 100,
+			"olympiad_participants": math.Round(olympiadActivityScore*100) / 100,
+			"total_rating":          math.Round(totalRating*100) / 100,
 		}
 
 		utils.ResponseJSON(w, response)
@@ -193,71 +192,240 @@ func (src *SchoolRatingController) getUNTRank(db *sql.DB, schoolID int64) (float
 	}
 
 	// Вычисляем UNT рейтинг
-	untRank := (25.0 / 100.0) * combinedAverage
+	untRank := (30.0 / 100.0) * combinedAverage
 	return untRank, nil
 }
+
+// func (src *SchoolRatingController) getEventScore(db *sql.DB, schoolID int64) (float64, error) {
+// 	// Получаем количество событий для школы
+// 	var eventCount int
+// 	err := db.QueryRow(`
+//         SELECT COUNT(e.id) as event_count
+//         FROM Schools s
+//         LEFT JOIN Events e ON s.school_id = e.school_id
+//         WHERE s.school_id = ?
+//     `, schoolID).Scan(&eventCount)
+// 	if err != nil {
+// 		return 0.0, err
+// 	}
+
+// 	// Получаем максимальное количество событий среди всех школ
+// 	var maxEventCount int
+// 	err = db.QueryRow(`
+//         SELECT COALESCE(MAX(event_count), 0)
+//         FROM (
+//             SELECT COUNT(id) as event_count
+//             FROM Events
+//             GROUP BY school_id
+//         ) as counts
+//     `).Scan(&maxEventCount)
+// 	if err != nil {
+// 		return 0.0, err
+// 	}
+
+// 	// Вычисляем счет
+// 	var score float64
+// 	if maxEventCount > 0 {
+// 		score = (float64(eventCount) / float64(maxEventCount)) * 10
+// 	}
+
+// 	return score, nil
+// }
+
 func (src *SchoolRatingController) getEventScore(db *sql.DB, schoolID int64) (float64, error) {
-	// Получаем количество событий для школы
-	var eventCount int
-	err := db.QueryRow(`
-        SELECT COUNT(e.id) as event_count
-        FROM Schools s
-        LEFT JOIN Events e ON s.school_id = e.school_id
-        WHERE s.school_id = ?
-    `, schoolID).Scan(&eventCount)
+	// Считаем количество валидных мероприятий конкретной школы
+	var schoolValidEventCount int
+	querySchool := `
+		SELECT COUNT(e.id)
+		FROM Events e
+		WHERE e.school_id = ?
+		AND e.end_date < CURRENT_DATE
+		AND (
+			SELECT COUNT(*) FROM events_participants ep WHERE ep.events_name = e.event_name
+		) >= 0.05 * (
+			SELECT COUNT(*) FROM EventRegistrations r WHERE r.event_id = e.id
+		)
+	`
+	err := db.QueryRow(querySchool, schoolID).Scan(&schoolValidEventCount)
 	if err != nil {
 		return 0.0, err
 	}
 
-	// Получаем максимальное количество событий среди всех школ
-	var maxEventCount int
-	err = db.QueryRow(`
-        SELECT COALESCE(MAX(event_count), 0)
-        FROM (
-            SELECT COUNT(id) as event_count
-            FROM Events
-            GROUP BY school_id
-        ) as counts
-    `).Scan(&maxEventCount)
+	// Считаем максимальное количество таких мероприятий по всем школам
+	var maxValidEventCount int
+	queryMax := `
+		SELECT MAX(valid_event_count) FROM (
+			SELECT e.school_id, COUNT(e.id) AS valid_event_count
+			FROM Events e
+			WHERE e.end_date < CURRENT_DATE
+			AND (
+				SELECT COUNT(*) FROM events_participants ep WHERE ep.events_name = e.event_name
+			) >= 0.05 * (
+				SELECT COUNT(*) FROM EventRegistrations r WHERE r.event_id = e.id
+			)
+			GROUP BY e.school_id
+		) AS sub
+	`
+	err = db.QueryRow(queryMax).Scan(&maxValidEventCount)
 	if err != nil {
 		return 0.0, err
 	}
 
-	// Вычисляем счет
+	// Вычисляем баллы
 	var score float64
-	if maxEventCount > 0 {
-		score = (float64(eventCount) / float64(maxEventCount)) * 10
+	if maxValidEventCount > 0 {
+		score = (float64(schoolValidEventCount) / float64(maxValidEventCount)) * 10
 	}
 
 	return score, nil
 }
+
+// func (src *SchoolRatingController) getOlympiadActivityScore(db *sql.DB, schoolID int64) (float64, error) {
+// 	// Кол-во валидных олимпиад конкретной школы
+// 	var schoolValidOlympCount int
+// 	querySchool := `
+// 		SELECT COUNT(o.subject_olympiad_id)
+// 		FROM subject_olympiads o
+// 		WHERE o.school_id = ?
+// 		AND o.end_date < CURRENT_DATE
+// 		AND (
+// 			SELECT COUNT(*)
+// 			FROM olympiad_registrations r
+// 			WHERE r.subject_olympiad_id = o.subject_olympiad_id
+// 			AND r.status = 'completed'
+// 		) >= 0.05 * (
+// 			SELECT COUNT(*)
+// 			FROM olympiad_registrations r
+// 			WHERE r.subject_olympiad_id = o.subject_olympiad_id
+// 		)
+// 	`
+// 	err := db.QueryRow(querySchool, schoolID).Scan(&schoolValidOlympCount)
+// 	if err != nil {
+// 		return 0.0, err
+// 	}
+
+// 	// Максимум валидных олимпиад по всем школам
+// 	var maxValidOlympCount int
+// 	queryMax := `
+// 	SELECT COALESCE(MAX(valid_count), 0) FROM (
+// 			SELECT o.school_id, COUNT(o.subject_olympiad_id) AS valid_count
+// 			FROM subject_olympiads o
+// 			WHERE o.end_date < CURRENT_DATE
+// 			AND (
+// 				SELECT COUNT(*)
+// 				FROM olympiad_registrations r
+// 				WHERE r.subject_olympiad_id = o.subject_olympiad_id
+// 				AND r.status = 'completed'
+// 			) >= 0.05 * (
+// 				SELECT COUNT(*)
+// 				FROM olympiad_registrations r
+// 				WHERE r.subject_olympiad_id = o.subject_olympiad_id
+// 			)
+// 			GROUP BY o.school_id
+// 		) AS sub
+// 	`
+// 	err = db.QueryRow(queryMax).Scan(&maxValidOlympCount)
+// 	if err != nil {
+// 		return 0.0, err
+// 	}
+
+// 	// Вычисляем итоговый балл
+// 	var score float64
+// 	if maxValidOlympCount > 0 {
+// 		score = (float64(schoolValidOlympCount) / float64(maxValidOlympCount)) * 10
+// 	}
+
+// 	return score, nil
+// }
+
+func (src *SchoolRatingController) getOlympiadActivityScore(db *sql.DB, schoolID int64) (float64, error) {
+	// ✅ 1. Считаем количество валидных олимпиад конкретной школы
+	var schoolValidOlympCount int
+	querySchool := `
+		SELECT COUNT(o.subject_olympiad_id)
+		FROM subject_olympiads o
+		WHERE o.school_id = ?
+		AND o.end_date < CURRENT_DATE
+		AND (
+			SELECT COUNT(*) 
+			FROM olympiad_registrations r 
+			WHERE r.subject_olympiad_id = o.subject_olympiad_id 
+			AND r.status = 'completed'
+		) >= 0.05 * (
+			SELECT COUNT(*) 
+			FROM olympiad_registrations r 
+			WHERE r.subject_olympiad_id = o.subject_olympiad_id
+		)
+	`
+	err := db.QueryRow(querySchool, schoolID).Scan(&schoolValidOlympCount)
+	if err != nil {
+		return 0.0, err
+	}
+
+	// ✅ 2. Считаем максимальное количество валидных олимпиад среди всех школ
+	var maxValidOlympCount int
+	queryMax := `
+		SELECT MAX(valid_count) FROM (
+			SELECT o.school_id, COUNT(o.subject_olympiad_id) AS valid_count
+			FROM subject_olympiads o
+			WHERE o.end_date < CURRENT_DATE
+			AND (
+				SELECT COUNT(*) 
+				FROM olympiad_registrations r 
+				WHERE r.subject_olympiad_id = o.subject_olympiad_id 
+				AND r.status = 'completed'
+			) >= 0.05 * (
+				SELECT COUNT(*) 
+				FROM olympiad_registrations r 
+				WHERE r.subject_olympiad_id = o.subject_olympiad_id
+			)
+			GROUP BY o.school_id
+		) AS sub
+	`
+	err = db.QueryRow(queryMax).Scan(&maxValidOlympCount)
+	if err != nil {
+		return 0.0, err
+	}
+
+	// ✅ 3. Вычисляем итоговый балл по формуле
+	var score float64
+	if maxValidOlympCount > 0 {
+		score = (float64(schoolValidOlympCount) / float64(maxValidOlympCount)) * 20
+	}
+
+	return score, nil
+}
+
 func (src *SchoolRatingController) getParticipantPoints(db *sql.DB, schoolID int64) (float64, error) {
 	// Получаем общее количество участников по всем школам
 	var maxParticipants int
 	countQuery := `
-        SELECT COUNT(r.event_registration_id)
-        FROM Schools s
-        LEFT JOIN EventRegistrations r ON s.school_id = r.school_id
-        WHERE r.status IN ('registered', 'accepted', 'completed')`
+		SELECT COUNT(ep.id)
+		FROM Schools s
+		LEFT JOIN Events e ON s.school_id = e.school_id
+		LEFT JOIN events_participants ep ON ep.events_name = e.event_name`
 	err := db.QueryRow(countQuery).Scan(&maxParticipants)
 	if err != nil {
+		log.Println("Ошибка при подсчете всех участников:", err)
 		return 0.0, err
 	}
 
 	// Получаем количество участников для конкретной школы
 	var participantCount int
 	query := `
-        SELECT COUNT(r.event_registration_id) AS participant_count
-        FROM Schools s
-        LEFT JOIN EventRegistrations r ON s.school_id = r.school_id
-        WHERE s.school_id = ? AND r.status IN ('registered', 'accepted', 'completed')`
+		SELECT COUNT(ep.id) AS participant_count
+		FROM Schools s
+		LEFT JOIN Events e ON s.school_id = e.school_id
+		LEFT JOIN events_participants ep ON ep.events_name = e.event_name
+		WHERE s.school_id = ?`
 	err = db.QueryRow(query, schoolID).Scan(&participantCount)
 	if err != nil {
+		log.Println("Ошибка при подсчете участников школы:", err)
 		return 0.0, err
 	}
 
 	// Вычисляем очки
-	const maxPoints = 30.0
+	const maxPoints = 20.0
 	var points float64
 	if maxParticipants > 0 {
 		points = (float64(participantCount) / float64(maxParticipants)) * maxPoints
@@ -265,6 +433,7 @@ func (src *SchoolRatingController) getParticipantPoints(db *sql.DB, schoolID int
 
 	return points, nil
 }
+
 func (src *SchoolRatingController) getAverageRatingRank(db *sql.DB, schoolID int64) (float64, error) {
 	query := `SELECT COALESCE(AVG(rating), 0) FROM Reviews WHERE school_id = ?`
 	var averageRating float64
@@ -288,7 +457,7 @@ func (src *SchoolRatingController) getOlympiadRank(db *sql.DB, schoolID int64) (
 	totalOlympiadRating := cityRating + regionRating + republicanRating
 
 	// Олимпиадный ранк (25 * общий олимпиадный рейтинг)
-	olympiadRank := 25.0 * totalOlympiadRating
+	olympiadRank := 20.0 * totalOlympiadRating
 
 	return olympiadRank, nil
 }
