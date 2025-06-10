@@ -315,7 +315,7 @@ func (src *SchoolRatingController) getParticipantPoints(db *sql.DB, schoolID int
 }
 
 func (src *SchoolRatingController) getAverageRatingRank(db *sql.DB, schoolID int64) (float64, error) {
-	query := `SELECT COALESCE(xAVG(rating), 0) FROM Reviews WHERE school_id = ?`
+	query := `SELECT COALESCE(AVG(rating), 0) FROM Reviews WHERE school_id = ?`
 	var averageRating float64
 	err := db.QueryRow(query, schoolID).Scan(&averageRating)
 	if err != nil {
