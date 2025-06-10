@@ -454,74 +454,33 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 		var olympiad models.SubjectOlympiad
 		var firstName, lastName, schoolName sql.NullString
 
-		// query := `
-		// 	SELECT
-		// 		so.subject_olympiad_id,
-		// 		so.subject_name,
-		// 		so.date,
-		// 		so.end_date,
-		// 		COALESCE(so.description, '') as description,
-		// 		so.school_id,
-		// 		so.level,
-		// 		so.limit_participants,
-		// 		COALESCE(so.creator_id, 0),
-		// 		u.first_name,
-		// 		u.last_name,
-		// 		s.school_name,
-		// 		CASE WHEN so.end_date < CURRENT_DATE THEN true ELSE false END AS expired,
-		// 		(
-		// 			SELECT COUNT(*) FROM olympiad_registrations reg
-		// 			WHERE reg.subject_olympiad_id = so.subject_olympiad_id AND reg.status = 'accepted'
-		// 		) AS participants
-		// 	FROM subject_olympiads so
-		// 	LEFT JOIN users u ON so.creator_id = u.id
-		// 	LEFT JOIN Schools s ON so.school_id = s.school_id
-		// 	WHERE so.subject_olympiad_id = ?
-		// `
-
-		// err = db.QueryRow(query, olympiadID).Scan(
-		// 	&olympiad.ID,
-		// 	&olympiad.SubjectName,
-		// 	&olympiad.StartDate,
-		// 	&olympiad.EndDate,
-		// 	&olympiad.Location,
-		// 	&olympiad.Description,
-		// 	&olympiad.SchoolID,
-		// 	&olympiad.Level,
-		// 	&olympiad.Limit,
-		// 	&olympiad.CreatorID,
-		// 	&firstName,
-		// 	&lastName,
-		// 	&schoolName,
-		// 	&olympiad.Expired,
-		// 	&olympiad.Participants,
-		// )
-
 		query := `
 		SELECT 
-		so.subject_olympiad_id,
-		so.subject_name,
-		so.date,
-		so.end_date,
-		COALESCE(so.description, '') as description,
-		so.school_id,
-		so.level,
-		so.limit_participants,
-		COALESCE(so.creator_id, 0),
-		u.first_name,
-		u.last_name,
-		s.school_name,
-		CASE WHEN so.end_date < CURRENT_DATE THEN true ELSE false END AS expired,
-		(
-			SELECT COUNT(*) FROM olympiad_registrations reg
-			WHERE reg.subject_olympiad_id = so.subject_olympiad_id AND reg.status = 'accepted'
-		) AS participants
-	FROM subject_olympiads so
-	LEFT JOIN users u ON so.creator_id = u.id
-	LEFT JOIN Schools s ON so.school_id = s.school_id
-	WHERE so.subject_olympiad_id = ?
+			so.subject_olympiad_id,
+			so.subject_name,
+			so.date,
+			so.end_date,
+			COALESCE(so.description, '') as description,
+			so.school_id,
+			so.level,
+			so.grade,
+			so.limit_participants,
+			COALESCE(so.creator_id, 0),
+			u.first_name,
+			u.last_name,
+			s.school_name,
+			CASE WHEN so.end_date < CURRENT_DATE THEN true ELSE false END AS expired,
+			(
+				SELECT COUNT(reg.olympiads_registrations_id) 
+				FROM olympiad_registrations reg
+				WHERE reg.subject_olympiad_id = so.subject_olympiad_id
+			) AS participants
+		FROM subject_olympiads so
+		LEFT JOIN users u ON so.creator_id = u.id
+		LEFT JOIN Schools s ON so.school_id = s.school_id
+		WHERE so.subject_olympiad_id = ?
+		`
 
-	`
 		err = db.QueryRow(query, olympiadID).Scan(
 			&olympiad.ID,
 			&olympiad.SubjectName,
@@ -530,13 +489,14 @@ func (c *SubjectOlympiadController) GetSubjectOlympiad(db *sql.DB) http.HandlerF
 			&olympiad.Description,
 			&olympiad.SchoolID,
 			&olympiad.Level,
+			&olympiad.Grade,
 			&olympiad.Limit,
 			&olympiad.CreatorID,
 			&firstName,
 			&lastName,
 			&schoolName,
 			&olympiad.Expired,
-			&olympiad.Participants,
+			&olympiad.CurrentParticipants,
 		)
 
 		if err == sql.ErrNoRows {
