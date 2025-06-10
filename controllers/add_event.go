@@ -1891,7 +1891,7 @@ func (ec *EventController) GetEventByID(db *sql.DB) http.HandlerFunc {
             SELECT e.id, e.school_id, COALESCE(s.school_name, '') as school_name, e.user_id, 
                    e.event_name, COALESCE(e.description, '') as description,
                    COALESCE(e.photo, '') as photo_url, 
-                   (SELECT COUNT(*) FROM EventRegistrations r WHERE r.event_id = e.id AND r.status = 'registered') as participants,
+                   (SELECT COUNT(*) FROM EventRegistrations r WHERE r.event_id = e.id) as participants,
                    e.limit_count as ` + "`limit`" + `,
                    e.start_date, e.end_date, COALESCE(e.location, '') as location, 
                    COALESCE(e.grade, 0) as grade,
